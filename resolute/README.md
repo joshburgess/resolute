@@ -356,7 +356,8 @@ let pool = TypedPool::connect("127.0.0.1:5432", "user", "pass", "mydb", 10).awai
 let client = pool.get().await?;
 let rows = client.query("SELECT 1::int4 AS n", &[]).await?;
 // Named params work through the pool too:
-let rows = client.query_named("SELECT :id::int4", &[("id", &1i32 as &dyn SqlParam)]).await?;
+let user_id: i32 = 1;
+let rows = client.query_named("SELECT :id::int4", &[("id", &user_id as &dyn SqlParam)]).await?;
 ```
 
 ## Pool lifecycle hooks
