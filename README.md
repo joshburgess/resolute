@@ -1,6 +1,6 @@
 # Stalwart
 
-A ground-up PostgreSQL client stack for Rust. Compile-time checked queries, binary wire protocol, async connection pool — no dependencies on tokio-postgres, sqlx, or diesel.
+A ground-up PostgreSQL client stack for Rust. Compile-time checked queries, binary wire protocol, async connection pool — no dependencies on tokio-postgres, sqlx, diesel, deadpool, bb8, or any other existing PostgreSQL or connection pool library.
 
 ## Crates
 
