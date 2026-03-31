@@ -94,7 +94,7 @@ let user_id: UserId = row.id;
 
 Type overrides work with nullable columns too — if the column is nullable, the field becomes `Option<UserId>`.
 
-The parser correctly ignores `::` casts (e.g., `created_at::text`) and falls back to the inferred type if the string after `:` isn't a valid Rust type.
+PostgreSQL casts (`::`) work normally and are not affected — `SELECT created_at::text` is a cast, not a type override. The override syntax uses a single `:` inside a quoted alias.
 
 ## Executor trait — generic over Client, Transaction, and Pool
 
