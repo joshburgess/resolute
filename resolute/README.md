@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::connect("127.0.0.1:5432", "user", "pass", "mydb").await?;
 
     // Compile-time checked query (requires DATABASE_URL env var):
-    let authors = query!("SELECT id, name FROM authors WHERE id = $1", 1i32)
+    let authors = query!("SELECT id, name FROM authors WHERE id = $1", 1)
         .fetch_all(&client)
         .await?;
 
@@ -84,7 +84,7 @@ struct UserId(i32);
 
 // Without override: id would be inferred as i32
 // With override: id field is typed as UserId
-let row = query!(r#"SELECT id as "id: UserId" FROM users WHERE id = $1"#, 1i32)
+let row = query!(r#"SELECT id as "id: UserId" FROM users WHERE id = $1"#, 1)
     .fetch_one(&client)
     .await?;
 
@@ -195,7 +195,7 @@ enum Status {
 
 // Encodes as int4 (4 bytes, big-endian). PgType::OID = 23, ARRAY_OID = 1007.
 let mut buf = BytesMut::new();
-Status::Active.encode(&mut buf);  // encodes as 1i32
+Status::Active.encode(&mut buf);  // encodes as 1 (i32)
 
 // Decodes from binary or text:
 let decoded = Status::decode(&buf)?;      // from binary int4

@@ -28,7 +28,7 @@ use resolute::{Client, query};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::connect("127.0.0.1:5432", "user", "pass", "mydb").await?;
 
-    let authors = query!("SELECT id, name FROM authors WHERE id = $1", 1i32)
+    let authors = query!("SELECT id, name FROM authors WHERE id = $1", 1)
         .fetch_all(&client)
         .await?;
 
