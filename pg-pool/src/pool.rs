@@ -33,6 +33,10 @@ pub trait Poolable: Send + 'static {
     /// Implementations should send `DISCARD ALL` or equivalent to clear
     /// session state (transactions, SET variables, temp tables, prepared statements).
     /// Returns false if the reset failed and the connection should be destroyed.
+    ///
+    /// **Must not panic.** A panic in `reset()` will cause the spawned return
+    /// task to abort, but `in_use_count` is decremented before `reset()` is
+    /// called so the pool remains consistent.
     fn reset(&self) -> impl std::future::Future<Output = bool> + Send {
         async { true } // default: no-op (backward compatible)
     }
@@ -205,6 +209,10 @@ struct Waiter<C> {
 // ---------------------------------------------------------------------------
 
 /// Production-grade connection pool, generic over connection type `C`.
+///
+/// **Hook safety:** Lifecycle hooks must not call back into the pool (e.g.,
+/// calling `get()` from inside a hook will deadlock). Hooks should be fast
+/// and non-blocking.
 pub struct ConnPool<C: Poolable> {
     config: ConnPoolConfig,
     hooks: LifecycleHooks<C>,
@@ -212,6 +220,7 @@ pub struct ConnPool<C: Poolable> {
     waiters: Mutex<VecDeque<Waiter<C>>>,
     total_count: AtomicUsize,
     in_use_count: AtomicUsize,
+    waiter_count: AtomicUsize,
     total_checkouts: AtomicU64,
     total_created: AtomicU64,
     total_destroyed: AtomicU64,
@@ -236,6 +245,7 @@ impl<C: Poolable> ConnPool<C> {
             waiters: Mutex::new(VecDeque::new()),
             total_count: AtomicUsize::new(0),
             in_use_count: AtomicUsize::new(0),
+            waiter_count: AtomicUsize::new(0),
             total_checkouts: AtomicU64::new(0),
             total_created: AtomicU64::new(0),
             total_destroyed: AtomicU64::new(0),
@@ -310,10 +320,12 @@ impl<C: Poolable> ConnPool<C> {
         {
             let mut waiters = self.waiters.lock().await;
             waiters.push_back(Waiter { tx });
+            self.waiter_count.fetch_add(1, Ordering::Relaxed);
         }
 
         match tokio::time::timeout(self.config.checkout_timeout, rx).await {
             Ok(Ok(conn)) => {
+                self.waiter_count.fetch_sub(1, Ordering::Relaxed);
                 self.in_use_count.fetch_add(1, Ordering::Relaxed);
                 self.total_checkouts.fetch_add(1, Ordering::Relaxed);
                 if let Some(ref hook) = self.hooks.on_checkout {
@@ -324,9 +336,21 @@ impl<C: Poolable> ConnPool<C> {
                     pool: Arc::clone(self),
                 })
             }
-            Ok(Err(_)) => Err(PoolError::Closed),
+            Ok(Err(_)) => {
+                self.waiter_count.fetch_sub(1, Ordering::Relaxed);
+                Err(PoolError::Closed)
+            }
             Err(_) => {
+                self.waiter_count.fetch_sub(1, Ordering::Relaxed);
                 self.total_timeouts.fetch_add(1, Ordering::Relaxed);
+                // Clean up our dead waiter from the queue to prevent unbounded growth.
+                // The sender (tx) is dropped by the timeout, so return_conn_async will
+                // skip it, but we should remove the entry to free memory.
+                {
+                    let mut waiters = self.waiters.lock().await;
+                    // Remove waiters whose receiver has been dropped (tx.is_closed()).
+                    waiters.retain(|w| !w.tx.is_closed());
+                }
                 Err(PoolError::Timeout)
             }
         }
@@ -398,8 +422,12 @@ impl<C: Poolable> ConnPool<C> {
     }
 
     async fn return_conn_async(&self, conn: C) {
+        // Decrement in_use immediately — the connection is no longer "in use"
+        // regardless of whether it goes back to idle, to a waiter, or is destroyed.
+        // This ensures the counter stays accurate even if reset() or a hook panics.
+        self.in_use_count.fetch_sub(1, Ordering::Relaxed);
+
         if conn.has_pending_data() {
-            self.in_use_count.fetch_sub(1, Ordering::Relaxed);
             self.destroy_conn_stats();
             if let Some(ref hook) = self.hooks.on_destroy {
                 hook();
@@ -413,7 +441,6 @@ impl<C: Poolable> ConnPool<C> {
 
         // Reset connection state (DISCARD ALL) to prevent dirty state leaking.
         if !conn.reset().await {
-            self.in_use_count.fetch_sub(1, Ordering::Relaxed);
             self.destroy_conn_stats();
             if let Some(ref hook) = self.hooks.on_destroy {
                 hook();
@@ -428,8 +455,6 @@ impl<C: Poolable> ConnPool<C> {
         if let Some(ref hook) = self.hooks.on_checkin {
             hook(&conn);
         }
-
-        self.in_use_count.fetch_sub(1, Ordering::Relaxed);
 
         if self.draining.load(Ordering::Relaxed) {
             self.destroy_conn_stats();
@@ -487,14 +512,19 @@ impl<C: Poolable> ConnPool<C> {
     }
 
     /// Get a snapshot of pool metrics.
+    ///
+    /// Note: metrics are read from atomic counters without a global lock,
+    /// so values may be slightly inconsistent during high concurrency
+    /// (e.g., `in_use` could briefly exceed `total`). Use `saturating_sub`
+    /// for derived values.
     pub fn metrics(&self) -> PoolMetrics {
-        let total = self.total_count.load(Ordering::Relaxed);
-        let in_use = self.in_use_count.load(Ordering::Relaxed);
+        let total = self.total_count.load(Ordering::Acquire);
+        let in_use = self.in_use_count.load(Ordering::Acquire);
         PoolMetrics {
             total,
             idle: total.saturating_sub(in_use),
             in_use,
-            waiters: 0,
+            waiters: self.waiter_count.load(Ordering::Relaxed),
             total_checkouts: self.total_checkouts.load(Ordering::Relaxed),
             total_created: self.total_created.load(Ordering::Relaxed),
             total_destroyed: self.total_destroyed.load(Ordering::Relaxed),
@@ -530,24 +560,30 @@ impl<C: Poolable> ConnPool<C> {
     pub async fn drain(&self) {
         self.draining.store(true, Ordering::Relaxed);
 
-        {
+        // Clear idle connections — release the lock BEFORE calling hooks
+        // to prevent deadlocks if a hook interacts with the pool.
+        let destroyed_count = {
             let mut idle = self.idle.lock().await;
             let count = idle.len();
             idle.clear();
             self.total_count.fetch_sub(count, Ordering::Relaxed);
             self.total_destroyed.fetch_add(count as u64, Ordering::Relaxed);
-            if count > 0 {
-                if let Some(ref hook) = self.hooks.on_destroy {
-                    for _ in 0..count {
-                        hook();
-                    }
+            count
+        };
+        // Hooks called outside the lock.
+        if destroyed_count > 0 {
+            if let Some(ref hook) = self.hooks.on_destroy {
+                for _ in 0..destroyed_count {
+                    hook();
                 }
             }
         }
 
         {
             let mut waiters = self.waiters.lock().await;
+            let waiter_count = waiters.len();
             waiters.clear();
+            self.waiter_count.fetch_sub(waiter_count, Ordering::Relaxed);
         }
 
         loop {
