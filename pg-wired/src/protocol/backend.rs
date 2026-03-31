@@ -2,6 +2,9 @@ use bytes::{Buf, BytesMut};
 
 use super::types::*;
 
+/// Maximum allowed message size (256 MB). Prevents OOM from malicious/corrupt lengths.
+const MAX_MESSAGE_SIZE: usize = 256 * 1024 * 1024;
+
 /// Try to parse one complete backend message from the buffer.
 /// Returns None if the buffer doesn't contain a complete message.
 pub fn parse_message(buf: &mut BytesMut) -> Result<Option<BackendMsg>, String> {
@@ -10,7 +13,17 @@ pub fn parse_message(buf: &mut BytesMut) -> Result<Option<BackendMsg>, String> {
     }
 
     let tag = buf[0];
-    let len = i32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+    let len_raw = i32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]);
+    if len_raw < 4 {
+        return Err(format!("invalid message length: {len_raw} (must be >= 4)"));
+    }
+    let len = len_raw as usize;
+
+    if len > MAX_MESSAGE_SIZE {
+        return Err(format!(
+            "message too large: {len} bytes (max {MAX_MESSAGE_SIZE})"
+        ));
+    }
 
     if buf.len() < 1 + len {
         return Ok(None); // Incomplete message
@@ -27,9 +40,14 @@ pub fn parse_message(buf: &mut BytesMut) -> Result<Option<BackendMsg>, String> {
         b'R' => parse_auth(&body),
         b'S' => parse_parameter_status(&body),
         b'K' => parse_backend_key_data(&body),
-        b'Z' => Ok(Some(BackendMsg::ReadyForQuery {
-            status: body[0],
-        })),
+        b'Z' => {
+            if body.is_empty() {
+                return Err("ReadyForQuery: empty body".into());
+            }
+            Ok(Some(BackendMsg::ReadyForQuery {
+                status: body[0],
+            }))
+        }
         b'1' => Ok(Some(BackendMsg::ParseComplete)),
         b'2' => Ok(Some(BackendMsg::BindComplete)),
         b'3' => Ok(Some(BackendMsg::CloseComplete)),
@@ -52,18 +70,24 @@ pub fn parse_message(buf: &mut BytesMut) -> Result<Option<BackendMsg>, String> {
         })),
         b'c' => Ok(Some(BackendMsg::CopyDone)),
         other => {
-            tracing::warn!("Unknown backend message tag: {}", other as char);
-            Ok(Some(BackendMsg::ReadyForQuery { status: b'I' })) // Skip unknown
+            tracing::warn!("Unknown backend message tag: {} (0x{:02x})", other as char, other);
+            Ok(None) // Skip unknown messages instead of fabricating ReadyForQuery
         }
     }
 }
 
 fn parse_auth(body: &[u8]) -> Result<Option<BackendMsg>, String> {
+    if body.len() < 4 {
+        return Err("AuthenticationRequest: body too short".into());
+    }
     let auth_type = i32::from_be_bytes([body[0], body[1], body[2], body[3]]);
     match auth_type {
         0 => Ok(Some(BackendMsg::AuthenticationOk)),
         3 => Ok(Some(BackendMsg::AuthenticationCleartextPassword)),
         5 => {
+            if body.len() < 8 {
+                return Err("AuthenticationMd5Password: body too short for salt".into());
+            }
             let mut salt = [0u8; 4];
             salt.copy_from_slice(&body[4..8]);
             Ok(Some(BackendMsg::AuthenticationMd5Password { salt }))
@@ -74,7 +98,10 @@ fn parse_auth(body: &[u8]) -> Result<Option<BackendMsg>, String> {
             let mut offset = 4;
             while offset < body.len() && body[offset] != 0 {
                 let (name, _) = split_cstring(&body[offset..]);
-                mechanisms.push(String::from_utf8_lossy(name).into_owned());
+                let name_str = String::from_utf8(name.to_vec()).map_err(|e| {
+                    format!("SASL mechanism name is not valid UTF-8: {e}")
+                })?;
+                mechanisms.push(name_str);
                 offset += name.len() + 1;
             }
             Ok(Some(BackendMsg::AuthenticationSASL { mechanisms }))
@@ -92,13 +119,20 @@ fn parse_auth(body: &[u8]) -> Result<Option<BackendMsg>, String> {
 fn parse_parameter_status(body: &[u8]) -> Result<Option<BackendMsg>, String> {
     let (name, rest) = split_cstring(body);
     let (value, _) = split_cstring(rest);
+    let name_str = String::from_utf8(name.to_vec())
+        .map_err(|e| format!("ParameterStatus name is not valid UTF-8: {e}"))?;
+    let value_str = String::from_utf8(value.to_vec())
+        .map_err(|e| format!("ParameterStatus value is not valid UTF-8: {e}"))?;
     Ok(Some(BackendMsg::ParameterStatus {
-        name: String::from_utf8_lossy(name).into_owned(),
-        value: String::from_utf8_lossy(value).into_owned(),
+        name: name_str,
+        value: value_str,
     }))
 }
 
 fn parse_backend_key_data(body: &[u8]) -> Result<Option<BackendMsg>, String> {
+    if body.len() < 8 {
+        return Err("BackendKeyData: body too short (need 8 bytes)".into());
+    }
     let pid = i32::from_be_bytes([body[0], body[1], body[2], body[3]]);
     let secret = i32::from_be_bytes([body[4], body[5], body[6], body[7]]);
     Ok(Some(BackendMsg::BackendKeyData { pid, secret }))
@@ -106,19 +140,29 @@ fn parse_backend_key_data(body: &[u8]) -> Result<Option<BackendMsg>, String> {
 
 fn parse_command_complete(body: &[u8]) -> Result<Option<BackendMsg>, String> {
     let (tag, _) = split_cstring(body);
-    Ok(Some(BackendMsg::CommandComplete {
-        tag: String::from_utf8_lossy(tag).into_owned(),
-    }))
+    let tag_str = String::from_utf8(tag.to_vec())
+        .map_err(|e| format!("CommandComplete tag is not valid UTF-8: {e}"))?;
+    Ok(Some(BackendMsg::CommandComplete { tag: tag_str }))
 }
 
 /// Parse DataRow: [int16 num_cols] [int32 len, bytes data]...
-/// This is the hot path — keep it fast.
+/// This is the hot path — bounds checks are explicit for safety while
+/// keeping allocations minimal.
 fn parse_data_row(body: &[u8]) -> Result<Option<BackendMsg>, String> {
+    if body.len() < 2 {
+        return Err("DataRow: body too short for column count".into());
+    }
     let num_cols = i16::from_be_bytes([body[0], body[1]]) as usize;
     let mut columns = Vec::with_capacity(num_cols);
     let mut offset = 2;
 
-    for _ in 0..num_cols {
+    for col_idx in 0..num_cols {
+        if offset + 4 > body.len() {
+            return Err(format!(
+                "DataRow: truncated at column {col_idx} length (offset {offset}, body len {})",
+                body.len()
+            ));
+        }
         let len = i32::from_be_bytes([
             body[offset],
             body[offset + 1],
@@ -128,8 +172,16 @@ fn parse_data_row(body: &[u8]) -> Result<Option<BackendMsg>, String> {
         offset += 4;
         if len == -1 {
             columns.push(None); // NULL
+        } else if len < 0 {
+            return Err(format!("DataRow: invalid negative column length {len} at column {col_idx}"));
         } else {
             let len = len as usize;
+            if offset + len > body.len() {
+                return Err(format!(
+                    "DataRow: truncated column {col_idx} data (need {len} bytes at offset {offset}, body len {})",
+                    body.len()
+                ));
+            }
             columns.push(Some(body[offset..offset + len].to_vec()));
             offset += len;
         }
@@ -139,13 +191,30 @@ fn parse_data_row(body: &[u8]) -> Result<Option<BackendMsg>, String> {
 }
 
 fn parse_row_description(body: &[u8]) -> Result<Option<BackendMsg>, String> {
+    if body.len() < 2 {
+        return Err("RowDescription: body too short for field count".into());
+    }
     let num_fields = i16::from_be_bytes([body[0], body[1]]) as usize;
     let mut fields = Vec::with_capacity(num_fields);
     let mut offset = 2;
 
-    for _ in 0..num_fields {
+    for field_idx in 0..num_fields {
+        if offset >= body.len() {
+            return Err(format!(
+                "RowDescription: truncated at field {field_idx} name"
+            ));
+        }
         let (name, _rest) = split_cstring(&body[offset..]);
         offset += name.len() + 1;
+
+        // Each field has: table_oid(4) + column_id(2) + type_oid(4) + type_size(2) + type_modifier(4) + format(2) = 18 bytes
+        if offset + 18 > body.len() {
+            return Err(format!(
+                "RowDescription: truncated at field {field_idx} metadata (need 18 bytes at offset {offset}, body len {})",
+                body.len()
+            ));
+        }
+
         let table_oid = u32::from_be_bytes([body[offset], body[offset+1], body[offset+2], body[offset+3]]);
         offset += 4;
         let column_id = i16::from_be_bytes([body[offset], body[offset+1]]);
@@ -159,8 +228,11 @@ fn parse_row_description(body: &[u8]) -> Result<Option<BackendMsg>, String> {
         let format = i16::from_be_bytes([body[offset], body[offset+1]]);
         offset += 2;
 
+        let name_str = String::from_utf8(name.to_vec())
+            .map_err(|e| format!("RowDescription field {field_idx} name is not valid UTF-8: {e}"))?;
+
         fields.push(FieldDescription {
-            name: String::from_utf8_lossy(name).into_owned(),
+            name: name_str,
             table_oid,
             column_id,
             type_oid,
@@ -175,7 +247,17 @@ fn parse_row_description(body: &[u8]) -> Result<Option<BackendMsg>, String> {
 
 /// Parse ParameterDescription: [int16 num_params] [int32 oid]...
 fn parse_parameter_description(body: &[u8]) -> Result<Option<BackendMsg>, String> {
+    if body.len() < 2 {
+        return Err("ParameterDescription: body too short for param count".into());
+    }
     let num_params = i16::from_be_bytes([body[0], body[1]]) as usize;
+    if body.len() < 2 + num_params * 4 {
+        return Err(format!(
+            "ParameterDescription: body too short for {num_params} params (need {}, have {})",
+            2 + num_params * 4,
+            body.len()
+        ));
+    }
     let mut type_oids = Vec::with_capacity(num_params);
     let mut offset = 2;
     for _ in 0..num_params {
@@ -190,19 +272,34 @@ fn parse_parameter_description(body: &[u8]) -> Result<Option<BackendMsg>, String
 
 /// Parse NotificationResponse: pid(i32) + channel(cstring) + payload(cstring)
 fn parse_notification(body: &[u8]) -> Result<Option<BackendMsg>, String> {
+    if body.len() < 4 {
+        return Err("NotificationResponse: body too short for pid".into());
+    }
     let pid = i32::from_be_bytes([body[0], body[1], body[2], body[3]]);
     let (channel, rest) = split_cstring(&body[4..]);
     let (payload, _) = split_cstring(rest);
+    let channel_str = String::from_utf8(channel.to_vec())
+        .map_err(|e| format!("NotificationResponse channel is not valid UTF-8: {e}"))?;
+    let payload_str = String::from_utf8(payload.to_vec())
+        .map_err(|e| format!("NotificationResponse payload is not valid UTF-8: {e}"))?;
     Ok(Some(BackendMsg::NotificationResponse {
         pid,
-        channel: String::from_utf8_lossy(channel).into_owned(),
-        payload: String::from_utf8_lossy(payload).into_owned(),
+        channel: channel_str,
+        payload: payload_str,
     }))
 }
 
 fn parse_copy_response(body: &[u8], is_in: bool) -> Result<Option<BackendMsg>, String> {
+    if body.len() < 3 {
+        return Err("CopyResponse: body too short".into());
+    }
     let format = body[0];
     let num_cols = i16::from_be_bytes([body[1], body[2]]) as usize;
+    if body.len() < 3 + num_cols * 2 {
+        return Err(format!(
+            "CopyResponse: body too short for {num_cols} column formats"
+        ));
+    }
     let mut column_formats = Vec::with_capacity(num_cols);
     let mut offset = 3;
     for _ in 0..num_cols {
@@ -230,9 +327,13 @@ fn parse_error_or_notice(body: &[u8]) -> Result<PgError, String> {
     while offset < body.len() && body[offset] != 0 {
         let field_type = body[offset];
         offset += 1;
+        if offset >= body.len() {
+            break;
+        }
         let (value, _rest) = split_cstring(&body[offset..]);
         offset += value.len() + 1;
-        let value_str = String::from_utf8_lossy(value).into_owned();
+        let value_str = String::from_utf8(value.to_vec())
+            .unwrap_or_else(|_| String::from_utf8_lossy(value).into_owned());
 
         match field_type {
             b'S' => err.severity = value_str,
@@ -253,5 +354,217 @@ fn split_cstring(data: &[u8]) -> (&[u8], &[u8]) {
     match data.iter().position(|&b| b == 0) {
         Some(pos) => (&data[..pos], &data[pos + 1..]),
         None => (data, &[]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BufMut;
+
+    /// Build a complete wire message: tag(1) + length(4) + body
+    fn make_message(tag: u8, body: &[u8]) -> BytesMut {
+        let mut buf = BytesMut::new();
+        buf.put_u8(tag);
+        buf.put_i32((body.len() + 4) as i32);
+        buf.extend_from_slice(body);
+        buf
+    }
+
+    #[test]
+    fn test_parse_ready_for_query() {
+        let mut buf = make_message(b'Z', &[b'I']);
+        let msg = parse_message(&mut buf).unwrap().unwrap();
+        assert!(matches!(msg, BackendMsg::ReadyForQuery { status: b'I' }));
+    }
+
+    #[test]
+    fn test_parse_ready_for_query_empty_body() {
+        let mut buf = make_message(b'Z', &[]);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("empty body"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_backend_key_data() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&42i32.to_be_bytes());
+        body.extend_from_slice(&99i32.to_be_bytes());
+        let mut buf = make_message(b'K', &body);
+        let msg = parse_message(&mut buf).unwrap().unwrap();
+        assert!(matches!(msg, BackendMsg::BackendKeyData { pid: 42, secret: 99 }));
+    }
+
+    #[test]
+    fn test_parse_backend_key_data_too_short() {
+        let mut buf = make_message(b'K', &[1, 2, 3]);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("too short"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_data_row_basic() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1i16.to_be_bytes()); // 1 column
+        body.extend_from_slice(&5i32.to_be_bytes()); // 5 bytes
+        body.extend_from_slice(b"hello");
+        let mut buf = make_message(b'D', &body);
+        let msg = parse_message(&mut buf).unwrap().unwrap();
+        if let BackendMsg::DataRow { columns } = msg {
+            assert_eq!(columns.len(), 1);
+            assert_eq!(columns[0].as_deref(), Some(b"hello".as_ref()));
+        } else {
+            panic!("expected DataRow");
+        }
+    }
+
+    #[test]
+    fn test_parse_data_row_null() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1i16.to_be_bytes()); // 1 column
+        body.extend_from_slice(&(-1i32).to_be_bytes()); // NULL
+        let mut buf = make_message(b'D', &body);
+        let msg = parse_message(&mut buf).unwrap().unwrap();
+        if let BackendMsg::DataRow { columns } = msg {
+            assert_eq!(columns[0], None);
+        } else {
+            panic!("expected DataRow");
+        }
+    }
+
+    #[test]
+    fn test_parse_data_row_truncated_length() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1i16.to_be_bytes()); // 1 column
+        body.extend_from_slice(&[0, 0]); // only 2 bytes, need 4
+        let mut buf = make_message(b'D', &body);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("truncated"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_data_row_truncated_data() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1i16.to_be_bytes());
+        body.extend_from_slice(&100i32.to_be_bytes()); // claims 100 bytes
+        body.extend_from_slice(b"short"); // only 5 bytes
+        let mut buf = make_message(b'D', &body);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("truncated"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_data_row_negative_length() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1i16.to_be_bytes());
+        body.extend_from_slice(&(-2i32).to_be_bytes()); // invalid negative (not -1)
+        let mut buf = make_message(b'D', &body);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("invalid negative"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_row_description_too_short() {
+        let mut buf = make_message(b'T', &[]);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("too short"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_parameter_description_too_short() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&3i16.to_be_bytes()); // claims 3 params
+        body.extend_from_slice(&23u32.to_be_bytes()); // only 1 OID
+        let mut buf = make_message(b't', &body);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("too short"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_notification_too_short() {
+        let mut buf = make_message(b'A', &[1, 2]);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("too short"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_copy_response_too_short() {
+        let mut buf = make_message(b'G', &[0, 0]);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("too short"), "got: {err}");
+    }
+
+    #[test]
+    fn test_negative_message_length() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(b'Z');
+        buf.put_i32(-1); // negative length
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("invalid message length"), "got: {err}");
+    }
+
+    #[test]
+    fn test_message_too_large() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(b'Z');
+        buf.put_i32((MAX_MESSAGE_SIZE + 100) as i32);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("too large"), "got: {err}");
+    }
+
+    #[test]
+    fn test_unknown_tag_returns_none() {
+        let mut buf = make_message(b'?', &[0]);
+        let msg = parse_message(&mut buf).unwrap();
+        assert!(msg.is_none(), "unknown tag should return None");
+    }
+
+    #[test]
+    fn test_incomplete_message_returns_none() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(b'Z');
+        buf.put_i32(5); // length=5, body_len=1, but no body yet
+        assert!(parse_message(&mut buf).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_parse_auth_too_short() {
+        let mut buf = make_message(b'R', &[0, 0]);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("too short"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_md5_salt_too_short() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&5i32.to_be_bytes()); // MD5 auth type
+        body.extend_from_slice(&[1, 2]); // only 2 salt bytes, need 4
+        let mut buf = make_message(b'R', &body);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("too short"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_command_complete() {
+        let mut body = b"SELECT 42\0".to_vec();
+        let mut buf = make_message(b'C', &body);
+        let msg = parse_message(&mut buf).unwrap().unwrap();
+        if let BackendMsg::CommandComplete { tag } = msg {
+            assert_eq!(tag, "SELECT 42");
+        } else {
+            panic!("expected CommandComplete");
+        }
+    }
+
+    #[test]
+    fn test_fuzz_empty_body_all_tags() {
+        // Every known tag with empty body should return Err, not panic.
+        for tag in [b'R', b'S', b'K', b'Z', b'D', b'T', b'A', b't', b'G', b'H'] {
+            let mut buf = make_message(tag, &[]);
+            let result = parse_message(&mut buf);
+            // Should be Err (body too short) or Ok(Some(...)) — must NOT panic.
+            assert!(result.is_ok() || result.is_err(),
+                "tag {}: should not panic on empty body", tag as char);
+        }
     }
 }

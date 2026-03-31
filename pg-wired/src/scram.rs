@@ -83,8 +83,8 @@ impl ScramClient {
             .decode(salt_b64)
             .map_err(|e| format!("Bad salt base64: {e}"))?;
 
-        let salted_password = hi(&self.password, &salt, iterations);
-        let client_key = hmac_sha256(&salted_password, b"Client Key");
+        let salted_password = hi(&self.password, &salt, iterations)?;
+        let client_key = hmac_sha256(&salted_password, b"Client Key")?;
         let stored_key = sha256(&client_key);
 
         // Channel binding data for client-final-message.
@@ -103,7 +103,7 @@ impl ScramClient {
             self.client_first_bare
         );
 
-        let client_signature = hmac_sha256(&stored_key, auth_message.as_bytes());
+        let client_signature = hmac_sha256(&stored_key, auth_message.as_bytes())?;
         let proof: Vec<u8> = client_key
             .iter()
             .zip(client_signature.iter())
@@ -118,17 +118,17 @@ impl ScramClient {
 }
 
 /// PBKDF2 with HMAC-SHA-256 (Hi function from RFC 5802).
-fn hi(password: &str, salt: &[u8], iterations: u32) -> Vec<u8> {
-    let mut mac =
-        HmacSha256::new_from_slice(password.as_bytes()).expect("HMAC accepts any key size");
+fn hi(password: &str, salt: &[u8], iterations: u32) -> Result<Vec<u8>, String> {
+    let mut mac = HmacSha256::new_from_slice(password.as_bytes())
+        .map_err(|e| format!("HMAC key error: {e}"))?;
     mac.update(salt);
     mac.update(&1u32.to_be_bytes());
     let mut u = mac.finalize().into_bytes().to_vec();
     let mut result = u.clone();
 
     for _ in 1..iterations {
-        let mut mac =
-            HmacSha256::new_from_slice(password.as_bytes()).expect("HMAC accepts any key size");
+        let mut mac = HmacSha256::new_from_slice(password.as_bytes())
+            .map_err(|e| format!("HMAC key error: {e}"))?;
         mac.update(&u);
         u = mac.finalize().into_bytes().to_vec();
         for (r, x) in result.iter_mut().zip(u.iter()) {
@@ -136,13 +136,14 @@ fn hi(password: &str, salt: &[u8], iterations: u32) -> Vec<u8> {
         }
     }
 
-    result
+    Ok(result)
 }
 
-fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts any key size");
+fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut mac = HmacSha256::new_from_slice(key)
+        .map_err(|e| format!("HMAC key error: {e}"))?;
     mac.update(data);
-    mac.finalize().into_bytes().to_vec()
+    Ok(mac.finalize().into_bytes().to_vec())
 }
 
 fn sha256(data: &[u8]) -> Vec<u8> {

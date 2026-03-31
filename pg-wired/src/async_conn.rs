@@ -183,18 +183,29 @@ impl AsyncConn {
     pub fn take_notification_receiver(
         &self,
     ) -> Option<mpsc::Receiver<crate::protocol::types::BackendMsg>> {
-        self.notification_rx.lock().unwrap().take()
+        self.notification_rx.lock().ok().and_then(|mut guard| guard.take())
     }
 
     /// Look up or allocate a statement name.
+    /// Uses an LRU-style eviction: when the cache is full, the oldest entry
+    /// (by insertion order / counter) is removed to make room.
     pub fn lookup_or_alloc(&self, sql: &str) -> (Vec<u8>, bool) {
-        let mut cache = self.stmt_cache.lock().unwrap();
+        let mut cache = match self.stmt_cache.lock() {
+            Ok(c) => c,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         if let Some((name, _)) = cache.get(sql) {
             return (name.as_bytes().to_vec(), false);
         }
-        // Evict if too large.
+        // LRU eviction: remove the entry with the lowest counter value.
         if cache.len() >= 256 {
-            cache.clear();
+            if let Some(oldest_key) = cache
+                .iter()
+                .min_by_key(|(_, (_, counter))| *counter)
+                .map(|(k, _)| k.clone())
+            {
+                cache.remove(&oldest_key);
+            }
         }
         let n = self.stmt_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let name = format!("s{n}");
@@ -256,14 +267,20 @@ impl AsyncConn {
     /// Evict a SQL statement from the cache, forcing re-parse on next use.
     /// Used for prepared statement invalidation after schema changes.
     pub fn invalidate_statement(&self, sql: &str) {
-        let mut cache = self.stmt_cache.lock().unwrap();
+        let mut cache = match self.stmt_cache.lock() {
+            Ok(c) => c,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         cache.remove(sql);
     }
 
     /// Clear the entire statement cache. Must be called after `DISCARD ALL`
     /// which destroys server-side prepared statements.
     pub fn clear_statement_cache(&self) {
-        let mut cache = self.stmt_cache.lock().unwrap();
+        let mut cache = match self.stmt_cache.lock() {
+            Ok(c) => c,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         cache.clear();
     }
 

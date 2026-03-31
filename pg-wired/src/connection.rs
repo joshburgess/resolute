@@ -39,8 +39,8 @@ impl WireConn {
         // TLS negotiation (if feature enabled).
         #[cfg(feature = "tls")]
         let stream = {
-            let hostname = addr.split(':').next().unwrap_or(addr);
-            crate::tls::negotiate_tls(stream, hostname).await?
+            let hostname = parse_hostname(addr);
+            crate::tls::negotiate_tls(stream, &hostname).await?
         };
         #[cfg(not(feature = "tls"))]
         let stream = MaybeTlsStream::Plain(stream);
@@ -258,6 +258,8 @@ impl WireConn {
     }
 
     /// Drain messages until ReadyForQuery (error recovery).
+    /// Also attempts to parse any remaining data in the receive buffer
+    /// before declaring the connection closed.
     pub async fn drain_until_ready(&mut self) -> Result<(), PgWireError> {
         loop {
             let msg = self.recv_msg().await?;
@@ -269,5 +271,49 @@ impl WireConn {
                 tracing::warn!("Error in drain: {}: {}", fields.code, fields.message);
             }
         }
+    }
+}
+
+#[cfg(any(feature = "tls", test))]
+/// Extract hostname from an address string, handling IPv6 bracket notation.
+/// Examples: "localhost:5432" → "localhost", "[::1]:5432" → "::1", "host" → "host"
+fn parse_hostname(addr: &str) -> String {
+    if addr.starts_with('[') {
+        // IPv6 bracket notation: [::1]:5432
+        if let Some(end) = addr.find(']') {
+            return addr[1..end].to_string();
+        }
+    }
+    // IPv4 or hostname: host:port
+    addr.split(':').next().unwrap_or(addr).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_hostname_ipv4() {
+        assert_eq!(parse_hostname("127.0.0.1:5432"), "127.0.0.1");
+    }
+
+    #[test]
+    fn test_parse_hostname_name() {
+        assert_eq!(parse_hostname("localhost:5432"), "localhost");
+    }
+
+    #[test]
+    fn test_parse_hostname_ipv6() {
+        assert_eq!(parse_hostname("[::1]:5432"), "::1");
+    }
+
+    #[test]
+    fn test_parse_hostname_ipv6_full() {
+        assert_eq!(parse_hostname("[2001:db8::1]:5432"), "2001:db8::1");
+    }
+
+    #[test]
+    fn test_parse_hostname_no_port() {
+        assert_eq!(parse_hostname("myhost"), "myhost");
     }
 }
