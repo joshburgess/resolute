@@ -259,7 +259,7 @@ impl<C: Poolable> ConnPool<C> {
             match pool.create_connection().await {
                 Ok(idle_conn) => {
                     pool.idle.lock().await.push_back(idle_conn);
-                    pool.total_count.fetch_add(1, Ordering::Relaxed);
+                    pool.total_count.fetch_add(1, Ordering::Release);
                 }
                 Err(e) => {
                     tracing::warn!("Failed to pre-fill connection: {e}");
@@ -277,7 +277,7 @@ impl<C: Poolable> ConnPool<C> {
 
     /// Check out a connection from the pool.
     pub async fn get(self: &Arc<Self>) -> Result<PoolGuard<C>, PoolError<C::Error>> {
-        if self.draining.load(Ordering::Relaxed) {
+        if self.draining.load(Ordering::Acquire) {
             return Err(PoolError::Draining);
         }
 
@@ -286,7 +286,7 @@ impl<C: Poolable> ConnPool<C> {
         }
 
         if let Some(conn) = self.try_get_idle().await {
-            self.in_use_count.fetch_add(1, Ordering::Relaxed);
+            self.in_use_count.fetch_add(1, Ordering::Release);
             self.total_checkouts.fetch_add(1, Ordering::Relaxed);
             if let Some(ref hook) = self.hooks.on_checkout {
                 hook(&conn);
@@ -297,10 +297,10 @@ impl<C: Poolable> ConnPool<C> {
             });
         }
 
-        if self.total_count.load(Ordering::Relaxed) < self.config.max_size {
+        if self.total_count.load(Ordering::Acquire) < self.config.max_size {
             match self.create_and_track().await {
                 Ok(conn) => {
-                    self.in_use_count.fetch_add(1, Ordering::Relaxed);
+                    self.in_use_count.fetch_add(1, Ordering::Release);
                     self.total_checkouts.fetch_add(1, Ordering::Relaxed);
                     if let Some(ref hook) = self.hooks.on_checkout {
                         hook(&conn);
@@ -326,7 +326,7 @@ impl<C: Poolable> ConnPool<C> {
         match tokio::time::timeout(self.config.checkout_timeout, rx).await {
             Ok(Ok(conn)) => {
                 self.waiter_count.fetch_sub(1, Ordering::Relaxed);
-                self.in_use_count.fetch_add(1, Ordering::Relaxed);
+                self.in_use_count.fetch_add(1, Ordering::Release);
                 self.total_checkouts.fetch_add(1, Ordering::Relaxed);
                 if let Some(ref hook) = self.hooks.on_checkout {
                     hook(&conn);
@@ -400,16 +400,16 @@ impl<C: Poolable> ConnPool<C> {
     }
 
     async fn create_and_track(&self) -> Result<C, PoolError<C::Error>> {
-        let prev = self.total_count.fetch_add(1, Ordering::Relaxed);
+        let prev = self.total_count.fetch_add(1, Ordering::Release);
         if prev >= self.config.max_size {
-            self.total_count.fetch_sub(1, Ordering::Relaxed);
+            self.total_count.fetch_sub(1, Ordering::Release);
             return Err(PoolError::AtCapacity);
         }
 
         match self.create_connection().await {
             Ok(idle_conn) => Ok(idle_conn.conn),
             Err(e) => {
-                self.total_count.fetch_sub(1, Ordering::Relaxed);
+                self.total_count.fetch_sub(1, Ordering::Release);
                 Err(PoolError::Connect(e))
             }
         }
@@ -425,7 +425,7 @@ impl<C: Poolable> ConnPool<C> {
         // Decrement in_use immediately — the connection is no longer "in use"
         // regardless of whether it goes back to idle, to a waiter, or is destroyed.
         // This ensures the counter stays accurate even if reset() or a hook panics.
-        self.in_use_count.fetch_sub(1, Ordering::Relaxed);
+        self.in_use_count.fetch_sub(1, Ordering::Release);
 
         if conn.has_pending_data() {
             self.destroy_conn_stats();
@@ -456,7 +456,7 @@ impl<C: Poolable> ConnPool<C> {
             hook(&conn);
         }
 
-        if self.draining.load(Ordering::Relaxed) {
+        if self.draining.load(Ordering::Acquire) {
             self.destroy_conn_stats();
             if let Some(ref hook) = self.hooks.on_destroy {
                 hook();
@@ -499,15 +499,15 @@ impl<C: Poolable> ConnPool<C> {
     }
 
     fn maybe_notify_drain(&self) {
-        if self.draining.load(Ordering::Relaxed)
-            && self.total_count.load(Ordering::Relaxed) == 0
+        if self.draining.load(Ordering::Acquire)
+            && self.total_count.load(Ordering::Acquire) == 0
         {
             self.drain_complete.notify_one();
         }
     }
 
     fn destroy_conn_stats(&self) {
-        self.total_count.fetch_sub(1, Ordering::Relaxed);
+        self.total_count.fetch_sub(1, Ordering::Release);
         self.total_destroyed.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -542,7 +542,7 @@ impl<C: Poolable> ConnPool<C> {
             match self.create_connection().await {
                 Ok(idle_conn) => {
                     self.idle.lock().await.push_back(idle_conn);
-                    self.total_count.fetch_add(1, Ordering::Relaxed);
+                    self.total_count.fetch_add(1, Ordering::Release);
                     created += 1;
                 }
                 Err(e) => {
@@ -558,7 +558,7 @@ impl<C: Poolable> ConnPool<C> {
 
     /// Initiate graceful drain.
     pub async fn drain(&self) {
-        self.draining.store(true, Ordering::Relaxed);
+        self.draining.store(true, Ordering::Release);
 
         // Clear idle connections — release the lock BEFORE calling hooks
         // to prevent deadlocks if a hook interacts with the pool.
@@ -566,7 +566,7 @@ impl<C: Poolable> ConnPool<C> {
             let mut idle = self.idle.lock().await;
             let count = idle.len();
             idle.clear();
-            self.total_count.fetch_sub(count, Ordering::Relaxed);
+            self.total_count.fetch_sub(count, Ordering::Release);
             self.total_destroyed.fetch_add(count as u64, Ordering::Relaxed);
             count
         };
@@ -588,7 +588,7 @@ impl<C: Poolable> ConnPool<C> {
 
         loop {
             let notified = self.drain_complete.notified();
-            if self.total_count.load(Ordering::Relaxed) == 0 {
+            if self.total_count.load(Ordering::Acquire) == 0 {
                 break;
             }
             notified.await;
@@ -620,18 +620,19 @@ pub struct PoolGuard<C: Poolable> {
 
 impl<C: Poolable> PoolGuard<C> {
     pub fn conn(&self) -> &C {
-        self.conn.as_ref().unwrap()
+        self.conn.as_ref().expect("PoolGuard: connection already taken via take()")
     }
 
     pub fn conn_mut(&mut self) -> &mut C {
-        self.conn.as_mut().unwrap()
+        self.conn.as_mut().expect("PoolGuard: connection already taken via take()")
     }
 
     /// Take ownership of the connection, removing it from the pool.
+    /// After calling this, the guard must not be used — it will panic.
     pub fn take(mut self) -> C {
-        let conn = self.conn.take().unwrap();
-        self.pool.in_use_count.fetch_sub(1, Ordering::Relaxed);
-        self.pool.total_count.fetch_sub(1, Ordering::Relaxed);
+        let conn = self.conn.take().expect("PoolGuard: connection already taken");
+        self.pool.in_use_count.fetch_sub(1, Ordering::Release);
+        self.pool.total_count.fetch_sub(1, Ordering::Release);
         conn
     }
 }
@@ -647,13 +648,13 @@ impl<C: Poolable> Drop for PoolGuard<C> {
 impl<C: Poolable> std::ops::Deref for PoolGuard<C> {
     type Target = C;
     fn deref(&self) -> &Self::Target {
-        self.conn.as_ref().unwrap()
+        self.conn.as_ref().expect("PoolGuard: connection already taken via take()")
     }
 }
 
 impl<C: Poolable> std::ops::DerefMut for PoolGuard<C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.conn.as_mut().unwrap()
+        self.conn.as_mut().expect("PoolGuard: connection already taken via take()")
     }
 }
 
@@ -673,7 +674,7 @@ async fn maintenance_task<C: Poolable>(pool: Arc<ConnPool<C>>, mut shutdown_rx: 
             }
         }
 
-        if pool.draining.load(Ordering::Relaxed) {
+        if pool.draining.load(Ordering::Acquire) {
             return;
         }
 
@@ -684,14 +685,14 @@ async fn maintenance_task<C: Poolable>(pool: Arc<ConnPool<C>>, mut shutdown_rx: 
             idle.retain(|entry| now < entry.expires_at);
             let evicted = before - idle.len();
             if evicted > 0 {
-                pool.total_count.fetch_sub(evicted, Ordering::Relaxed);
+                pool.total_count.fetch_sub(evicted, Ordering::Release);
                 pool.total_destroyed.fetch_add(evicted as u64, Ordering::Relaxed);
                 tracing::debug!("Evicted {evicted} expired connections");
             }
         }
 
-        let total = pool.total_count.load(Ordering::Relaxed);
-        let in_use = pool.in_use_count.load(Ordering::Relaxed);
+        let total = pool.total_count.load(Ordering::Acquire);
+        let in_use = pool.in_use_count.load(Ordering::Acquire);
         let current_idle = total.saturating_sub(in_use);
 
         if current_idle < pool.config.min_idle && total < pool.config.max_size {
