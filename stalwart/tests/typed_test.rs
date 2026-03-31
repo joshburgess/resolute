@@ -1298,6 +1298,486 @@ fn test_pg_domain_numeric() {
 }
 
 // ---------------------------------------------------------------------------
+// PgDomain: ARRAY_OID inheritance
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_pg_domain_inherits_array_oid_from_string() {
+    // String has ARRAY_OID = 1009 (text[])
+    assert_eq!(<Email as PgType>::ARRAY_OID, 1009);
+}
+
+#[test]
+fn test_pg_domain_inherits_array_oid_from_i32() {
+    // i32 has ARRAY_OID = 1007 (int4[])
+    assert_eq!(<PositiveInt as PgType>::ARRAY_OID, 1007);
+}
+
+#[derive(Debug, PartialEq, stalwart::PgDomain)]
+struct UserId(i64);
+
+#[test]
+fn test_pg_domain_inherits_array_oid_from_i64() {
+    // i64 has ARRAY_OID = 1016 (int8[])
+    assert_eq!(<UserId as PgType>::ARRAY_OID, 1016);
+}
+
+#[derive(Debug, PartialEq, stalwart::PgDomain)]
+struct Flag(bool);
+
+#[test]
+fn test_pg_domain_inherits_array_oid_from_bool() {
+    assert_eq!(<Flag as PgType>::ARRAY_OID, 1000);
+}
+
+#[test]
+fn test_pg_domain_oid_is_zero() {
+    // Domain types use OID=0 (server infers from context)
+    assert_eq!(<Email as PgType>::OID, 0);
+    assert_eq!(<PositiveInt as PgType>::OID, 0);
+    assert_eq!(<UserId as PgType>::OID, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Integer-backed PgEnum
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, PartialEq, stalwart::PgEnum)]
+#[repr(i32)]
+enum IntStatus {
+    Active = 1,
+    Inactive = 2,
+    Deleted = 3,
+}
+
+#[test]
+fn test_int_enum_encode() {
+    let mut buf = bytes::BytesMut::new();
+    IntStatus::Active.encode(&mut buf);
+    assert_eq!(buf.len(), 4);
+    assert_eq!(i32::decode(&buf).unwrap(), 1);
+}
+
+#[test]
+fn test_int_enum_encode_all_variants() {
+    for (variant, expected) in [
+        (IntStatus::Active, 1i32),
+        (IntStatus::Inactive, 2),
+        (IntStatus::Deleted, 3),
+    ] {
+        let mut buf = bytes::BytesMut::new();
+        variant.encode(&mut buf);
+        assert_eq!(i32::decode(&buf).unwrap(), expected, "variant {:?}", variant);
+    }
+}
+
+#[test]
+fn test_int_enum_decode() {
+    let mut buf = bytes::BytesMut::new();
+    1i32.encode(&mut buf);
+    assert_eq!(IntStatus::decode(&buf).unwrap(), IntStatus::Active);
+
+    buf.clear();
+    2i32.encode(&mut buf);
+    assert_eq!(IntStatus::decode(&buf).unwrap(), IntStatus::Inactive);
+
+    buf.clear();
+    3i32.encode(&mut buf);
+    assert_eq!(IntStatus::decode(&buf).unwrap(), IntStatus::Deleted);
+}
+
+#[test]
+fn test_int_enum_decode_unknown_discriminant() {
+    let mut buf = bytes::BytesMut::new();
+    99i32.encode(&mut buf);
+    let err = IntStatus::decode(&buf).unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("unknown"), "expected unknown discriminant error, got: {msg}");
+    assert!(msg.contains("99"), "expected discriminant 99 in error, got: {msg}");
+}
+
+#[test]
+fn test_int_enum_decode_text() {
+    assert_eq!(IntStatus::decode_text("1").unwrap(), IntStatus::Active);
+    assert_eq!(IntStatus::decode_text("2").unwrap(), IntStatus::Inactive);
+    assert_eq!(IntStatus::decode_text("3").unwrap(), IntStatus::Deleted);
+}
+
+#[test]
+fn test_int_enum_decode_text_unknown() {
+    let err = IntStatus::decode_text("0").unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("unknown"), "got: {msg}");
+}
+
+#[test]
+fn test_int_enum_decode_text_invalid() {
+    let err = IntStatus::decode_text("abc").unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("parse"), "got: {msg}");
+}
+
+#[test]
+fn test_int_enum_pg_type_oids() {
+    // i32 enum → OID 23 (int4), ARRAY_OID 1007 (int4[])
+    assert_eq!(<IntStatus as PgType>::OID, 23);
+    assert_eq!(<IntStatus as PgType>::ARRAY_OID, 1007);
+}
+
+#[test]
+fn test_int_enum_roundtrip() {
+    for variant in [IntStatus::Active, IntStatus::Inactive, IntStatus::Deleted] {
+        let mut buf = bytes::BytesMut::new();
+        variant.encode(&mut buf);
+        let decoded = IntStatus::decode(&buf).unwrap();
+        assert_eq!(decoded, variant);
+    }
+}
+
+#[derive(Debug, PartialEq, stalwart::PgEnum)]
+#[repr(i16)]
+enum Priority {
+    Low = 0,
+    Medium = 1,
+    High = 2,
+    Critical = 3,
+}
+
+#[test]
+fn test_int_enum_i16_encode_decode() {
+    assert_eq!(<Priority as PgType>::OID, 21); // int2
+    assert_eq!(<Priority as PgType>::ARRAY_OID, 1005); // int2[]
+
+    for (variant, expected) in [
+        (Priority::Low, 0i16),
+        (Priority::Medium, 1),
+        (Priority::High, 2),
+        (Priority::Critical, 3),
+    ] {
+        let mut buf = bytes::BytesMut::new();
+        variant.encode(&mut buf);
+        assert_eq!(buf.len(), 2);
+        let decoded = Priority::decode(&buf).unwrap();
+        assert_eq!(decoded, variant);
+        assert_eq!(i16::decode(&buf).unwrap(), expected);
+    }
+}
+
+#[derive(Debug, PartialEq, stalwart::PgEnum)]
+#[repr(i64)]
+enum BigEnum {
+    A = 100,
+    B = 200,
+    C = -1,
+}
+
+#[test]
+fn test_int_enum_i64_encode_decode() {
+    assert_eq!(<BigEnum as PgType>::OID, 20); // int8
+    assert_eq!(<BigEnum as PgType>::ARRAY_OID, 1016); // int8[]
+
+    let mut buf = bytes::BytesMut::new();
+    BigEnum::C.encode(&mut buf);
+    assert_eq!(buf.len(), 8);
+    assert_eq!(i64::decode(&buf).unwrap(), -1);
+    assert_eq!(BigEnum::decode(&buf).unwrap(), BigEnum::C);
+}
+
+#[test]
+fn test_int_enum_negative_discriminant_roundtrip() {
+    let mut buf = bytes::BytesMut::new();
+    BigEnum::C.encode(&mut buf);
+    let decoded = BigEnum::decode(&buf).unwrap();
+    assert_eq!(decoded, BigEnum::C);
+}
+
+#[test]
+fn test_int_enum_decode_too_short() {
+    let buf = [0u8; 2]; // too short for i32
+    let err = IntStatus::decode(&buf).unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("expected 4 bytes"), "got: {msg}");
+}
+
+// ---------------------------------------------------------------------------
+// FromRow: skip attribute
+// ---------------------------------------------------------------------------
+
+#[derive(stalwart::FromRow, Debug)]
+struct WithSkip {
+    id: i32,
+    name: String,
+    #[from_row(skip)]
+    computed: String,
+}
+
+#[tokio::test]
+async fn test_from_row_skip() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT 1::int4 AS id, 'Alice'::text AS name", &[])
+        .await
+        .unwrap();
+    let row = WithSkip::from_row(&rows[0]).unwrap();
+    assert_eq!(row.id, 1);
+    assert_eq!(row.name, "Alice");
+    assert_eq!(row.computed, "", "skipped field should be Default::default()");
+}
+
+// ---------------------------------------------------------------------------
+// FromRow: default attribute
+// ---------------------------------------------------------------------------
+
+#[derive(stalwart::FromRow, Debug)]
+struct WithDefault {
+    id: i32,
+    #[from_row(default)]
+    missing_col: i32,
+}
+
+#[tokio::test]
+async fn test_from_row_default_missing_column() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT 1::int4 AS id", &[])
+        .await
+        .unwrap();
+    let row = WithDefault::from_row(&rows[0]).unwrap();
+    assert_eq!(row.id, 1);
+    assert_eq!(row.missing_col, 0, "default on missing column → Default::default()");
+}
+
+#[derive(stalwart::FromRow, Debug)]
+struct WithDefaultOption {
+    id: i32,
+    #[from_row(default)]
+    opt_col: Option<String>,
+}
+
+#[tokio::test]
+async fn test_from_row_default_missing_option_column() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT 1::int4 AS id", &[])
+        .await
+        .unwrap();
+    let row = WithDefaultOption::from_row(&rows[0]).unwrap();
+    assert_eq!(row.id, 1);
+    assert_eq!(row.opt_col, None, "default on missing Option column → None");
+}
+
+#[tokio::test]
+async fn test_from_row_default_null_value() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT 1::int4 AS id, NULL::int4 AS missing_col", &[])
+        .await
+        .unwrap();
+    let row = WithDefault::from_row(&rows[0]).unwrap();
+    assert_eq!(row.id, 1);
+    assert_eq!(row.missing_col, 0, "default on NULL → Default::default()");
+}
+
+// ---------------------------------------------------------------------------
+// FromRow: flatten attribute
+// ---------------------------------------------------------------------------
+
+#[derive(stalwart::FromRow, Debug, PartialEq)]
+struct Inner {
+    name: String,
+}
+
+#[derive(stalwart::FromRow, Debug)]
+struct WithFlatten {
+    id: i32,
+    #[from_row(flatten)]
+    inner: Inner,
+}
+
+#[tokio::test]
+async fn test_from_row_flatten() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT 1::int4 AS id, 'Alice'::text AS name", &[])
+        .await
+        .unwrap();
+    let row = WithFlatten::from_row(&rows[0]).unwrap();
+    assert_eq!(row.id, 1);
+    assert_eq!(row.inner, Inner { name: "Alice".into() });
+}
+
+// ---------------------------------------------------------------------------
+// FromRow: try_from attribute
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+struct NonZeroId(i32);
+
+impl TryFrom<i32> for NonZeroId {
+    type Error = String;
+    fn try_from(v: i32) -> Result<Self, Self::Error> {
+        if v == 0 {
+            Err("id must be non-zero".into())
+        } else {
+            Ok(NonZeroId(v))
+        }
+    }
+}
+
+#[derive(stalwart::FromRow, Debug)]
+struct WithTryFrom {
+    #[from_row(try_from = "i32")]
+    id: NonZeroId,
+    name: String,
+}
+
+#[tokio::test]
+async fn test_from_row_try_from_success() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT 1::int4 AS id, 'Alice'::text AS name", &[])
+        .await
+        .unwrap();
+    let row = WithTryFrom::from_row(&rows[0]).unwrap();
+    assert_eq!(row.id.0, 1);
+    assert_eq!(row.name, "Alice");
+}
+
+#[tokio::test]
+async fn test_from_row_try_from_failure() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT 0::int4 AS id, 'Nobody'::text AS name", &[])
+        .await
+        .unwrap();
+    let err = WithTryFrom::from_row(&rows[0]).unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("try_from"), "expected try_from error, got: {msg}");
+    assert!(msg.contains("non-zero"), "expected validation message, got: {msg}");
+}
+
+// ---------------------------------------------------------------------------
+// FromRow: json attribute
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+struct Metadata {
+    key: String,
+    value: i32,
+}
+
+#[derive(stalwart::FromRow, Debug)]
+struct WithJson {
+    id: i32,
+    #[from_row(json)]
+    meta: Metadata,
+}
+
+#[tokio::test]
+async fn test_from_row_json() {
+    let client = connect().await;
+    let rows = client
+        .query(
+            r#"SELECT 1::int4 AS id, '{"key":"test","value":42}'::jsonb AS meta"#,
+            &[],
+        )
+        .await
+        .unwrap();
+    let row = WithJson::from_row(&rows[0]).unwrap();
+    assert_eq!(row.id, 1);
+    assert_eq!(row.meta, Metadata { key: "test".into(), value: 42 });
+}
+
+#[derive(stalwart::FromRow, Debug)]
+struct WithJsonOption {
+    id: i32,
+    #[from_row(json)]
+    meta: Option<Metadata>,
+}
+
+#[tokio::test]
+async fn test_from_row_json_option_some() {
+    let client = connect().await;
+    let rows = client
+        .query(
+            r#"SELECT 1::int4 AS id, '{"key":"x","value":0}'::jsonb AS meta"#,
+            &[],
+        )
+        .await
+        .unwrap();
+    let row = WithJsonOption::from_row(&rows[0]).unwrap();
+    assert_eq!(row.meta, Some(Metadata { key: "x".into(), value: 0 }));
+}
+
+#[tokio::test]
+async fn test_from_row_json_option_null() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT 1::int4 AS id, NULL::jsonb AS meta", &[])
+        .await
+        .unwrap();
+    let row = WithJsonOption::from_row(&rows[0]).unwrap();
+    assert_eq!(row.meta, None);
+}
+
+// ---------------------------------------------------------------------------
+// FromRow: rename + default combined
+// ---------------------------------------------------------------------------
+
+#[derive(stalwart::FromRow, Debug)]
+struct RenameAndDefault {
+    #[from_row(rename = "user_id")]
+    id: i32,
+    #[from_row(default)]
+    optional_field: i32,
+}
+
+#[tokio::test]
+async fn test_from_row_rename_and_default() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT 42::int4 AS user_id", &[])
+        .await
+        .unwrap();
+    let row = RenameAndDefault::from_row(&rows[0]).unwrap();
+    assert_eq!(row.id, 42);
+    assert_eq!(row.optional_field, 0);
+}
+
+// ---------------------------------------------------------------------------
+// FromRow: try_from with Option
+// ---------------------------------------------------------------------------
+
+#[derive(stalwart::FromRow, Debug)]
+struct WithTryFromOption {
+    #[from_row(try_from = "i32")]
+    id: Option<NonZeroId>,
+    name: String,
+}
+
+#[tokio::test]
+async fn test_from_row_try_from_option_some() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT 5::int4 AS id, 'Alice'::text AS name", &[])
+        .await
+        .unwrap();
+    let row = WithTryFromOption::from_row(&rows[0]).unwrap();
+    assert_eq!(row.id.as_ref().unwrap().0, 5);
+}
+
+#[tokio::test]
+async fn test_from_row_try_from_option_null() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT NULL::int4 AS id, 'Bob'::text AS name", &[])
+        .await
+        .unwrap();
+    let row = WithTryFromOption::from_row(&rows[0]).unwrap();
+    assert!(row.id.is_none());
+}
+
+// ---------------------------------------------------------------------------
 // Integration tests: new array types against real PostgreSQL
 // ---------------------------------------------------------------------------
 

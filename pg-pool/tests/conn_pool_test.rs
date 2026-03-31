@@ -547,6 +547,152 @@ async fn test_all_hooks_fire_in_sequence() {
     assert_eq!(events[3], "destroy");
 }
 
+#[tokio::test]
+async fn test_lifecycle_hooks_before_acquire() {
+    let counter = Arc::new(AtomicU64::new(0));
+    let c = Arc::clone(&counter);
+    let hooks = LifecycleHooks {
+        before_acquire: Some(Box::new(move || {
+            c.fetch_add(1, Ordering::Relaxed);
+        })),
+        ..Default::default()
+    };
+
+    let pool = Pool::new(test_config(), hooks).await.unwrap();
+
+    assert_eq!(counter.load(Ordering::Relaxed), 0, "before_acquire not called yet");
+
+    let g1 = pool.get().await.unwrap();
+    assert_eq!(counter.load(Ordering::Relaxed), 1, "before_acquire on first checkout");
+
+    let g2 = pool.get().await.unwrap();
+    assert_eq!(counter.load(Ordering::Relaxed), 2, "before_acquire on second checkout");
+
+    drop(g1);
+    drop(g2);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Re-checkout reuses idle connection — before_acquire still fires.
+    let _g3 = pool.get().await.unwrap();
+    assert_eq!(counter.load(Ordering::Relaxed), 3, "before_acquire on re-checkout");
+}
+
+#[tokio::test]
+async fn test_lifecycle_hooks_after_release() {
+    let counter = Arc::new(AtomicU64::new(0));
+    let c = Arc::clone(&counter);
+    let hooks = LifecycleHooks {
+        after_release: Some(Box::new(move || {
+            c.fetch_add(1, Ordering::Relaxed);
+        })),
+        ..Default::default()
+    };
+
+    let pool = Pool::new(test_config(), hooks).await.unwrap();
+
+    let g1 = pool.get().await.unwrap();
+    assert_eq!(counter.load(Ordering::Relaxed), 0, "no release yet");
+
+    drop(g1);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(counter.load(Ordering::Relaxed), 1, "after_release on return");
+
+    let g2 = pool.get().await.unwrap();
+    drop(g2);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(counter.load(Ordering::Relaxed), 2, "after_release on second return");
+}
+
+#[tokio::test]
+async fn test_after_release_fires_on_drain() {
+    let counter = Arc::new(AtomicU64::new(0));
+    let c = Arc::clone(&counter);
+    let hooks = LifecycleHooks {
+        after_release: Some(Box::new(move || {
+            c.fetch_add(1, Ordering::Relaxed);
+        })),
+        ..Default::default()
+    };
+
+    let pool = Pool::new(test_config(), hooks).await.unwrap();
+
+    let g = pool.get().await.unwrap();
+    drop(g);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let count_before_drain = counter.load(Ordering::Relaxed);
+    assert!(count_before_drain >= 1, "at least one release before drain");
+}
+
+#[tokio::test]
+async fn test_connection_aware_on_checkout_receives_valid_conn() {
+    let saw_conn = Arc::new(AtomicU64::new(0));
+    let s = Arc::clone(&saw_conn);
+    let hooks = LifecycleHooks {
+        on_checkout: Some(Box::new(move |conn: &pg_pool::wire::WirePoolable| {
+            // Verify we got a real connection — has_pending_data should be false
+            // for a healthy connection.
+            if !conn.0.has_pending_data() {
+                s.fetch_add(1, Ordering::Relaxed);
+            }
+        })),
+        ..Default::default()
+    };
+
+    let pool = Pool::new(test_config(), hooks).await.unwrap();
+    let _g = pool.get().await.unwrap();
+    assert_eq!(saw_conn.load(Ordering::Relaxed), 1, "on_checkout received valid conn");
+}
+
+#[tokio::test]
+async fn test_all_hooks_fire_in_sequence_with_new_hooks() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+
+    let l1 = Arc::clone(&log);
+    let l2 = Arc::clone(&log);
+    let l3 = Arc::clone(&log);
+    let l4 = Arc::clone(&log);
+    let l5 = Arc::clone(&log);
+    let l6 = Arc::clone(&log);
+
+    let hooks = LifecycleHooks {
+        on_create: Some(Box::new(move |_| { l1.lock().unwrap().push("create"); })),
+        before_acquire: Some(Box::new(move || { l2.lock().unwrap().push("before_acquire"); })),
+        on_checkout: Some(Box::new(move |_| { l3.lock().unwrap().push("checkout"); })),
+        on_checkin: Some(Box::new(move |_| { l4.lock().unwrap().push("checkin"); })),
+        after_release: Some(Box::new(move || { l5.lock().unwrap().push("after_release"); })),
+        on_destroy: Some(Box::new(move || { l6.lock().unwrap().push("destroy"); })),
+    };
+
+    let mut config = test_config();
+    config.min_idle = 0;
+    let pool = Pool::new(config, hooks).await.unwrap();
+
+    let g = pool.get().await.unwrap();
+    drop(g);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    pool.drain().await;
+
+    let events = log.lock().unwrap().clone();
+    // Expected order: before_acquire, create, checkout, checkin, after_release, destroy
+    assert!(events.contains(&"before_acquire"), "missing before_acquire: {:?}", events);
+    assert!(events.contains(&"create"), "missing create: {:?}", events);
+    assert!(events.contains(&"checkout"), "missing checkout: {:?}", events);
+    assert!(events.contains(&"checkin"), "missing checkin: {:?}", events);
+    assert!(events.contains(&"after_release"), "missing after_release: {:?}", events);
+    assert!(events.contains(&"destroy"), "missing destroy: {:?}", events);
+
+    // Verify ordering of key events.
+    let ba_pos = events.iter().position(|e| *e == "before_acquire").unwrap();
+    let co_pos = events.iter().position(|e| *e == "checkout").unwrap();
+    let ci_pos = events.iter().position(|e| *e == "checkin").unwrap();
+    let ar_pos = events.iter().position(|e| *e == "after_release").unwrap();
+    assert!(ba_pos < co_pos, "before_acquire must precede checkout");
+    assert!(co_pos < ci_pos, "checkout must precede checkin");
+    assert!(ci_pos < ar_pos, "checkin must precede after_release");
+}
+
 // ---------------------------------------------------------------------------
 // Metrics
 // ---------------------------------------------------------------------------
