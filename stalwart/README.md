@@ -204,6 +204,8 @@ let decoded = Status::decode_text("2")?;  // from text → Inactive
 
 Supported repr types: `#[repr(i16)]` (int2), `#[repr(i32)]` (int4), `#[repr(i64)]` (int8). All variants must have explicit discriminants. Negative values are supported.
 
+**Design note:** sqlx allows `#[sqlx(transparent)]` on `#[repr(i32)]` enums without explicit discriminants, relying on Rust's auto-incrementing discriminant behavior. Stalwart requires explicit discriminants intentionally — implicit discriminants are fragile (reordering variants silently changes database values), and the explicitness makes the database mapping unambiguous and auditable.
+
 ### Composite types
 
 ```rust
@@ -557,3 +559,13 @@ stalwart::migrate::run("postgres://user:pass@localhost/mydb", "migrations").awai
 | `chrono` | yes | `NaiveDate`, `NaiveTime`, `NaiveDateTime`, `DateTime<Utc>` |
 | `json` | yes | `serde_json::Value` for JSON/JSONB |
 | `uuid` | yes | `uuid::Uuid` |
+
+## Design decisions
+
+**PostgreSQL only.** Stalwart does not have an `Any` database abstraction or multi-database support. It is built from the ground up for PostgreSQL — the wire protocol, type system, OID mappings, and query semantics are all PostgreSQL-specific. This is intentional: a single-database library can leverage PostgreSQL features fully (range types, advisory locks, LISTEN/NOTIFY, custom enums, composite types, binary protocol) without lowest-common-denominator abstractions.
+
+**Explicit integer enum discriminants.** Integer-backed enums require `= N` on every variant. This prevents silent breakage when variants are reordered or inserted.
+
+**OID = 0 for custom types.** `PgEnum`, `PgComposite`, and `PgDomain` all set `OID = 0` (Unspecified), letting PostgreSQL infer the type from context (column type, cast, etc.). This avoids requiring users to know or hardcode OIDs, at the cost of less precise error messages when types mismatch.
+
+**Non-consuming Executor.** The `Executor` trait uses `&self` instead of consuming `self`. This is a deliberate departure from sqlx, enabling natural multi-query reuse in generic functions without lifetime gymnastics.

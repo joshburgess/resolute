@@ -121,6 +121,52 @@ impl Client {
         Ok(client)
     }
 
+    /// Look up the OID of a custom PostgreSQL type by name.
+    ///
+    /// Useful for custom enums, composites, and domains where you need the
+    /// actual OID (e.g., for array operations or explicit type casting).
+    ///
+    /// ```ignore
+    /// let mood_oid = client.lookup_type_oid("mood").await?;
+    /// let mood_array_oid = client.lookup_type_oid("_mood").await?; // array type
+    /// ```
+    pub async fn lookup_type_oid(&self, type_name: &str) -> Result<Option<u32>, TypedError> {
+        let rows = self.query(
+            "SELECT oid::int4 FROM pg_type WHERE typname = $1",
+            &[&type_name.to_string()],
+        ).await?;
+        if rows.is_empty() {
+            Ok(None)
+        } else {
+            let oid: i32 = rows[0].get(0)?;
+            Ok(Some(oid as u32))
+        }
+    }
+
+    /// Look up a custom type's OID and its array OID by name.
+    ///
+    /// Returns `(type_oid, array_oid)`. The array type name in PostgreSQL
+    /// is conventionally `_typename` (e.g., `_mood` for `mood[]`).
+    ///
+    /// ```ignore
+    /// let (oid, array_oid) = client.lookup_type_oids("mood").await?;
+    /// println!("mood OID: {oid}, mood[] OID: {array_oid}");
+    /// ```
+    pub async fn lookup_type_oids(&self, type_name: &str) -> Result<(u32, u32), TypedError> {
+        let rows = self.query(
+            "SELECT t.oid::int4, COALESCE(t.typarray, 0)::int4 \
+             FROM pg_type t WHERE t.typname = $1",
+            &[&type_name.to_string()],
+        ).await?;
+        if rows.is_empty() {
+            Err(TypedError::Config(format!("type not found: {type_name}")))
+        } else {
+            let oid: i32 = rows[0].get(0)?;
+            let array_oid: i32 = rows[0].get(1)?;
+            Ok((oid as u32, array_oid as u32))
+        }
+    }
+
     /// Execute a query and return typed rows.
     ///
     /// Parameters are encoded in binary format. Results are requested in binary.
@@ -530,7 +576,7 @@ impl Client {
         self.conn
             .copy_in(copy_sql, data)
             .await
-            .map_err(TypedError::from)
+            .map_err(|e| TypedError::from(e).with_sql(copy_sql))
     }
 
     /// Export data via COPY TO STDOUT.
@@ -545,7 +591,7 @@ impl Client {
         self.conn
             .copy_out(copy_sql)
             .await
-            .map_err(TypedError::from)
+            .map_err(|e| TypedError::from(e).with_sql(copy_sql))
     }
 
     /// Begin a transaction. Returns a `Transaction` guard that

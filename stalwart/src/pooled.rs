@@ -133,7 +133,7 @@ impl PooledTypedClient {
             .0
             .copy_in(copy_sql, data)
             .await
-            .map_err(TypedError::from)
+            .map_err(|e| TypedError::from(e).with_sql(copy_sql))
     }
 
     /// Export data via COPY TO STDOUT.
@@ -143,7 +143,7 @@ impl PooledTypedClient {
             .0
             .copy_out(copy_sql)
             .await
-            .map_err(TypedError::from)
+            .map_err(|e| TypedError::from(e).with_sql(copy_sql))
     }
 
     /// Check if the connection is alive.
