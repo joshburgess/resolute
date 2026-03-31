@@ -1,0 +1,21 @@
+[package]
+name = "pg-pool"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
+tracing = "0.1"
+bytes = "1"
+
+# Optional pg-wire integration
+pg-wire = { path = "../pg-wire", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+bytes = "1"
+pg-wire = { path = "../pg-wire" }
+
+[features]
+default = ["wire"]
+wire = ["pg-wire"]

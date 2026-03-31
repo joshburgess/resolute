@@ -1,0 +1,5 @@
+error: expected 1 parameter(s), got 2
+ --> tests/compile_fail/wrong_param_count.rs:3:30
+  |
+3 |     let _ = stalwart::query!("SELECT $1::int4 AS n", 1i32, 2i32);
+  |                              ^^^^^^^^^^^^^^^^^^^^^^

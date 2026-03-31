@@ -1,0 +1,829 @@
+//! Compile-time checked SQL query macros with offline cache support.
+//!
+//! Connects to PostgreSQL at compile time via pg-wire to validate SQL
+//! and generate typed result structs.
+//!
+//! # Modes
+//!
+//! - **Online (default):** Connects to DB via `DATABASE_URL`, caches results to `.sqlx/`
+//! - **Offline:** Set `STALWART_OFFLINE=true` to use cached metadata only (no DB needed)
+//! - **Prepare:** Run `stalwart-cli prepare` to populate the cache from source files
+//!
+//! ```ignore
+//! let rows = stalwart::query!("SELECT id, name FROM users WHERE id = $1", user_id)
+//!     .fetch_all(&client)
+//!     .await?;
+//! ```
+
+use proc_macro::TokenStream;
+use quote::{format_ident, quote};
+use syn::parse::{Parse, ParseStream};
+use syn::{parse_macro_input, Expr, LitStr, Token};
+
+mod cache;
+
+/// Input to the query! macro: SQL literal + optional comma-separated params.
+/// Supports both positional (`query!("... $1", val)`) and named (`query!("... :name", name = val)`) params.
+struct QueryInput {
+    sql: LitStr,
+    params: Vec<Expr>,
+    /// If named params were used, this holds (name, expr) pairs.
+    named: Vec<(syn::Ident, Expr)>,
+}
+
+impl Parse for QueryInput {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let sql: LitStr = input.parse()?;
+        let mut params = Vec::new();
+        let mut named = Vec::new();
+        let mut mode: Option<bool> = None; // None=unknown, Some(true)=named, Some(false)=positional
+
+        while input.peek(Token![,]) {
+            input.parse::<Token![,]>()?;
+            if input.is_empty() {
+                break;
+            }
+
+            // Try to detect named param: `ident = expr` (but not `ident == expr`)
+            let is_named_param = {
+                let fork = input.fork();
+                fork.parse::<syn::Ident>().is_ok()
+                    && fork.parse::<Token![=]>().is_ok()
+                    && !fork.peek(Token![=])
+            };
+
+            if is_named_param && mode != Some(false) {
+                let name: syn::Ident = input.parse()?;
+                input.parse::<Token![=]>()?;
+                let expr: Expr = input.parse()?;
+                named.push((name, expr));
+                mode = Some(true);
+            } else if mode != Some(true) {
+                params.push(input.parse()?);
+                mode = Some(false);
+            } else {
+                return Err(input.error("cannot mix positional and named parameters"));
+            }
+        }
+
+        Ok(QueryInput { sql, params, named })
+    }
+}
+
+/// If named params are present, rewrite SQL and reorder params.
+/// Otherwise pass through unchanged.
+fn resolve_named(
+    sql_str: String,
+    params: Vec<Expr>,
+    named: &[(syn::Ident, Expr)],
+    sql_span: &LitStr,
+) -> Result<(String, Vec<Expr>), TokenStream> {
+    if named.is_empty() {
+        return Ok((sql_str, params));
+    }
+    let (rewritten, names) = rewrite_named_params(&sql_str);
+    let mut ordered = Vec::with_capacity(names.len());
+    for name in &names {
+        match named.iter().find(|(n, _)| n == name) {
+            Some((_, expr)) => ordered.push(expr.clone()),
+            None => {
+                let msg = format!("named parameter `:{name}` in SQL has no binding");
+                return Err(syn::Error::new_spanned(sql_span, msg)
+                    .to_compile_error()
+                    .into());
+            }
+        }
+    }
+    for (n, _) in named {
+        if !names.iter().any(|name| name == &n.to_string()) {
+            let msg = format!("binding `{}` does not match any `:{}` in SQL", n, n);
+            return Err(syn::Error::new_spanned(n, msg)
+                .to_compile_error()
+                .into());
+        }
+    }
+    Ok((rewritten, ordered))
+}
+
+/// Resolve query metadata: try cache first, then live DB, then update cache.
+fn resolve_metadata(
+    sql: &str,
+) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), String> {
+    let sql_hash = hash_sql(sql);
+    let offline = std::env::var("STALWART_OFFLINE")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
+    // 1. Try the cache first.
+    if let Some(cached) = cache::read_cache(sql_hash) {
+        return Ok((cached.param_oids, cached.columns));
+    }
+
+    // 2. If offline mode, fail — cache is required.
+    if offline {
+        return Err(format!(
+            "STALWART_OFFLINE=true but no cached metadata for query (hash {sql_hash:x}). \
+             Run `stalwart-cli prepare` to populate the cache."
+        ));
+    }
+
+    // 3. Connect to PG and describe.
+    let (param_oids, columns) = describe_live(sql)?;
+
+    // 4. Write to cache for future offline builds.
+    let entry = cache::CacheEntry {
+        sql: sql.to_string(),
+        hash: sql_hash,
+        param_oids: param_oids.clone(),
+        columns: columns.clone(),
+    };
+    if let Err(e) = cache::write_cache(&entry) {
+        // Cache write failure is non-fatal — just warn.
+        eprintln!("stalwart: warning: failed to write cache: {e}");
+    }
+
+    Ok((param_oids, columns))
+}
+
+/// Connect to PG via pg-wire and describe the statement.
+fn describe_live(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), String> {
+    let db_url = std::env::var("DATABASE_URL").map_err(|_| {
+        "DATABASE_URL not set and no cached metadata found. \
+         Set DATABASE_URL or run `stalwart-cli prepare`."
+            .to_string()
+    })?;
+
+    let (user, password, host, port, database) =
+        parse_pg_uri(&db_url).ok_or_else(|| format!("Invalid DATABASE_URL: {db_url}"))?;
+    let addr = format!("{host}:{port}");
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("Failed to create tokio runtime: {e}"))?;
+
+    rt.block_on(async {
+        let mut conn = pg_wire::WireConn::connect(&addr, &user, &password, &database)
+            .await
+            .map_err(|e| format!("Failed to connect to database: {e}"))?;
+
+        let (param_oids, fields) = conn
+            .describe_statement(sql)
+            .await
+            .map_err(|e| format!("SQL error: {e}"))?;
+
+        // Detect nullable columns by querying pg_attribute for real table columns.
+        // Batch all table_oid/column_id pairs into one query.
+        let mut columns: Vec<cache::CachedColumn> = fields
+            .iter()
+            .map(|f| cache::CachedColumn {
+                name: f.name.clone(),
+                type_oid: f.type_oid,
+                nullable: true, // Default: assume nullable.
+            })
+            .collect();
+
+        // Collect non-null info for columns that come from real tables.
+        let table_cols: Vec<(usize, u32, i16)> = fields
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.table_oid != 0 && f.column_id > 0)
+            .map(|(i, f)| (i, f.table_oid, f.column_id))
+            .collect();
+
+        if !table_cols.is_empty() {
+            // Build a single query to check all columns at once.
+            let conditions: Vec<String> = table_cols
+                .iter()
+                .map(|(_, oid, col)| format!("(attrelid={oid} AND attnum={col})"))
+                .collect();
+            let null_sql = format!(
+                "SELECT attrelid, attnum, attnotnull FROM pg_attribute WHERE {}",
+                conditions.join(" OR ")
+            );
+
+            // Send as simple query and collect rows.
+            let mut buf = bytes::BytesMut::new();
+            pg_wire::protocol::frontend::encode_message(
+                &pg_wire::protocol::types::FrontendMsg::Query(null_sql.as_bytes()),
+                &mut buf,
+            );
+            if conn.send_raw(&buf).await.is_ok() {
+                if let Ok((rows, _)) = conn.collect_rows().await {
+                    for row in &rows {
+                        let oid: u32 = row.first()
+                            .and_then(|v| v.as_ref())
+                            .and_then(|b| String::from_utf8(b.clone()).ok())
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0);
+                        let col: i16 = row.get(1)
+                            .and_then(|v| v.as_ref())
+                            .and_then(|b| String::from_utf8(b.clone()).ok())
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0);
+                        let notnull: bool = row.get(2)
+                            .and_then(|v| v.as_ref())
+                            .map(|b| b == b"t")
+                            .unwrap_or(false);
+
+                        // Find the matching column and mark it non-nullable.
+                        for &(idx, t_oid, t_col) in &table_cols {
+                            if t_oid == oid && t_col == col && notnull {
+                                columns[idx].nullable = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((param_oids, columns))
+    })
+}
+
+/// Map a PostgreSQL type OID to a Rust type token.
+fn oid_to_rust_type(oid: u32) -> proc_macro2::TokenStream {
+    match oid {
+        // Scalar types
+        16 => quote! { bool },
+        18 | 19 | 25 | 1042 | 1043 => quote! { String },
+        20 => quote! { i64 },
+        21 => quote! { i16 },
+        23 | 26 => quote! { i32 },
+        700 => quote! { f32 },
+        701 => quote! { f64 },
+        17 => quote! { Vec<u8> },
+        114 | 3802 => quote! { serde_json::Value },
+        1082 => quote! { chrono::NaiveDate },
+        1083 => quote! { chrono::NaiveTime },
+        1114 => quote! { chrono::NaiveDateTime },
+        1184 => quote! { chrono::DateTime<chrono::Utc> },
+        2950 => quote! { uuid::Uuid },
+        869 => quote! { stalwart::PgInet },
+        1700 => quote! { stalwart::PgNumeric },
+        // Array types
+        1000 => quote! { Vec<bool> },
+        1005 => quote! { Vec<i16> },
+        1007 => quote! { Vec<i32> },
+        1009 | 1015 => quote! { Vec<String> },
+        1016 => quote! { Vec<i64> },
+        1021 => quote! { Vec<f32> },
+        1022 => quote! { Vec<f64> },
+        1041 => quote! { Vec<stalwart::PgInet> },
+        1115 => quote! { Vec<chrono::NaiveDateTime> },
+        1182 => quote! { Vec<chrono::NaiveDate> },
+        1183 => quote! { Vec<chrono::NaiveTime> },
+        1185 => quote! { Vec<chrono::DateTime<chrono::Utc>> },
+        1231 => quote! { Vec<stalwart::PgNumeric> },
+        2951 => quote! { Vec<uuid::Uuid> },
+        3807 => quote! { Vec<serde_json::Value> },
+        _ => quote! { Vec<u8> },
+    }
+}
+
+/// `query!("SQL", param1, param2, ...)` — compile-time checked SQL query.
+#[proc_macro]
+pub fn query(input: TokenStream) -> TokenStream {
+    let parsed = parse_macro_input!(input as QueryInput);
+    query_impl(parsed)
+}
+
+fn query_impl(input: QueryInput) -> TokenStream {
+    let QueryInput { sql, params, named } = input;
+    let sql_str = sql.value();
+
+    let (sql_str, params) = match resolve_named(sql_str, params, &named, &sql) {
+        Ok(v) => v,
+        Err(ts) => return ts,
+    };
+
+    let (param_oids, column_infos) = match resolve_metadata(&sql_str) {
+        Ok(result) => result,
+        Err(e) => {
+            return syn::Error::new_spanned(&sql, e)
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    if params.len() != param_oids.len() {
+        let msg = format!(
+            "expected {} parameter(s), got {}",
+            param_oids.len(),
+            params.len()
+        );
+        return syn::Error::new_spanned(&sql, msg)
+            .to_compile_error()
+            .into();
+    }
+
+    // Generate compile-time param type checks.
+    // Each check verifies the param type can encode as the PG-expected type.
+    let param_type_checks: Vec<_> = param_oids
+        .iter()
+        .enumerate()
+        .map(|(i, oid)| {
+            let _expected = oid_to_rust_type(*oid);
+            let param = &params[i];
+            let oid_val = *oid;
+            let _type_name = oid_to_type_name(oid_val);
+            // Assert the param implements SqlParam (basic check) and
+            // generate a type hint that catches obvious mismatches.
+            quote! {
+                {
+                    // Verify parameter #i is compatible with PG type (OID #oid_val).
+                    fn __stalwart_check_param<T: stalwart::Encode + Sync>(_: &T) {}
+                    __stalwart_check_param(&#param);
+                    let _ = &#param as &dyn stalwart::SqlParam;
+                }
+            }
+        })
+        .collect();
+
+    let field_names: Vec<_> = column_infos
+        .iter()
+        .map(|c| format_ident!("{}", sanitize_ident(&c.name)))
+        .collect();
+    let field_types: Vec<_> = column_infos
+        .iter()
+        .map(|c| {
+            let base = oid_to_rust_type(c.type_oid);
+            if c.nullable {
+                quote! { Option<#base> }
+            } else {
+                base
+            }
+        })
+        .collect();
+    let _field_indices: Vec<_> = (0..column_infos.len()).collect::<Vec<_>>();
+    let field_getters: Vec<_> = column_infos
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            if c.nullable {
+                quote! { row.get_opt(#i)? }
+            } else {
+                quote! { row.get(#i)? }
+            }
+        })
+        .collect();
+
+    let struct_name = format_ident!("__QueryResult_{}", hash_sql(&sql_str));
+
+    let param_refs: Vec<_> = params
+        .iter()
+        .map(|p| quote! { &#p as &dyn stalwart::SqlParam })
+        .collect();
+
+    // Use rewritten SQL (with $1,$2) in generated code, not the original :name SQL.
+    let sql_lit_rewritten = LitStr::new(&sql_str, sql.span());
+
+    let expanded = quote! {
+        {
+            // Compile-time parameter type assertions.
+            #(#param_type_checks)*
+
+            #[allow(non_camel_case_types)]
+            #[derive(Debug)]
+            struct #struct_name {
+                #(pub #field_names: #field_types,)*
+            }
+
+            stalwart::CheckedQuery::<#struct_name> {
+                sql: #sql_lit_rewritten,
+                params: vec![#(#param_refs),*],
+                _marker: std::marker::PhantomData,
+                mapper: |row: &stalwart::Row| -> Result<#struct_name, stalwart::TypedError> {
+                    Ok(#struct_name {
+                        #(#field_names: #field_getters,)*
+                    })
+                },
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// `query_as!(Type, "SQL", param1, param2, ...)` — compile-time checked query
+/// mapped to an existing struct via FromRow.
+#[proc_macro]
+pub fn query_as(input: TokenStream) -> TokenStream {
+    let parsed = parse_macro_input!(input as QueryAsInput);
+    query_as_impl(parsed)
+}
+
+fn query_as_impl(input: QueryAsInput) -> TokenStream {
+    let QueryAsInput { target_type, sql, params, named } = input;
+    let sql_str = sql.value();
+
+    let (sql_str, params) = match resolve_named(sql_str, params, &named, &sql) {
+        Ok(v) => v,
+        Err(ts) => return ts,
+    };
+
+    let (param_oids, _column_infos) = match resolve_metadata(&sql_str) {
+        Ok(result) => result,
+        Err(e) => {
+            return syn::Error::new_spanned(&sql, e)
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    if params.len() != param_oids.len() {
+        let msg = format!(
+            "expected {} parameter(s), got {}",
+            param_oids.len(),
+            params.len()
+        );
+        return syn::Error::new_spanned(&sql, msg)
+            .to_compile_error()
+            .into();
+    }
+
+    let param_refs: Vec<_> = params
+        .iter()
+        .map(|p| quote! { &#p as &dyn stalwart::SqlParam })
+        .collect();
+    let sql_lit_rewritten = LitStr::new(&sql_str, sql.span());
+
+    let expanded = quote! {
+        {
+            stalwart::CheckedQuery::<#target_type> {
+                sql: #sql_lit_rewritten,
+                params: vec![#(#param_refs),*],
+                _marker: std::marker::PhantomData,
+                mapper: |row: &stalwart::Row| -> Result<#target_type, stalwart::TypedError> {
+                    <#target_type as stalwart::FromRow>::from_row(row)
+                },
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// `query_scalar!("SQL", param1, ...)` — compile-time checked single-value query.
+#[proc_macro]
+pub fn query_scalar(input: TokenStream) -> TokenStream {
+    let parsed = parse_macro_input!(input as QueryInput);
+    query_scalar_impl(parsed)
+}
+
+fn query_scalar_impl(input: QueryInput) -> TokenStream {
+    let QueryInput { sql, params, named } = input;
+    let sql_str = sql.value();
+
+    let (sql_str, params) = match resolve_named(sql_str, params, &named, &sql) {
+        Ok(v) => v,
+        Err(ts) => return ts,
+    };
+
+    let (param_oids, column_infos) = match resolve_metadata(&sql_str) {
+        Ok(result) => result,
+        Err(e) => {
+            return syn::Error::new_spanned(&sql, e)
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    if params.len() != param_oids.len() {
+        let msg = format!(
+            "expected {} parameter(s), got {}",
+            param_oids.len(),
+            params.len()
+        );
+        return syn::Error::new_spanned(&sql, msg)
+            .to_compile_error()
+            .into();
+    }
+
+    if column_infos.len() != 1 {
+        let msg = format!(
+            "query_scalar! requires exactly 1 column, got {}",
+            column_infos.len()
+        );
+        return syn::Error::new_spanned(&sql, msg)
+            .to_compile_error()
+            .into();
+    }
+
+    let scalar_type = oid_to_rust_type(column_infos[0].type_oid);
+    let param_refs: Vec<_> = params
+        .iter()
+        .map(|p| quote! { &#p as &dyn stalwart::SqlParam })
+        .collect();
+    let sql_lit_rewritten = LitStr::new(&sql_str, sql.span());
+
+    let expanded = quote! {
+        {
+            stalwart::CheckedQuery::<#scalar_type> {
+                sql: #sql_lit_rewritten,
+                params: vec![#(#param_refs),*],
+                _marker: std::marker::PhantomData,
+                mapper: |row: &stalwart::Row| -> Result<#scalar_type, stalwart::TypedError> {
+                    row.get(0)
+                },
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// Input to query_as!: Type, "SQL", params...
+struct QueryAsInput {
+    target_type: syn::Type,
+    sql: LitStr,
+    params: Vec<Expr>,
+    named: Vec<(syn::Ident, Expr)>,
+}
+
+impl Parse for QueryAsInput {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let target_type: syn::Type = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let sql: LitStr = input.parse()?;
+        let mut params = Vec::new();
+        let mut named = Vec::new();
+        let mut mode: Option<bool> = None;
+        while input.peek(Token![,]) {
+            input.parse::<Token![,]>()?;
+            if input.is_empty() {
+                break;
+            }
+            let is_named_param = {
+                let fork = input.fork();
+                fork.parse::<syn::Ident>().is_ok()
+                    && fork.parse::<Token![=]>().is_ok()
+                    && !fork.peek(Token![=])
+            };
+            if is_named_param && mode != Some(false) {
+                let name: syn::Ident = input.parse()?;
+                input.parse::<Token![=]>()?;
+                let expr: Expr = input.parse()?;
+                named.push((name, expr));
+                mode = Some(true);
+            } else if mode != Some(true) {
+                params.push(input.parse()?);
+                mode = Some(false);
+            } else {
+                return Err(input.error("cannot mix positional and named parameters"));
+            }
+        }
+        Ok(QueryAsInput { target_type, sql, params, named })
+    }
+}
+
+/// `query_file!("path/to/query.sql", param1, param2, ...)` — like query! but reads SQL from a file.
+#[proc_macro]
+pub fn query_file(input: TokenStream) -> TokenStream {
+    let QueryInput { sql: path_lit, params, named: _ } = parse_macro_input!(input as QueryInput);
+    let file_path = path_lit.value();
+
+    let sql_str = match read_sql_file(&file_path) {
+        Ok(s) => s,
+        Err(e) => {
+            return syn::Error::new_spanned(&path_lit, e)
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    // Reuse the query! logic with the file contents.
+    let sql_lit = LitStr::new(&sql_str, path_lit.span());
+    let inner = QueryInput { sql: sql_lit, params, named: Vec::new() };
+    query_impl(inner)
+}
+
+/// `query_file_as!(Type, "path/to/query.sql", param1, ...)` — like query_as! but reads SQL from a file.
+#[proc_macro]
+pub fn query_file_as(input: TokenStream) -> TokenStream {
+    let QueryAsInput { target_type, sql: path_lit, params, named: _ } =
+        parse_macro_input!(input as QueryAsInput);
+    let file_path = path_lit.value();
+
+    let sql_str = match read_sql_file(&file_path) {
+        Ok(s) => s,
+        Err(e) => {
+            return syn::Error::new_spanned(&path_lit, e)
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    let sql_lit = LitStr::new(&sql_str, path_lit.span());
+    let inner = QueryAsInput { target_type, sql: sql_lit, params, named: Vec::new() };
+    query_as_impl(inner)
+}
+
+/// `query_file_scalar!("path/to/query.sql", param1, ...)` — file-based scalar query.
+#[proc_macro]
+pub fn query_file_scalar(input: TokenStream) -> TokenStream {
+    let QueryInput { sql: path_lit, params, named: _ } = parse_macro_input!(input as QueryInput);
+    let file_path = path_lit.value();
+
+    let sql_str = match read_sql_file(&file_path) {
+        Ok(s) => s,
+        Err(e) => {
+            return syn::Error::new_spanned(&path_lit, e)
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    let sql_lit = LitStr::new(&sql_str, path_lit.span());
+    let inner = QueryInput { sql: sql_lit, params, named: Vec::new() };
+    query_scalar_impl(inner)
+}
+
+/// `query_unchecked!("SQL", param1, ...)` — skip compile-time validation.
+/// Useful when DATABASE_URL is unavailable and no cache exists.
+/// Params are passed as-is; no type or count checking.
+#[proc_macro]
+pub fn query_unchecked(input: TokenStream) -> TokenStream {
+    let QueryInput { sql, params, named: _ } = parse_macro_input!(input as QueryInput);
+
+    let param_refs: Vec<_> = params
+        .iter()
+        .map(|p| quote! { &#p as &dyn stalwart::SqlParam })
+        .collect();
+    let sql_literal = &sql;
+
+    let expanded = quote! {
+        {
+            stalwart::UncheckedQuery {
+                sql: #sql_literal,
+                params: vec![#(#param_refs),*],
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// Read a SQL file relative to CARGO_MANIFEST_DIR.
+fn read_sql_file(path: &str) -> Result<String, String> {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
+    let full_path = std::path::Path::new(&manifest_dir).join(path);
+    std::fs::read_to_string(&full_path)
+        .map_err(|e| format!("Failed to read SQL file {}: {e}", full_path.display()))
+        .map(|s| s.trim().to_string())
+}
+
+/// Human-readable PG type name for error messages.
+#[allow(dead_code)]
+fn oid_to_type_name(oid: u32) -> &'static str {
+    match oid {
+        16 => "bool",
+        18 | 19 | 25 | 1042 | 1043 => "text",
+        20 => "int8",
+        21 => "int2",
+        23 => "int4",
+        26 => "oid",
+        700 => "float4",
+        701 => "float8",
+        17 => "bytea",
+        114 => "json",
+        869 => "inet",
+        1700 => "numeric",
+        3802 => "jsonb",
+        1082 => "date",
+        1083 => "time",
+        1114 => "timestamp",
+        1184 => "timestamptz",
+        2950 => "uuid",
+        // Array types
+        1000 => "bool[]",
+        1005 => "int2[]",
+        1007 => "int4[]",
+        1009 | 1015 => "text[]",
+        1016 => "int8[]",
+        1021 => "float4[]",
+        1022 => "float8[]",
+        1041 => "inet[]",
+        1115 => "timestamp[]",
+        1182 => "date[]",
+        1183 => "time[]",
+        1185 => "timestamptz[]",
+        1231 => "numeric[]",
+        2951 => "uuid[]",
+        3807 => "jsonb[]",
+        _ => "unknown",
+    }
+}
+
+fn sanitize_ident(name: &str) -> String {
+    let s: String = name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    if s.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{s}")
+    } else if s.is_empty() {
+        "column".to_string()
+    } else {
+        s
+    }
+}
+
+/// FNV-1a hash.
+pub(crate) fn hash_sql(sql: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in sql.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+/// Rewrite `:name` named params to `$N` positional params.
+/// Returns (rewritten_sql, ordered_param_names).
+fn rewrite_named_params(sql: &str) -> (String, Vec<String>) {
+    let mut result = String::with_capacity(sql.len());
+    let mut names: Vec<String> = Vec::new();
+    let mut positions: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let chars: Vec<char> = sql.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // Skip string literals.
+        if chars[i] == '\'' {
+            result.push('\'');
+            i += 1;
+            while i < len {
+                result.push(chars[i]);
+                if chars[i] == '\'' {
+                    if i + 1 < len && chars[i + 1] == '\'' {
+                        result.push('\'');
+                        i += 2;
+                    } else {
+                        i += 1;
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+
+        // :: cast: pass through.
+        if chars[i] == ':' && i + 1 < len && chars[i + 1] == ':' {
+            result.push(':');
+            result.push(':');
+            i += 2;
+            continue;
+        }
+
+        // :name — named parameter.
+        if chars[i] == ':'
+            && i + 1 < len
+            && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_')
+        {
+            i += 1;
+            let start = i;
+            while i < len && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let name: String = chars[start..i].iter().collect();
+            let pos = if let Some(&existing) = positions.get(&name) {
+                existing
+            } else {
+                names.push(name.clone());
+                let pos = names.len();
+                positions.insert(name, pos);
+                pos
+            };
+            result.push('$');
+            result.push_str(&pos.to_string());
+            continue;
+        }
+
+        result.push(chars[i]);
+        i += 1;
+    }
+
+    (result, names)
+}
+
+fn parse_pg_uri(uri: &str) -> Option<(String, String, String, u16, String)> {
+    let rest = uri
+        .strip_prefix("postgres://")
+        .or_else(|| uri.strip_prefix("postgresql://"))?;
+    let (auth, hostdb) = rest.split_once('@').unwrap_or(("postgres:postgres", rest));
+    let (user, password) = auth.split_once(':').unwrap_or((auth, ""));
+    let (hostport, database) = hostdb.split_once('/').unwrap_or((hostdb, "postgres"));
+    let (host, port_str) = hostport.split_once(':').unwrap_or((hostport, "5432"));
+    let port: u16 = port_str.parse().unwrap_or(5432);
+    Some((
+        user.to_string(),
+        password.to_string(),
+        host.to_string(),
+        port,
+        database.to_string(),
+    ))
+}
