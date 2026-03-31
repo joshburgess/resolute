@@ -16,6 +16,8 @@ pub struct WireConn {
     recv_buf: BytesMut,
     pub pid: i32,
     pub secret: i32,
+    /// Server parameters received during startup (server_version, server_encoding, etc.).
+    pub params: std::collections::HashMap<String, String>,
 }
 
 const RECV_BUF_SIZE: usize = 32 * 1024; // 32KB recv buffer
@@ -50,6 +52,7 @@ impl WireConn {
             recv_buf: BytesMut::with_capacity(RECV_BUF_SIZE),
             pid: 0,
             secret: 0,
+            params: std::collections::HashMap::new(),
         };
 
         // Send startup message.
@@ -125,7 +128,10 @@ impl WireConn {
                         }
                     }
                 }
-                BackendMsg::ParameterStatus { .. } => {} // Collect if needed
+                BackendMsg::ParameterStatus { name, value } => {
+                    tracing::debug!(name = %name, value = %value, "server parameter");
+                    conn.params.insert(name, value);
+                }
                 BackendMsg::BackendKeyData { pid, secret } => {
                     conn.pid = pid;
                     conn.secret = secret;
@@ -164,6 +170,12 @@ impl WireConn {
             // Not enough data — read more from the socket.
             let n = self.stream.read_buf(&mut self.recv_buf).await?;
             if n == 0 {
+                // EOF — try to parse any remaining buffered data before giving up.
+                if let Some(msg) = backend::parse_message(&mut self.recv_buf)
+                    .map_err(PgWireError::Protocol)?
+                {
+                    return Ok(msg);
+                }
                 return Err(PgWireError::ConnectionClosed);
             }
         }

@@ -152,7 +152,10 @@ fn parse_data_row(body: &[u8]) -> Result<Option<BackendMsg>, String> {
     if body.len() < 2 {
         return Err("DataRow: body too short for column count".into());
     }
-    let num_cols = i16::from_be_bytes([body[0], body[1]]) as usize;
+    let num_cols = i16_to_usize(
+        i16::from_be_bytes([body[0], body[1]]),
+        "DataRow",
+    )?;
     let mut columns = Vec::with_capacity(num_cols);
     let mut offset = 2;
 
@@ -194,7 +197,10 @@ fn parse_row_description(body: &[u8]) -> Result<Option<BackendMsg>, String> {
     if body.len() < 2 {
         return Err("RowDescription: body too short for field count".into());
     }
-    let num_fields = i16::from_be_bytes([body[0], body[1]]) as usize;
+    let num_fields = i16_to_usize(
+        i16::from_be_bytes([body[0], body[1]]),
+        "RowDescription",
+    )?;
     let mut fields = Vec::with_capacity(num_fields);
     let mut offset = 2;
 
@@ -250,7 +256,10 @@ fn parse_parameter_description(body: &[u8]) -> Result<Option<BackendMsg>, String
     if body.len() < 2 {
         return Err("ParameterDescription: body too short for param count".into());
     }
-    let num_params = i16::from_be_bytes([body[0], body[1]]) as usize;
+    let num_params = i16_to_usize(
+        i16::from_be_bytes([body[0], body[1]]),
+        "ParameterDescription",
+    )?;
     if body.len() < 2 + num_params * 4 {
         return Err(format!(
             "ParameterDescription: body too short for {num_params} params (need {}, have {})",
@@ -294,7 +303,10 @@ fn parse_copy_response(body: &[u8], is_in: bool) -> Result<Option<BackendMsg>, S
         return Err("CopyResponse: body too short".into());
     }
     let format = body[0];
-    let num_cols = i16::from_be_bytes([body[1], body[2]]) as usize;
+    let num_cols = i16_to_usize(
+        i16::from_be_bytes([body[1], body[2]]),
+        "CopyResponse",
+    )?;
     if body.len() < 3 + num_cols * 2 {
         return Err(format!(
             "CopyResponse: body too short for {num_cols} column formats"
@@ -347,6 +359,15 @@ fn parse_error_or_notice(body: &[u8]) -> Result<PgError, String> {
     }
 
     Ok(err)
+}
+
+/// Convert i16 to usize, rejecting negative values.
+fn i16_to_usize(val: i16, context: &str) -> Result<usize, String> {
+    if val < 0 {
+        Err(format!("{context}: negative count {val}"))
+    } else {
+        Ok(val as usize)
+    }
 }
 
 /// Split a null-terminated string from a byte slice.

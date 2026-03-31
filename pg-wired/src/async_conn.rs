@@ -131,7 +131,7 @@ impl AsyncConn {
             .map(|a| a.to_string())
             .unwrap_or_default();
 
-        let (notification_tx, notification_rx) = mpsc::channel(256);
+        let (notification_tx, notification_rx) = mpsc::channel(4096);
         let (request_tx, request_rx) = mpsc::channel::<PipelineRequest>(256);
         let pending: Arc<Mutex<VecDeque<PendingResponse>>> =
             Arc::new(Mutex::new(VecDeque::new()));
@@ -428,10 +428,12 @@ impl AsyncConn {
 
         frontend::encode_message(&FrontendMsg::Sync, &mut buf);
 
-        // 3. Simple query for COMMIT.
-        frontend::encode_message(&FrontendMsg::Query(b"COMMIT"), &mut buf);
-
         let data_msgs = buf.split();
+
+        // 3. Simple query for COMMIT — in its own buffer so each request
+        // carries exactly the bytes that produce its ReadyForQuery response.
+        let mut commit_buf = BytesMut::with_capacity(32);
+        frontend::encode_message(&FrontendMsg::Query(b"COMMIT"), &mut commit_buf);
 
         // Submit all three as separate requests with different collectors.
         // They'll be coalesced by the writer into one write() syscall.
@@ -461,7 +463,7 @@ impl AsyncConn {
 
         self.request_tx
             .send(PipelineRequest {
-                messages: BytesMut::new(), // COMMIT already in data_msgs
+                messages: commit_buf,
                 collector: ResponseCollector::Drain,
                 response_tx: commit_tx,
             })
@@ -671,6 +673,12 @@ async fn read_msg(
         }
         let n = stream.read_buf(buf).await?;
         if n == 0 {
+            // EOF — try to parse any remaining data in the buffer before giving up.
+            // This handles the case where the last message arrived just before the
+            // connection closed and is already fully buffered.
+            if let Some(msg) = backend::parse_message(buf).map_err(PgWireError::Protocol)? {
+                return Ok(msg);
+            }
             return Err(PgWireError::ConnectionClosed);
         }
     }
@@ -699,7 +707,9 @@ async fn collect_rows(
             }
             msg @ BackendMsg::NotificationResponse { .. } => {
                 // Forward notification instead of dropping.
-                let _ = notification_tx.try_send(msg);
+                if notification_tx.try_send(msg).is_err() {
+                    tracing::warn!("notification channel full — dropping notification");
+                }
             }
             BackendMsg::ParseComplete
             | BackendMsg::BindComplete
