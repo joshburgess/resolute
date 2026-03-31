@@ -1,7 +1,7 @@
-//! Basic integration tests for pg-wire.
+//! Basic integration tests for pg-wired.
 //! Requires: docker compose up -d (PostgreSQL on port 54322)
 
-use pg_wire::{PgPipeline, WireConn};
+use pg_wired::{PgPipeline, WireConn};
 
 const ADDR: &str = "127.0.0.1:54322";
 const USER: &str = "postgres";

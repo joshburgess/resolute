@@ -6,7 +6,7 @@ A ground-up PostgreSQL client stack for Rust. Compile-time checked queries, bina
 
 | Crate | Description |
 |-------|-------------|
-| **pg-wire** | PostgreSQL wire protocol v3. Async connections, extended query protocol (Parse/Bind/Describe/Execute/Sync), binary format, statement caching, pipelining, LISTEN/NOTIFY, COPY, cancellation, optional TLS (rustls). |
+| **pg-wired** | PostgreSQL wire protocol v3. Async connections, extended query protocol (Parse/Bind/Describe/Execute/Sync), binary format, statement caching, pipelining, LISTEN/NOTIFY, COPY, cancellation, optional TLS (rustls). |
 | **pg-pool** | Generic async connection pool. Checkout/checkin, lifecycle hooks, idle timeout, health monitoring, metrics, min/max connections, drain. Works with any connection type via the `Poolable` trait. |
 | **stalwart** | Compile-time checked queries. 7 query macros (`query!`, `query_as!`, `query_scalar!`, `query_file!`, `query_file_as!`, `query_file_scalar!`, `query_unchecked!`), `Executor` trait, `atomic()` with savepoint nesting, named params, `FromRow`/`PgEnum`/`PgComposite`/`PgDomain` derives, `TypedPool`, `PgListener`, streaming, pipelining, COPY, retry, auto-reconnect, metrics. |
 | **stalwart-derive** | Proc-macro crate. `FromRow`, `PgEnum`, `PgComposite`, `PgDomain` derives and `#[stalwart::test]` attribute macro. |
@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Why Stalwart
 
-**Owns the full stack.** Most Rust database libraries build on top of tokio-postgres or a shared protocol layer. Stalwart implements the PostgreSQL wire protocol from scratch (`pg-wire`), the connection pool from scratch (`pg-pool`), and the typed query layer on top. This means fewer transitive dependencies, fewer abstraction layers, and full control over performance.
+**Owns the full stack.** Most Rust database libraries build on top of tokio-postgres or a shared protocol layer. Stalwart implements the PostgreSQL wire protocol from scratch (`pg-wired`), the connection pool from scratch (`pg-pool`), and the typed query layer on top. This means fewer transitive dependencies, fewer abstraction layers, and full control over performance.
 
 **Non-consuming Executor.** sqlx's `Executor` trait consumes `self`, making it awkward to run multiple queries on the same generic executor. Stalwart's `Executor` uses `&self` — write a function once, call it with a `Client`, `Transaction`, or `Pool`.
 
@@ -55,11 +55,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 stalwart          ── query macros, Executor trait, typed API
   ├── stalwart-derive  ── proc-macro derives
   ├── stalwart-macros  ── compile-time query validation
-  ├── pg-wire          ── PostgreSQL wire protocol v3
+  ├── pg-wired          ── PostgreSQL wire protocol v3
   └── pg-pool          ── generic async connection pool
 
 stalwart-cli      ── offline cache + migrations CLI
-  └── pg-wire
+  └── pg-wired
 ```
 
 ## Performance
@@ -85,7 +85,7 @@ Run benchmarks: `cargo bench -p stalwart`
 | `json` | yes | `serde_json::Value` for JSON/JSONB |
 | `uuid` | yes | `uuid::Uuid` |
 
-pg-wire has an optional `tls` feature for rustls-based TLS connections.
+pg-wired has an optional `tls` feature for rustls-based TLS connections.
 
 ## Documentation
 

@@ -1,4 +1,4 @@
-//! Typed query client built on pg-wire AsyncConn.
+//! Typed query client built on pg-wired AsyncConn.
 //!
 //! Sends queries with binary format parameters and results,
 //! returning typed Rows instead of raw bytes.
@@ -9,9 +9,9 @@ use std::task::{Context, Poll};
 use bytes::BytesMut;
 use tokio::sync::mpsc;
 
-use pg_wire::protocol::frontend;
-use pg_wire::protocol::types::{FormatCode, FrontendMsg};
-use pg_wire::{AsyncConn, PipelineResponse, ResponseCollector, WireConn};
+use pg_wired::protocol::frontend;
+use pg_wired::protocol::types::{FormatCode, FrontendMsg};
+use pg_wired::{AsyncConn, PipelineResponse, ResponseCollector, WireConn};
 
 use crate::encode::SqlParam;
 use crate::error::TypedError;
@@ -177,7 +177,7 @@ impl Client {
             param_values.push(p.encode_param_value());
         }
 
-        // Convert to the wire format expected by pg-wire.
+        // Convert to the wire format expected by pg-wired.
         let param_refs: Vec<Option<&[u8]>> = param_values
             .iter()
             .map(|v| v.as_ref().map(|b| b.as_ref()))
@@ -515,7 +515,7 @@ impl Client {
     /// Send a simple text query (no params, no binary format).
     /// Used for BEGIN/COMMIT/ROLLBACK and DDL.
     pub async fn simple_query(&self, sql: &str) -> Result<(), TypedError> {
-        use pg_wire::protocol::types::FrontendMsg;
+        use pg_wired::protocol::types::FrontendMsg;
         let mut buf = BytesMut::new();
         frontend::encode_message(&FrontendMsg::Query(sql.as_bytes()), &mut buf);
         let _resp = self.conn.submit(buf, ResponseCollector::Drain).await?;
@@ -609,8 +609,8 @@ impl Client {
     /// });
     /// client.query("SELECT pg_sleep(60)", &[]).await; // cancelled after 5s
     /// ```
-    pub fn cancel_token(&self) -> pg_wire::CancelToken {
-        pg_wire::CancelToken {
+    pub fn cancel_token(&self) -> pg_wired::CancelToken {
+        pg_wired::CancelToken {
             addr: self.conn.addr.clone(),
             pid: self.conn.backend_pid,
             secret: self.conn.backend_secret,
@@ -904,7 +904,7 @@ impl Client {
 /// Implements `tokio_stream::Stream<Item = Result<Row, TypedError>>` for
 /// row-at-a-time consumption without buffering the entire result set.
 pub struct RowStream {
-    row_rx: mpsc::Receiver<Result<Vec<Option<Vec<u8>>>, pg_wire::PgWireError>>,
+    row_rx: mpsc::Receiver<Result<Vec<Option<Vec<u8>>>, pg_wired::PgWireError>>,
     columns: Vec<String>,
     type_oids: Vec<u32>,
     formats: Vec<i16>,
@@ -949,8 +949,8 @@ fn truncate_sql(sql: &str) -> String {
 /// evicted and re-prepared. PG error codes:
 /// - 26000: "prepared statement does not exist"
 /// - 0A000: "feature not supported" (can happen with statement invalidation)
-fn is_stale_statement_error(e: &pg_wire::PgWireError) -> bool {
-    if let pg_wire::PgWireError::Pg(ref pg_err) = e {
+fn is_stale_statement_error(e: &pg_wired::PgWireError) -> bool {
+    if let pg_wired::PgWireError::Pg(ref pg_err) = e {
         matches!(pg_err.code.as_str(), "26000" | "0A000")
     } else {
         false

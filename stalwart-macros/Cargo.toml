@@ -10,7 +10,7 @@ proc-macro = true
 syn = { version = "2", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
-pg-wire = { path = "../pg-wire" }
+pg-wired = { path = "../pg-wired" }
 bytes = "1"
 tokio = { version = "1", features = ["rt", "net"] }
 serde = { version = "1", features = ["derive"] }

@@ -5,7 +5,7 @@
 //! stalwart::migrate::run("postgres://user:pass@localhost/db", "migrations").await?;
 //! ```
 
-use pg_wire::{PgPipeline, WireConn};
+use pg_wired::{PgPipeline, WireConn};
 
 use crate::error::TypedError;
 

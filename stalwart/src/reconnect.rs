@@ -150,7 +150,7 @@ fn is_connection_error(e: &TypedError) -> bool {
     match e {
         TypedError::Wire(wire_err) => matches!(
             wire_err.as_ref(),
-            pg_wire::PgWireError::Io(_) | pg_wire::PgWireError::ConnectionClosed
+            pg_wired::PgWireError::Io(_) | pg_wired::PgWireError::ConnectionClosed
         ),
         _ => false,
     }

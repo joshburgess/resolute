@@ -26,7 +26,7 @@ impl TypedPool {
     pub async fn new(
         config: ConnPoolConfig,
         hooks: LifecycleHooks,
-    ) -> Result<Self, PoolError<pg_wire::PgWireError>> {
+    ) -> Result<Self, PoolError<pg_wired::PgWireError>> {
         let pool = ConnPool::new(config, hooks).await?;
         Ok(Self { pool })
     }
@@ -38,7 +38,7 @@ impl TypedPool {
         password: &str,
         database: &str,
         max_size: usize,
-    ) -> Result<Self, PoolError<pg_wire::PgWireError>> {
+    ) -> Result<Self, PoolError<pg_wired::PgWireError>> {
         let config = ConnPoolConfig {
             addr: addr.to_string(),
             user: user.to_string(),
@@ -98,7 +98,7 @@ pub struct PooledTypedClient {
 
 impl PooledTypedClient {
     /// Access the underlying `AsyncConn` for direct use.
-    pub fn conn(&self) -> &pg_wire::AsyncConn {
+    pub fn conn(&self) -> &pg_wired::AsyncConn {
         &self.guard.conn().0
     }
 

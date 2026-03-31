@@ -4,7 +4,7 @@
 //! Features: waiter queue with dead-waiter skipping, jittered max-life,
 //! health checks on checkout, lifecycle hooks, graceful drain, and metrics.
 //!
-//! # Example with pg-wire (requires `wire` feature)
+//! # Example with pg-wired (requires `wire` feature)
 //!
 //! ```ignore
 //! use pg_pool::{ConnPool, ConnPoolConfig, LifecycleHooks};

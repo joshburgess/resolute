@@ -8,14 +8,14 @@ tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 tracing = "0.1"
 bytes = "1"
 
-# Optional pg-wire integration
-pg-wire = { path = "../pg-wire", optional = true }
+# Optional pg-wired integration
+pg-wired = { path = "../pg-wired", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 bytes = "1"
-pg-wire = { path = "../pg-wire" }
+pg-wired = { path = "../pg-wired" }
 
 [features]
 default = ["wire"]
-wire = ["pg-wire"]
+wire = ["pg-wired"]

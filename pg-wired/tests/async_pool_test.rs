@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use pg_wire::{AsyncPool, WireConn};
+use pg_wired::{AsyncPool, WireConn};
 
 const ADDR: &str = "127.0.0.1:54322";
 const USER: &str = "postgres";
@@ -735,11 +735,11 @@ fn col_str(col: &Option<Vec<u8>>) -> String {
 
 async fn kill_backend(conn: &mut WireConn, pid: i32) {
     use bytes::BytesMut;
-    use pg_wire::protocol::types::FrontendMsg;
+    use pg_wired::protocol::types::FrontendMsg;
 
     let sql = format!("SELECT pg_terminate_backend({pid})");
     let mut buf = BytesMut::new();
-    pg_wire::protocol::frontend::encode_message(
+    pg_wired::protocol::frontend::encode_message(
         &FrontendMsg::Query(sql.as_bytes()),
         &mut buf,
     );

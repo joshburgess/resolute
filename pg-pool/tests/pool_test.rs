@@ -1,4 +1,4 @@
-//! Integration tests for pg-pool with pg-wire backend.
+//! Integration tests for pg-pool with pg-wired backend.
 //! Requires: docker compose up -d (PostgreSQL on port 54322)
 
 use std::sync::Arc;

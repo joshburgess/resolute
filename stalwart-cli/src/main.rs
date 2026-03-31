@@ -199,7 +199,7 @@ async fn prepare(
     println!("Found {} query!() invocations", queries.len());
 
     // Connect to PG.
-    let mut conn = pg_wire::WireConn::connect(&addr, &user, &password, &database).await?;
+    let mut conn = pg_wired::WireConn::connect(&addr, &user, &password, &database).await?;
     println!("Connected to {database}@{host}:{port}");
 
     // Create .sqlx directory.
@@ -259,7 +259,7 @@ async fn check(database_url: &str) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let mut conn = pg_wire::WireConn::connect(&addr, &user, &password, &database).await?;
+    let mut conn = pg_wired::WireConn::connect(&addr, &user, &password, &database).await?;
     println!("Connected to {database}@{host}:{port}");
 
     let mut ok = 0;

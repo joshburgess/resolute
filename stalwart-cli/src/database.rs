@@ -3,7 +3,7 @@
 //! Connects to the `postgres` maintenance database to issue
 //! CREATE DATABASE / DROP DATABASE statements.
 
-use pg_wire::{PgPipeline, WireConn};
+use pg_wired::{PgPipeline, WireConn};
 
 /// Create a database if it doesn't already exist.
 pub async fn create(database_url: &str) -> Result<(), Box<dyn std::error::Error>> {

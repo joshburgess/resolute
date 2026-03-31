@@ -1,6 +1,6 @@
 //! Compile-time checked SQL query macros with offline cache support.
 //!
-//! Connects to PostgreSQL at compile time via pg-wire to validate SQL
+//! Connects to PostgreSQL at compile time via pg-wired to validate SQL
 //! and generate typed result structs.
 //!
 //! # Modes
@@ -145,7 +145,7 @@ fn resolve_metadata(
     Ok((param_oids, columns))
 }
 
-/// Connect to PG via pg-wire and describe the statement.
+/// Connect to PG via pg-wired and describe the statement.
 fn describe_live(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), String> {
     let db_url = std::env::var("DATABASE_URL").map_err(|_| {
         "DATABASE_URL not set and no cached metadata found. \
@@ -163,7 +163,7 @@ fn describe_live(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), Stri
         .map_err(|e| format!("Failed to create tokio runtime: {e}"))?;
 
     rt.block_on(async {
-        let mut conn = pg_wire::WireConn::connect(&addr, &user, &password, &database)
+        let mut conn = pg_wired::WireConn::connect(&addr, &user, &password, &database)
             .await
             .map_err(|e| format!("Failed to connect to database: {e}"))?;
 
@@ -204,8 +204,8 @@ fn describe_live(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), Stri
 
             // Send as simple query and collect rows.
             let mut buf = bytes::BytesMut::new();
-            pg_wire::protocol::frontend::encode_message(
-                &pg_wire::protocol::types::FrontendMsg::Query(null_sql.as_bytes()),
+            pg_wired::protocol::frontend::encode_message(
+                &pg_wired::protocol::types::FrontendMsg::Query(null_sql.as_bytes()),
                 &mut buf,
             );
             if conn.send_raw(&buf).await.is_ok() {

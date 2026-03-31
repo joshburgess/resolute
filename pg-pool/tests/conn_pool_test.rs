@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use pg_pool::{ConnPool, ConnPoolConfig, LifecycleHooks, PoolGuard};
 use pg_pool::wire::WirePoolable;
-use pg_wire::{PgWireError, WireConn};
+use pg_wired::{PgWireError, WireConn};
 
 type Pool = ConnPool<WirePoolable>;
 
@@ -214,7 +214,7 @@ async fn test_checkout_connection_functional_with_pipeline() {
 
     let g = pool.get().await.unwrap();
     let wire_poolable = g.take();
-    let mut pipeline = pg_wire::PgPipeline::new(wire_poolable.0);
+    let mut pipeline = pg_wired::PgPipeline::new(wire_poolable.0);
     // Use the taken connection via PgPipeline.
     let rows = pipeline
         .query("SELECT $1::text AS val", &[Some(b"test" as &[u8])], &[0])
@@ -1078,8 +1078,8 @@ async fn test_async_conn_no_cpu_spin_when_idle() {
     // Verify that an idle AsyncConn doesn't burn CPU.
     // We can't measure CPU directly, but we can verify it works
     // correctly after being idle for a while.
-    let conn = pg_wire::AsyncConn::new(
-        pg_wire::WireConn::connect(ADDR, USER, PASS, DB).await.unwrap()
+    let conn = pg_wired::AsyncConn::new(
+        pg_wired::WireConn::connect(ADDR, USER, PASS, DB).await.unwrap()
     );
 
     // Let the reader sit idle.
@@ -1119,11 +1119,11 @@ async fn send_query(
     sql: &str,
 ) -> (Vec<Vec<Option<Vec<u8>>>>, String) {
     use bytes::BytesMut;
-    use pg_wire::protocol::types::FrontendMsg;
+    use pg_wired::protocol::types::FrontendMsg;
 
     let conn: &mut WireConn = &mut guard.conn_mut().0;
     let mut buf = BytesMut::new();
-    pg_wire::protocol::frontend::encode_message(
+    pg_wired::protocol::frontend::encode_message(
         &FrontendMsg::Query(sql.as_bytes()),
         &mut buf,
     );
@@ -1136,10 +1136,10 @@ async fn send_query_raw(
     sql: &str,
 ) -> (Vec<Vec<Option<Vec<u8>>>>, String) {
     use bytes::BytesMut;
-    use pg_wire::protocol::types::FrontendMsg;
+    use pg_wired::protocol::types::FrontendMsg;
 
     let mut buf = BytesMut::new();
-    pg_wire::protocol::frontend::encode_message(
+    pg_wired::protocol::frontend::encode_message(
         &FrontendMsg::Query(sql.as_bytes()),
         &mut buf,
     );
@@ -1152,11 +1152,11 @@ async fn send_query_try(
     sql: &str,
 ) -> Result<(Vec<Vec<Option<Vec<u8>>>>, String), PgWireError> {
     use bytes::BytesMut;
-    use pg_wire::protocol::types::FrontendMsg;
+    use pg_wired::protocol::types::FrontendMsg;
 
     let conn: &mut WireConn = &mut guard.conn_mut().0;
     let mut buf = BytesMut::new();
-    pg_wire::protocol::frontend::encode_message(
+    pg_wired::protocol::frontend::encode_message(
         &FrontendMsg::Query(sql.as_bytes()),
         &mut buf,
     );

@@ -2,8 +2,8 @@
 //!
 //! Provides a typed notification listener that uses a dedicated connection.
 
-use pg_wire::protocol::types::BackendMsg;
-use pg_wire::{PgPipeline, WireConn};
+use pg_wired::protocol::types::BackendMsg;
+use pg_wired::{PgPipeline, WireConn};
 
 use crate::error::TypedError;
 

@@ -152,4 +152,4 @@ pub use types::TypeInfo;
 pub use newtypes::{PgNumeric, PgInet, PgTimestamp, PgDate};
 pub use listener::{PgListener, Notification};
 pub use pooled::{TypedPool, PooledTypedClient};
-pub use pg_wire::CancelToken;
+pub use pg_wired::CancelToken;

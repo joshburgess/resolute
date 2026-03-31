@@ -111,10 +111,10 @@ fn is_transient(err: &TypedError) -> bool {
     match err {
         TypedError::Wire(wire_err) => match wire_err.as_ref() {
             // I/O errors are transient (connection reset, broken pipe).
-            pg_wire::PgWireError::Io(_) => true,
-            pg_wire::PgWireError::ConnectionClosed => true,
+            pg_wired::PgWireError::Io(_) => true,
+            pg_wired::PgWireError::ConnectionClosed => true,
             // PG errors: check the error code.
-            pg_wire::PgWireError::Pg(pg_err) => is_transient_pg_code(&pg_err.code),
+            pg_wired::PgWireError::Pg(pg_err) => is_transient_pg_code(&pg_err.code),
             _ => false,
         },
         _ => false,

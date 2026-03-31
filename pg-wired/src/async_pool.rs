@@ -104,7 +104,7 @@ impl AsyncPool {
 
         let mut slot = self.conns[idx].write().await;
         *slot = new_conn;
-        tracing::info!("pg-wire: reconnected slot {idx}");
+        tracing::info!("pg-wired: reconnected slot {idx}");
         Ok(())
     }
 
@@ -163,7 +163,7 @@ async fn health_monitor(pool_weak: std::sync::Weak<AsyncPool>) {
         let pool = match pool_weak.upgrade() {
             Some(p) => p,
             None => {
-                tracing::debug!("pg-wire: health monitor stopping (pool dropped)");
+                tracing::debug!("pg-wired: health monitor stopping (pool dropped)");
                 return;
             }
         };
@@ -175,11 +175,11 @@ async fn health_monitor(pool_weak: std::sync::Weak<AsyncPool>) {
             };
 
             if is_dead {
-                tracing::warn!("pg-wire: slot {idx} is dead, reconnecting...");
+                tracing::warn!("pg-wired: slot {idx} is dead, reconnecting...");
                 match pool.reconnect(idx).await {
                     Ok(()) => {}
                     Err(e) => {
-                        tracing::error!("pg-wire: reconnect slot {idx} failed: {e}");
+                        tracing::error!("pg-wired: reconnect slot {idx} failed: {e}");
                     }
                 }
             }

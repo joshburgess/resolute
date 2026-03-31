@@ -1,12 +1,12 @@
-//! pg-wire integration: implements [`Poolable`] for [`pg_wire::WireConn`].
+//! pg-wired integration: implements [`Poolable`] for [`pg_wired::WireConn`].
 
 use crate::Poolable;
 
-/// Newtype wrapper around [`pg_wire::WireConn`] that implements [`Poolable`].
-pub struct WirePoolable(pub pg_wire::WireConn);
+/// Newtype wrapper around [`pg_wired::WireConn`] that implements [`Poolable`].
+pub struct WirePoolable(pub pg_wired::WireConn);
 
 impl std::ops::Deref for WirePoolable {
-    type Target = pg_wire::WireConn;
+    type Target = pg_wired::WireConn;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -19,7 +19,7 @@ impl std::ops::DerefMut for WirePoolable {
 }
 
 impl Poolable for WirePoolable {
-    type Error = pg_wire::PgWireError;
+    type Error = pg_wired::PgWireError;
 
     async fn connect(
         addr: &str,
@@ -27,7 +27,7 @@ impl Poolable for WirePoolable {
         password: &str,
         database: &str,
     ) -> Result<Self, Self::Error> {
-        let conn = pg_wire::WireConn::connect(addr, user, password, database).await?;
+        let conn = pg_wired::WireConn::connect(addr, user, password, database).await?;
         Ok(WirePoolable(conn))
     }
 

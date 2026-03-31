@@ -3,7 +3,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum TypedError {
     #[error("wire error: {0}")]
-    Wire(#[from] Box<pg_wire::PgWireError>),
+    Wire(#[from] Box<pg_wired::PgWireError>),
 
     #[error("decode error: column {column}: {message}")]
     Decode { column: usize, message: String },
@@ -42,8 +42,8 @@ pub enum TypedError {
     },
 }
 
-impl From<pg_wire::PgWireError> for TypedError {
-    fn from(e: pg_wire::PgWireError) -> Self {
+impl From<pg_wired::PgWireError> for TypedError {
+    fn from(e: pg_wired::PgWireError) -> Self {
         Self::Wire(Box::new(e))
     }
 }

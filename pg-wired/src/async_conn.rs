@@ -148,7 +148,7 @@ impl AsyncConn {
             tokio::spawn(async move {
                 writer_task(request_rx, stream_write, pending, pending_notify).await;
                 alive.store(false, std::sync::atomic::Ordering::Relaxed);
-                tracing::warn!("pg-wire writer task exited");
+                tracing::warn!("pg-wired writer task exited");
             });
         }
 
@@ -161,7 +161,7 @@ impl AsyncConn {
             tokio::spawn(async move {
                 reader_task(stream_read, pending, pending_notify, ntf_tx).await;
                 alive_clone.store(false, std::sync::atomic::Ordering::Relaxed);
-                tracing::warn!("pg-wire reader task exited");
+                tracing::warn!("pg-wired reader task exited");
             });
         }
 

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pg_wire::{PgPipeline, WireConn};
+use pg_wired::{PgPipeline, WireConn};
 
 /// A migration file on disk.
 #[derive(Debug)]

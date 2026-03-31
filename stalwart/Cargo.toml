@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-pg-wire = { path = "../pg-wire" }
+pg-wired = { path = "../pg-wired" }
 stalwart-derive = { path = "../stalwart-derive" }
 stalwart-macros = { path = "../stalwart-macros" }
 pg-pool = { path = "../pg-pool" }

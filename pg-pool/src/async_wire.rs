@@ -1,4 +1,4 @@
-//! pg-wire AsyncConn integration: implements [`Poolable`] for async connections.
+//! pg-wired AsyncConn integration: implements [`Poolable`] for async connections.
 //!
 //! Unlike `WirePoolable` which pools raw `WireConn` (requiring a new `AsyncConn`
 //! per checkout), this pools `AsyncConn` directly so reader/writer tasks survive
@@ -6,15 +6,15 @@
 
 use crate::Poolable;
 
-/// Poolable wrapper around [`pg_wire::AsyncConn`].
+/// Poolable wrapper around [`pg_wired::AsyncConn`].
 ///
 /// The `AsyncConn` spawns reader/writer tasks on creation and keeps them
 /// running until the connection dies. Pooling `AsyncConn` directly means
 /// connections are reused without re-establishing TCP or re-authenticating.
-pub struct AsyncPoolable(pub pg_wire::AsyncConn);
+pub struct AsyncPoolable(pub pg_wired::AsyncConn);
 
 impl Poolable for AsyncPoolable {
-    type Error = pg_wire::PgWireError;
+    type Error = pg_wired::PgWireError;
 
     async fn connect(
         addr: &str,
@@ -22,8 +22,8 @@ impl Poolable for AsyncPoolable {
         password: &str,
         database: &str,
     ) -> Result<Self, Self::Error> {
-        let wire = pg_wire::WireConn::connect(addr, user, password, database).await?;
-        let async_conn = pg_wire::AsyncConn::new(wire);
+        let wire = pg_wired::WireConn::connect(addr, user, password, database).await?;
+        let async_conn = pg_wired::AsyncConn::new(wire);
         Ok(AsyncPoolable(async_conn))
     }
 
@@ -41,11 +41,11 @@ impl Poolable for AsyncPoolable {
         // DISCARD ALL: resets search_path, temp tables, prepared statements,
         // advisory locks, LISTEN channels, and aborts any open transaction.
         let mut buf = bytes::BytesMut::new();
-        pg_wire::protocol::frontend::encode_message(
-            &pg_wire::protocol::types::FrontendMsg::Query(b"DISCARD ALL"),
+        pg_wired::protocol::frontend::encode_message(
+            &pg_wired::protocol::types::FrontendMsg::Query(b"DISCARD ALL"),
             &mut buf,
         );
-        match self.0.submit(buf, pg_wire::ResponseCollector::Drain).await {
+        match self.0.submit(buf, pg_wired::ResponseCollector::Drain).await {
             Ok(_) => {
                 // DISCARD ALL destroys server-side prepared statements,
                 // so clear the client-side cache to stay in sync.
