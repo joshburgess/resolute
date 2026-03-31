@@ -1,0 +1,7 @@
+error: proc-macro derive panicked
+ --> tests/compile_fail_derive/int_enum_no_discriminant.rs:2:10
+  |
+2 | #[derive(stalwart::PgEnum)]
+  |          ^^^^^^^^^^^^^^^^
+  |
+  = help: message: PgEnum with #[repr(i32)]: variant `A` must have an explicit discriminant (e.g., = 1)

@@ -277,6 +277,13 @@ fn oid_to_rust_type(oid: u32) -> proc_macro2::TokenStream {
         1231 => quote! { Vec<stalwart::PgNumeric> },
         2951 => quote! { Vec<uuid::Uuid> },
         3807 => quote! { Vec<serde_json::Value> },
+        // Range types
+        3904 => quote! { stalwart::PgRange<i32> },
+        3926 => quote! { stalwart::PgRange<i64> },
+        3906 => quote! { stalwart::PgRange<stalwart::PgNumeric> },
+        3912 => quote! { stalwart::PgRange<chrono::NaiveDate> },
+        3908 => quote! { stalwart::PgRange<chrono::NaiveDateTime> },
+        3910 => quote! { stalwart::PgRange<chrono::DateTime<chrono::Utc>> },
         _ => quote! { Vec<u8> },
     }
 }
@@ -725,6 +732,13 @@ fn oid_to_type_name(oid: u32) -> &'static str {
         1231 => "numeric[]",
         2951 => "uuid[]",
         3807 => "jsonb[]",
+        // Range types
+        3904 => "int4range",
+        3926 => "int8range",
+        3906 => "numrange",
+        3912 => "daterange",
+        3908 => "tsrange",
+        3910 => "tstzrange",
         _ => "unknown",
     }
 }

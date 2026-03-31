@@ -1,0 +1,7 @@
+error: proc-macro derive panicked
+ --> tests/compile_fail_derive/from_row_skip_with_rename.rs:2:10
+  |
+2 | #[derive(stalwart::FromRow)]
+  |          ^^^^^^^^^^^^^^^^^
+  |
+  = help: message: from_row(skip) cannot be combined with other attributes

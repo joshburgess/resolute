@@ -1,0 +1,7 @@
+error: proc-macro derive panicked
+ --> tests/compile_fail_derive/from_row_on_tuple_struct.rs:2:10
+  |
+2 | #[derive(stalwart::FromRow)]
+  |          ^^^^^^^^^^^^^^^^^
+  |
+  = help: message: FromRow only supports structs with named fields

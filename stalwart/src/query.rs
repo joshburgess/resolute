@@ -17,6 +17,31 @@ use crate::encode::SqlParam;
 use crate::error::TypedError;
 use crate::row::Row;
 
+/// Transaction isolation level for `begin_with()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolationLevel {
+    /// `READ COMMITTED` — default PostgreSQL isolation level.
+    /// Each statement sees only rows committed before it began.
+    ReadCommitted,
+    /// `REPEATABLE READ` — all statements in the transaction see
+    /// a snapshot of the database as of the transaction start.
+    RepeatableRead,
+    /// `SERIALIZABLE` — strictest level. Transactions appear to
+    /// execute one at a time. May cause serialization failures.
+    Serializable,
+}
+
+impl IsolationLevel {
+    /// Returns the SQL fragment for this isolation level.
+    pub fn as_sql(&self) -> &'static str {
+        match self {
+            Self::ReadCommitted => "READ COMMITTED",
+            Self::RepeatableRead => "REPEATABLE READ",
+            Self::Serializable => "SERIALIZABLE",
+        }
+    }
+}
+
 /// A typed query client wrapping an AsyncConn.
 /// Sends parameters in binary format and requests binary results.
 pub struct Client {
@@ -53,6 +78,24 @@ impl Client {
         let wire = WireConn::connect(addr, user, password, database).await?;
         tracing::info!(addr = addr, database = database, pid = wire.pid, "connected");
         Ok(Self::new(wire))
+    }
+
+    /// Connect using a connection string (URI or key=value format).
+    ///
+    /// Supports:
+    /// - `postgres://user:pass@host:port/dbname`
+    /// - `postgresql://user:pass@host:port/dbname`
+    /// - `host=localhost port=5432 dbname=mydb user=postgres password=secret`
+    ///
+    /// ```ignore
+    /// let client = Client::connect_from_str("postgres://user:pass@localhost/mydb").await?;
+    /// let client = Client::connect_from_str("host=localhost dbname=mydb user=postgres").await?;
+    /// ```
+    pub async fn connect_from_str(connstr: &str) -> Result<Self, TypedError> {
+        let (user, password, host, port, database) = parse_connection_string(connstr)
+            .ok_or_else(|| TypedError::Config(format!("invalid connection string: {connstr}")))?;
+        let addr = format!("{host}:{port}");
+        Self::connect(&addr, &user, &password, &database).await
     }
 
     /// Connect and run initialization SQL (e.g. `SET search_path`, `SET role`).
@@ -512,6 +555,64 @@ impl Client {
         Ok(Transaction { client: self, done: false })
     }
 
+    /// Begin a transaction with a specific isolation level.
+    ///
+    /// ```ignore
+    /// let txn = client.begin_with(IsolationLevel::Serializable).await?;
+    /// // or with read-only:
+    /// let txn = client.begin_with(IsolationLevel::RepeatableRead).await?;
+    /// ```
+    pub async fn begin_with(&self, level: IsolationLevel) -> Result<Transaction<'_>, TypedError> {
+        let sql = format!("BEGIN ISOLATION LEVEL {}", level.as_sql());
+        self.simple_query(&sql).await?;
+        Ok(Transaction { client: self, done: false })
+    }
+
+    /// Acquire a session-level advisory lock (blocks until acquired).
+    ///
+    /// ```ignore
+    /// client.advisory_lock(12345).await?;
+    /// // ... critical section ...
+    /// client.advisory_unlock(12345).await?;
+    /// ```
+    pub async fn advisory_lock(&self, key: i64) -> Result<(), TypedError> {
+        self.simple_query(&format!("SELECT pg_advisory_lock({key})")).await
+    }
+
+    /// Try to acquire a session-level advisory lock (non-blocking).
+    /// Returns `true` if the lock was acquired, `false` if it was already held.
+    pub async fn try_advisory_lock(&self, key: i64) -> Result<bool, TypedError> {
+        let rows = self.query(
+            "SELECT pg_try_advisory_lock($1::int8) AS acquired",
+            &[&key],
+        ).await?;
+        rows[0].get::<bool>(0)
+    }
+
+    /// Release a session-level advisory lock.
+    /// Returns `true` if the lock was held and released, `false` if it was not held.
+    pub async fn advisory_unlock(&self, key: i64) -> Result<bool, TypedError> {
+        let rows = self.query(
+            "SELECT pg_advisory_unlock($1::int8) AS released",
+            &[&key],
+        ).await?;
+        rows[0].get::<bool>(0)
+    }
+
+    /// Acquire a transaction-level advisory lock (released at end of transaction).
+    pub async fn advisory_xact_lock(&self, key: i64) -> Result<(), TypedError> {
+        self.simple_query(&format!("SELECT pg_advisory_xact_lock({key})")).await
+    }
+
+    /// Try to acquire a transaction-level advisory lock (non-blocking).
+    pub async fn try_advisory_xact_lock(&self, key: i64) -> Result<bool, TypedError> {
+        let rows = self.query(
+            "SELECT pg_try_advisory_xact_lock($1::int8) AS acquired",
+            &[&key],
+        ).await?;
+        rows[0].get::<bool>(0)
+    }
+
     /// Send a simple text query (no params, no binary format).
     /// Used for BEGIN/COMMIT/ROLLBACK and DDL.
     pub async fn simple_query(&self, sql: &str) -> Result<(), TypedError> {
@@ -964,4 +1065,64 @@ fn parse_row_count(tag: &str) -> u64 {
     tag.rsplit_once(' ')
         .and_then(|(_, count)| count.parse::<u64>().ok())
         .unwrap_or(0)
+}
+
+/// Parse a connection string in URI or key=value format.
+///
+/// Supported formats:
+/// - `postgres://user:pass@host:port/dbname`
+/// - `postgresql://user:pass@host:port/dbname`
+/// - `host=localhost port=5432 dbname=mydb user=postgres password=secret`
+///
+/// Returns `(user, password, host, port, database)` or `None` if parsing fails.
+pub fn parse_connection_string(s: &str) -> Option<(String, String, String, u16, String)> {
+    if s.starts_with("postgres://") || s.starts_with("postgresql://") {
+        parse_pg_uri(s)
+    } else {
+        parse_pg_keyvalue(s)
+    }
+}
+
+fn parse_pg_uri(uri: &str) -> Option<(String, String, String, u16, String)> {
+    let rest = uri
+        .strip_prefix("postgres://")
+        .or_else(|| uri.strip_prefix("postgresql://"))?;
+    // Strip query string if present (e.g., ?sslmode=require)
+    let rest = rest.split('?').next().unwrap_or(rest);
+    let (auth, hostdb) = rest.split_once('@').unwrap_or(("postgres:postgres", rest));
+    let (user, password) = auth.split_once(':').unwrap_or((auth, ""));
+    let (hostport, database) = hostdb.split_once('/').unwrap_or((hostdb, "postgres"));
+    let (host, port_str) = hostport.split_once(':').unwrap_or((hostport, "5432"));
+    let port: u16 = port_str.parse().unwrap_or(5432);
+    Some((
+        user.to_string(),
+        password.to_string(),
+        host.to_string(),
+        port,
+        database.to_string(),
+    ))
+}
+
+fn parse_pg_keyvalue(s: &str) -> Option<(String, String, String, u16, String)> {
+    let mut host = "127.0.0.1".to_string();
+    let mut port: u16 = 5432;
+    let mut user = "postgres".to_string();
+    let mut password = String::new();
+    let mut dbname = "postgres".to_string();
+
+    for part in s.split_whitespace() {
+        if let Some((key, value)) = part.split_once('=') {
+            match key {
+                "host" | "hostaddr" => host = value.to_string(),
+                "port" => port = value.parse().unwrap_or(5432),
+                "user" => user = value.to_string(),
+                "password" => password = value.to_string(),
+                "dbname" => dbname = value.to_string(),
+                // Silently ignore other keys (sslmode, connect_timeout, etc.)
+                _ => {}
+            }
+        }
+    }
+
+    Some((user, password, host, port, dbname))
 }
