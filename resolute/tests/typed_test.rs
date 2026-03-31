@@ -4026,3 +4026,229 @@ async fn test_execute_timeout_fires() {
         "expected timeout error message, got: {err_msg}",
     );
 }
+
+// ---------------------------------------------------------------------------
+// Transaction isolation levels
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_begin_with_serializable() {
+    let client = connect().await;
+    let txn = client.begin_with(resolute::IsolationLevel::Serializable).await.unwrap();
+    let rows = txn.query("SELECT 1::int4 AS n", &[]).await.unwrap();
+    assert_eq!(rows[0].get::<i32>(0).unwrap(), 1);
+    txn.commit().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_begin_with_repeatable_read() {
+    let client = connect().await;
+    let txn = client.begin_with(resolute::IsolationLevel::RepeatableRead).await.unwrap();
+    txn.query("SELECT 1::int4", &[]).await.unwrap();
+    txn.commit().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_begin_with_read_committed() {
+    let client = connect().await;
+    let txn = client.begin_with(resolute::IsolationLevel::ReadCommitted).await.unwrap();
+    txn.query("SELECT 1::int4", &[]).await.unwrap();
+    txn.commit().await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Advisory locks
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_advisory_lock_unlock() {
+    let client = connect().await;
+    let key = 999_999_i64;
+    client.advisory_lock(key).await.unwrap();
+    let released = client.advisory_unlock(key).await.unwrap();
+    assert!(released, "should have released the lock");
+}
+
+#[tokio::test]
+async fn test_try_advisory_lock() {
+    let client = connect().await;
+    let key = 999_998_i64;
+    let acquired = client.try_advisory_lock(key).await.unwrap();
+    assert!(acquired, "should acquire on first attempt");
+    client.advisory_unlock(key).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_advisory_unlock_not_held() {
+    let client = connect().await;
+    let key = 999_997_i64;
+    let released = client.advisory_unlock(key).await.unwrap();
+    assert!(!released, "should return false when lock not held");
+}
+
+#[tokio::test]
+async fn test_advisory_xact_lock() {
+    let client = connect().await;
+    let txn = client.begin().await.unwrap();
+    // xact lock acquired within transaction.
+    txn.client.advisory_xact_lock(999_996).await.unwrap();
+    txn.commit().await.unwrap();
+    // Lock should be auto-released after commit.
+}
+
+#[tokio::test]
+async fn test_try_advisory_xact_lock() {
+    let client = connect().await;
+    let txn = client.begin().await.unwrap();
+    let acquired = txn.client.try_advisory_xact_lock(999_995).await.unwrap();
+    assert!(acquired);
+    txn.commit().await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Executor: nested savepoints via atomic()
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_atomic_client_uses_begin() {
+    use resolute::Executor;
+    let client = connect().await;
+    let result = client.atomic(|db| Box::pin(async move {
+        db.query("SELECT 1::int4", &[]).await?;
+        Ok(42)
+    })).await.unwrap();
+    assert_eq!(result, 42);
+}
+
+#[tokio::test]
+async fn test_atomic_transaction_uses_savepoint() {
+    use resolute::Executor;
+    let client = connect().await;
+    let txn = client.begin().await.unwrap();
+    // atomic() inside a transaction should use SAVEPOINT.
+    let result = txn.atomic(|db| Box::pin(async move {
+        db.query("SELECT 1::int4", &[]).await?;
+        Ok(99)
+    })).await.unwrap();
+    assert_eq!(result, 99);
+    txn.commit().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_atomic_rollback_on_error() {
+    use resolute::Executor;
+    let client = connect().await;
+    let result: Result<i32, _> = client.atomic(|db| Box::pin(async move {
+        db.query("SELECT 1::int4", &[]).await?;
+        Err(resolute::TypedError::Config("test error".into()))
+    })).await;
+    assert!(result.is_err());
+    // Connection should still be usable after rollback.
+    let rows = client.query("SELECT 1::int4 AS n", &[]).await.unwrap();
+    assert_eq!(rows[0].get::<i32>(0).unwrap(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// LISTEN/NOTIFY via PgListener
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_pg_listener_listen_notify() {
+    use resolute::listener::PgListener;
+    let mut listener = PgListener::connect(ADDR, USER, PASS, DB).await.unwrap();
+    listener.listen("test_channel_1").await.unwrap();
+
+    // Send a notification from a separate connection.
+    let sender = connect().await;
+    sender.simple_query("NOTIFY test_channel_1, 'hello'").await.unwrap();
+
+    // Receive it.
+    let notification = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        listener.recv(),
+    ).await.expect("timed out waiting for notification").unwrap();
+
+    assert_eq!(notification.channel, "test_channel_1");
+    assert_eq!(notification.payload, "hello");
+}
+
+#[tokio::test]
+async fn test_pg_listener_unlisten() {
+    use resolute::listener::PgListener;
+    let mut listener = PgListener::connect(ADDR, USER, PASS, DB).await.unwrap();
+    listener.listen("test_channel_2").await.unwrap();
+    assert_eq!(listener.channels().len(), 1);
+    listener.unlisten("test_channel_2").await.unwrap();
+    assert_eq!(listener.channels().len(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// connect_from_str
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_connect_from_str_uri() {
+    let connstr = format!("postgres://{USER}:{PASS}@{ADDR}/{DB}");
+    let client = resolute::Client::connect_from_str(&connstr).await.unwrap();
+    let rows = client.query("SELECT 1::int4 AS n", &[]).await.unwrap();
+    assert_eq!(rows[0].get::<i32>(0).unwrap(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Range types against real PostgreSQL
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_int4range_roundtrip_db() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT '[1,10)'::int4range AS r", &[])
+        .await
+        .unwrap();
+    let r: resolute::PgRange<i32> = rows[0].get(0).unwrap();
+    if let resolute::PgRange::Range { lower, upper, lower_inclusive, upper_inclusive } = r {
+        assert_eq!(lower, Some(1));
+        assert_eq!(upper, Some(10));
+        assert!(lower_inclusive);
+        assert!(!upper_inclusive);
+    } else {
+        panic!("expected Range, got {:?}", r);
+    }
+}
+
+#[tokio::test]
+async fn test_empty_range_db() {
+    let client = connect().await;
+    let rows = client
+        .query("SELECT 'empty'::int4range AS r", &[])
+        .await
+        .unwrap();
+    let r: resolute::PgRange<i32> = rows[0].get(0).unwrap();
+    assert_eq!(r, resolute::PgRange::Empty);
+}
+
+// ---------------------------------------------------------------------------
+// lookup_type_oid / lookup_type_oids
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_lookup_type_oid_builtin() {
+    let client = connect().await;
+    let oid = client.lookup_type_oid("int4").await.unwrap();
+    assert_eq!(oid, Some(23));
+}
+
+#[tokio::test]
+async fn test_lookup_type_oid_nonexistent() {
+    let client = connect().await;
+    let oid = client.lookup_type_oid("this_type_does_not_exist_xyz").await.unwrap();
+    assert_eq!(oid, None);
+}
+
+#[tokio::test]
+async fn test_lookup_type_oids_builtin() {
+    let client = connect().await;
+    let (oid, array_oid) = client.lookup_type_oids("int4").await.unwrap();
+    assert_eq!(oid, 23);
+    assert_eq!(array_oid, 1007);
+}

@@ -241,6 +241,115 @@ proptest! {
 // PgDomain ARRAY_OID inheritance — compile-time assertions
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// PgRange — property-based roundtrip
+// ---------------------------------------------------------------------------
+
+use resolute::PgRange;
+
+fn roundtrip_range<T>(r: &PgRange<T>)
+where
+    T: Encode + Decode + resolute::PgType + PartialEq + std::fmt::Debug,
+{
+    let mut buf = bytes::BytesMut::new();
+    r.encode(&mut buf);
+    let decoded = PgRange::<T>::decode(&buf).expect("range decode failed");
+    assert_eq!(&decoded, r, "range roundtrip mismatch");
+}
+
+proptest! {
+    #[test]
+    fn prop_range_i32(
+        lower in proptest::option::of(any::<i32>()),
+        upper in proptest::option::of(any::<i32>()),
+        lb_inc in any::<bool>(),
+        ub_inc in any::<bool>(),
+    ) {
+        roundtrip_range(&PgRange::new(lower, upper, lb_inc, ub_inc));
+    }
+
+    #[test]
+    fn prop_range_i64(
+        lower in proptest::option::of(any::<i64>()),
+        upper in proptest::option::of(any::<i64>()),
+        lb_inc in any::<bool>(),
+        ub_inc in any::<bool>(),
+    ) {
+        roundtrip_range(&PgRange::new(lower, upper, lb_inc, ub_inc));
+    }
+
+    #[test]
+    fn prop_range_empty(dummy in any::<bool>()) {
+        let _ = dummy;
+        roundtrip_range(&PgRange::<i32>::empty());
+        roundtrip_range(&PgRange::<i64>::empty());
+    }
+
+    #[test]
+    fn fuzz_range_decode_arbitrary(data in proptest::collection::vec(any::<u8>(), 0..64)) {
+        // Must not panic. Errors are fine.
+        let _ = PgRange::<i32>::decode(&data);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PgComposite — property-based roundtrip
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, PartialEq, resolute::PgComposite)]
+struct PropComposite {
+    value: i32,
+    label: String,
+}
+
+proptest! {
+    #[test]
+    fn prop_composite_roundtrip(value in any::<i32>(), label in "[a-zA-Z0-9]{0,32}") {
+        let val = PropComposite { value, label };
+        let mut buf = bytes::BytesMut::new();
+        val.encode(&mut buf);
+        let decoded = PropComposite::decode(&buf).unwrap();
+        assert_eq!(decoded, val);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PgNumeric / PgInet validation — property-based
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn fuzz_pg_numeric_try_from(s in ".*") {
+        // Must not panic. Errors are fine.
+        let _ = resolute::PgNumeric::try_from(s.as_str());
+    }
+
+    #[test]
+    fn fuzz_pg_inet_try_from(s in ".*") {
+        // Must not panic.
+        let _ = resolute::PgInet::try_from(s.as_str());
+    }
+
+    #[test]
+    fn prop_valid_numeric_roundtrip(
+        sign in proptest::option::of(prop_oneof![Just("-"), Just("+")]),
+        integer in "[0-9]{1,10}",
+        fraction in proptest::option::of("[0-9]{1,5}"),
+    ) {
+        let s = format!(
+            "{}{}{}",
+            sign.unwrap_or(""),
+            integer,
+            fraction.map(|f| format!(".{f}")).unwrap_or_default(),
+        );
+        assert!(resolute::PgNumeric::try_from(s.as_str()).is_ok(), "should be valid: {s}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PgDomain ARRAY_OID inheritance — compile-time assertions
+// ---------------------------------------------------------------------------
+
 use resolute::PgType;
 
 #[test]
