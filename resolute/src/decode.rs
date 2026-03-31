@@ -365,7 +365,13 @@ impl_array_decode!(String);
 #[cfg(feature = "chrono")]
 const PG_EPOCH_OFFSET_US: i64 = 946_684_800_000_000;
 
-/// PostgreSQL sentinel values for infinity.
+/// PostgreSQL sentinel values for infinity in the binary wire format.
+/// These match the constants defined in PostgreSQL source code
+/// `src/include/datatype/timestamp.h`:
+/// - `DT_NOEND` = `i64::MAX` (timestamp infinity)
+/// - `DT_NOBEGIN` = `i64::MIN` (timestamp -infinity)
+/// - `DATEVAL_NOEND` = `i32::MAX` (date infinity)
+/// - `DATEVAL_NOBEGIN` = `i32::MIN` (date -infinity)
 const PG_TIMESTAMP_INFINITY: i64 = i64::MAX;
 const PG_TIMESTAMP_NEG_INFINITY: i64 = i64::MIN;
 const PG_DATE_INFINITY: i32 = i32::MAX;

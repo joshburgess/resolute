@@ -102,18 +102,24 @@ pub fn rewrite(sql: &str) -> (String, Vec<String>) {
                     result.push(c);
                 }
                 i += 1;
-                // Find closing $tag$
+                // Find closing $tag$ by comparing character-by-character
+                // instead of allocating a String on every '$'.
+                let tag_chars: Vec<char> = tag.chars().collect();
+                let tag_len = tag_chars.len();
                 loop {
                     if i >= len {
                         break;
                     }
-                    if chars[i] == '$' {
-                        let remaining: String = chars[i..].iter().collect();
-                        if remaining.starts_with(&tag) {
-                            for c in tag.chars() {
-                                result.push(c);
+                    if chars[i] == '$' && i + tag_len <= len {
+                        let matches = chars[i..i + tag_len]
+                            .iter()
+                            .zip(tag_chars.iter())
+                            .all(|(a, b)| a == b);
+                        if matches {
+                            for c in &tag_chars {
+                                result.push(*c);
                             }
-                            i += tag.len();
+                            i += tag_len;
                             break;
                         }
                     }
@@ -314,6 +320,28 @@ mod tests {
         assert!(!has_named_params("SELECT $1"));
         assert!(!has_named_params("SELECT 1::int4"));
         assert!(!has_named_params("SELECT ':nope'"));
+    }
+
+    #[test]
+    fn test_dollar_quoted_with_tag() {
+        let (sql, names) = rewrite("SELECT $fn$ :not_a_param $fn$ WHERE id = :id");
+        assert_eq!(sql, "SELECT $fn$ :not_a_param $fn$ WHERE id = $1");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_dollar_quoted_with_dollar_in_body() {
+        // Body contains $ but not the closing tag.
+        let (sql, names) = rewrite("SELECT $$ foo $ bar $$ WHERE id = :id");
+        assert_eq!(sql, "SELECT $$ foo $ bar $$ WHERE id = $1");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_dollar_quoted_nested_different_tags() {
+        let (sql, names) = rewrite("SELECT $outer$ inner $inner$ content $inner$ $outer$ WHERE id = :id");
+        assert_eq!(sql, "SELECT $outer$ inner $inner$ content $inner$ $outer$ WHERE id = $1");
+        assert_eq!(names, vec!["id"]);
     }
 
     #[test]

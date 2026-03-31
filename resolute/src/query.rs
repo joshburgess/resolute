@@ -1156,12 +1156,14 @@ fn parse_pg_uri(uri: &str) -> Option<(String, String, String, u16, String)> {
     let (hostport, database) = hostdb.split_once('/').unwrap_or((hostdb, "postgres"));
     let (host, port_str) = hostport.split_once(':').unwrap_or((hostport, "5432"));
     let port: u16 = port_str.parse().unwrap_or(5432);
+    // Decode percent-encoded characters (e.g., %40 → @, %23 → #).
+    // Common in passwords with special characters.
     Some((
-        user.to_string(),
-        password.to_string(),
+        url_decode(user),
+        url_decode(password),
         host.to_string(),
         port,
-        database.to_string(),
+        url_decode(database),
     ))
 }
 
@@ -1187,4 +1189,104 @@ fn parse_pg_keyvalue(s: &str) -> Option<(String, String, String, u16, String)> {
     }
 
     Some((user, password, host, port, dbname))
+}
+
+/// Decode percent-encoded characters in a URI component.
+/// Handles %XX sequences where XX is a two-digit hex value.
+/// Non-encoded characters pass through unchanged. Invalid sequences
+/// (incomplete %X, non-hex digits) are left as-is.
+fn url_decode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (
+                hex_digit(bytes[i + 1]),
+                hex_digit(bytes[i + 2]),
+            ) {
+                result.push((hi << 4 | lo) as char);
+                i += 3;
+                continue;
+            }
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+    result
+}
+
+fn hex_digit(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_url_decode_basic() {
+        assert_eq!(url_decode("hello"), "hello");
+        assert_eq!(url_decode("hello%20world"), "hello world");
+        assert_eq!(url_decode("p%40ss"), "p@ss");
+        assert_eq!(url_decode("%23hash"), "#hash");
+    }
+
+    #[test]
+    fn test_url_decode_password_with_special_chars() {
+        assert_eq!(url_decode("p%40ssw%23rd"), "p@ssw#rd");
+        assert_eq!(url_decode("100%25done"), "100%done");
+    }
+
+    #[test]
+    fn test_url_decode_invalid_sequences() {
+        // Incomplete % sequence — left as-is.
+        assert_eq!(url_decode("abc%2"), "abc%2");
+        assert_eq!(url_decode("abc%"), "abc%");
+        // Non-hex digits — left as-is.
+        assert_eq!(url_decode("abc%ZZ"), "abc%ZZ");
+    }
+
+    #[test]
+    fn test_url_decode_empty() {
+        assert_eq!(url_decode(""), "");
+    }
+
+    #[test]
+    fn test_parse_connection_string_with_encoded_password() {
+        let (user, pass, host, port, db) =
+            parse_connection_string("postgres://user:p%40ss@localhost:5432/mydb").unwrap();
+        assert_eq!(user, "user");
+        assert_eq!(pass, "p@ss");
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 5432);
+        assert_eq!(db, "mydb");
+    }
+
+    #[test]
+    fn test_parse_connection_string_keyvalue() {
+        let (user, pass, host, port, db) =
+            parse_connection_string("host=db.example.com port=5433 dbname=prod user=admin password=secret").unwrap();
+        assert_eq!(user, "admin");
+        assert_eq!(pass, "secret");
+        assert_eq!(host, "db.example.com");
+        assert_eq!(port, 5433);
+        assert_eq!(db, "prod");
+    }
+
+    #[test]
+    fn test_parse_connection_string_defaults() {
+        let (user, pass, host, port, db) =
+            parse_connection_string("postgres://localhost/mydb").unwrap();
+        assert_eq!(user, "postgres");
+        assert_eq!(pass, "postgres");
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 5432);
+        assert_eq!(db, "mydb");
+    }
 }
