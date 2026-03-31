@@ -359,7 +359,7 @@ impl Client {
         if rows.len() != 1 {
             return Err(TypedError::NotExactlyOne(rows.len()));
         }
-        Ok(rows.into_iter().next().unwrap())
+        Ok(rows.into_iter().next().expect("already verified rows.len()"))
     }
 
     /// Execute a query and return an optional single row.
@@ -371,7 +371,7 @@ impl Client {
         let rows = self.query(sql, params).await?;
         match rows.len() {
             0 => Ok(None),
-            1 => Ok(Some(rows.into_iter().next().unwrap())),
+            1 => Ok(Some(rows.into_iter().next().expect("already verified rows.len()"))),
             n => Err(TypedError::NotExactlyOne(n)),
         }
     }
@@ -632,7 +632,11 @@ impl Client {
             "SELECT pg_try_advisory_lock($1::int8) AS acquired",
             &[&key],
         ).await?;
-        rows[0].get::<bool>(0)
+        let row = rows.into_iter().next().ok_or_else(|| TypedError::Decode {
+            column: 0,
+            message: "pg_try_advisory_lock returned no rows".into(),
+        })?;
+        row.get::<bool>(0)
     }
 
     /// Release a session-level advisory lock.
@@ -642,12 +646,20 @@ impl Client {
             "SELECT pg_advisory_unlock($1::int8) AS released",
             &[&key],
         ).await?;
-        rows[0].get::<bool>(0)
+        let row = rows.into_iter().next().ok_or_else(|| TypedError::Decode {
+            column: 0,
+            message: "pg_advisory_unlock returned no rows".into(),
+        })?;
+        row.get::<bool>(0)
     }
 
     /// Acquire a transaction-level advisory lock (released at end of transaction).
     pub async fn advisory_xact_lock(&self, key: i64) -> Result<(), TypedError> {
-        self.simple_query(&format!("SELECT pg_advisory_xact_lock({key})")).await
+        self.query(
+            "SELECT pg_advisory_xact_lock($1::int8)",
+            &[&key],
+        ).await?;
+        Ok(())
     }
 
     /// Try to acquire a transaction-level advisory lock (non-blocking).
@@ -656,7 +668,11 @@ impl Client {
             "SELECT pg_try_advisory_xact_lock($1::int8) AS acquired",
             &[&key],
         ).await?;
-        rows[0].get::<bool>(0)
+        let row = rows.into_iter().next().ok_or_else(|| TypedError::Decode {
+            column: 0,
+            message: "pg_try_advisory_xact_lock returned no rows".into(),
+        })?;
+        row.get::<bool>(0)
     }
 
     /// Send a simple text query (no params, no binary format).

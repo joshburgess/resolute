@@ -241,7 +241,9 @@ impl Executor for crate::query::Client {
                     Ok(val)
                 }
                 Err(e) => {
-                    let _ = self.simple_query("ROLLBACK").await;
+                    if let Err(rb_err) = self.simple_query("ROLLBACK").await {
+                        tracing::error!(error = %rb_err, "transaction rollback failed");
+                    }
                     Err(e)
                 }
             }
@@ -298,10 +300,13 @@ impl Executor for crate::query::Transaction<'_> {
                     Ok(val)
                 }
                 Err(e) => {
-                    let _ = self
+                    if let Err(rb_err) = self
                         .client
                         .simple_query(&format!("ROLLBACK TO SAVEPOINT {sp}"))
-                        .await;
+                        .await
+                    {
+                        tracing::error!(error = %rb_err, savepoint = %sp, "savepoint rollback failed");
+                    }
                     Err(e)
                 }
             }
@@ -354,7 +359,9 @@ impl Executor for crate::pooled::PooledTypedClient {
                     Ok(val)
                 }
                 Err(e) => {
-                    let _ = self.simple_query("ROLLBACK").await;
+                    if let Err(rb_err) = self.simple_query("ROLLBACK").await {
+                        tracing::error!(error = %rb_err, "transaction rollback failed");
+                    }
                     Err(e)
                 }
             }

@@ -71,12 +71,16 @@ pub async fn run(database_url: &str, migrations_dir: &str) -> Result<usize, Type
 
         pg.simple_query("BEGIN").await?;
         if let Err(e) = pg.simple_query(&sql).await {
-            let _ = pg.simple_query("ROLLBACK").await;
+            if let Err(rb_err) = pg.simple_query("ROLLBACK").await {
+                tracing::error!(error = %rb_err, "rollback failed after migration error");
+            }
             return Err(e.into());
         }
+        // Use dollar-quoting for the name to avoid SQL injection via crafted
+        // migration filenames. Version is a validated i64, safe to interpolate.
+        let escaped_name = name.replace('\'', "''");
         pg.simple_query(&format!(
-            "INSERT INTO _resolute_migrations (version, name) VALUES ({version}, '{}')",
-            name.replace('\'', "''")
+            "INSERT INTO _resolute_migrations (version, name) VALUES ({version}, E'{escaped_name}')"
         ))
         .await?;
         pg.simple_query("COMMIT").await?;

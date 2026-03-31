@@ -253,7 +253,8 @@ impl Encode for serde_json::Value {
     fn encode(&self, buf: &mut BytesMut) {
         // JSONB binary format: version byte (1) + JSON text.
         buf.put_u8(1);
-        let json_text = serde_json::to_string(self).unwrap_or_default();
+        // serde_json::Value serialization is infallible — the value is already valid JSON.
+        let json_text = serde_json::to_string(self).expect("serde_json::Value serialization cannot fail");
         buf.put_slice(json_text.as_bytes());
     }
 }

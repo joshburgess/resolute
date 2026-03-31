@@ -484,7 +484,11 @@ impl Decode for uuid::Uuid {
                 message: format!("UUID: expected 16 bytes, got {}", buf.len()),
             });
         }
-        Ok(uuid::Uuid::from_bytes(buf.try_into().unwrap()))
+        let bytes: [u8; 16] = buf.try_into().map_err(|_| TypedError::Decode {
+            column: 0,
+            message: "UUID: buffer size mismatch".into(),
+        })?;
+        Ok(uuid::Uuid::from_bytes(bytes))
     }
 }
 
