@@ -1,0 +1,7 @@
+error: proc-macro derive panicked
+ --> tests/compile_fail_derive/pg_domain_on_enum.rs:2:10
+  |
+2 | #[derive(resolute::PgDomain)]
+  |          ^^^^^^^^^^^^^^^^^^
+  |
+  = help: message: PgDomain only supports tuple structs

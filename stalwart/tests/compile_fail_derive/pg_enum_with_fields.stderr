@@ -1,7 +1,0 @@
-error: proc-macro derive panicked
- --> tests/compile_fail_derive/pg_enum_with_fields.rs:2:10
-  |
-2 | #[derive(stalwart::PgEnum)]
-  |          ^^^^^^^^^^^^^^^^
-  |
-  = help: message: PgEnum: variant `B` has fields — only unit variants are supported

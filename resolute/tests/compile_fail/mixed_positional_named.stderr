@@ -1,0 +1,5 @@
+error: SQL error: PostgreSQL error: 42601: syntax error at or near ":"
+ --> tests/compile_fail/mixed_positional_named.rs:3:30
+  |
+3 |     let _ = resolute::query!("SELECT $1::int4, :name::text", 1i32, name = "hello");
+  |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

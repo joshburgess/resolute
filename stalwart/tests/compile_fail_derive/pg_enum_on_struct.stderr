@@ -1,7 +1,0 @@
-error: proc-macro derive panicked
- --> tests/compile_fail_derive/pg_enum_on_struct.rs:2:10
-  |
-2 | #[derive(stalwart::PgEnum)]
-  |          ^^^^^^^^^^^^^^^^
-  |
-  = help: message: PgEnum can only be derived for enums

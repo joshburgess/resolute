@@ -1,11 +1,11 @@
-# Stalwart Roadmap
+# Resolute Roadmap
 
 ## Ship it
 
 ### 1. Publish to crates.io
-Publish all 6 crates: pg-wired, pg-pool, stalwart, stalwart-derive, stalwart-macros, stalwart-cli. The crates are ready — this is the single highest-leverage thing.
+Publish all 6 crates: pg-wired, pg-pool, resolute, resolute-derive, resolute-macros, resolute-cli. The crates are ready — this is the single highest-leverage thing.
 
-### 2. CI for the stalwart repo
+### 2. CI for the resolute repo
 GitHub Actions pipeline: fmt, clippy, unit tests, integration tests (docker postgres). No CI exists on the repo yet.
 
 ### 3. LICENSE file
@@ -16,7 +16,7 @@ README says MIT but no LICENSE file exists.
 ## Close remaining gaps with sqlx
 
 ### 4. `#[sqlx(transparent)]`-style in query macros — DONE
-Documented as intentional design decision. Our integer enum requires explicit discriminants — implicit discriminants are fragile (reordering variants silently changes database values). Documented in `stalwart/README.md` under "Design decisions" and in the integer-backed enums section.
+Documented as intentional design decision. Our integer enum requires explicit discriminants — implicit discriminants are fragile (reordering variants silently changes database values). Documented in `resolute/README.md` under "Design decisions" and in the integer-backed enums section.
 
 ### 5. Compile-fail tests — DONE (13 tests)
 - FromRow: skip+rename, skip+default, flatten+json, flatten+try_from, json+try_from, on enum, on tuple struct
@@ -24,7 +24,7 @@ Documented as intentional design decision. Our integer enum requires explicit di
 - PgEnum: on struct, with fields, integer enum without discriminants
 
 ### 6. `Any` database abstraction — DONE (documented as non-goal)
-Documented in `stalwart/README.md` under "Design decisions": stalwart is PostgreSQL-only by design — single-database focus enables full leverage of PostgreSQL features without lowest-common-denominator abstractions.
+Documented in `resolute/README.md` under "Design decisions": resolute is PostgreSQL-only by design — single-database focus enables full leverage of PostgreSQL features without lowest-common-denominator abstractions.
 
 ---
 
@@ -52,7 +52,7 @@ Session-level: `advisory_lock(key)`, `try_advisory_lock(key)`, `advisory_unlock(
 ### 12. `cargo doc` quality pass — DONE
 Audit found 95%+ doc coverage. All public items across all modules have doc comments. All trait methods documented with examples. All public structs and enums have field-level documentation.
 
-### 13. `stalwart-cli migrate` test harness — DONE
+### 13. `resolute-cli migrate` test harness — DONE
 Integration tests for CLI binary: `migrate create` (file generation), `migrate run/status/revert` (full lifecycle against real PostgreSQL), `database create/drop`, help text output validation.
 
 ### 14. Error messages — DONE
