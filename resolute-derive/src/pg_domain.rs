@@ -19,6 +19,7 @@ use syn::{Data, DeriveInput, Fields};
 pub fn derive(input: DeriveInput) -> TokenStream {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    let (custom_oid, custom_array_oid) = get_custom_oids(&input.attrs);
 
     let inner_type = match &input.data {
         Data::Struct(data) => match &data.fields {
@@ -57,11 +58,39 @@ pub fn derive(input: DeriveInput) -> TokenStream {
         }
 
         impl #impl_generics resolute::PgType for #name #ty_generics #where_clause {
-            const OID: u32 = 0;
-            const ARRAY_OID: u32 = <#inner_type as resolute::PgType>::ARRAY_OID;
+            const OID: u32 = #custom_oid;
+            const ARRAY_OID: u32 = if #custom_array_oid != 0 {
+                #custom_array_oid
+            } else {
+                <#inner_type as resolute::PgType>::ARRAY_OID
+            };
         }
 
     };
 
     TokenStream::from(expanded)
+}
+
+/// Parse optional `#[pg_type(oid = N)]` and `#[pg_type(array_oid = N)]`.
+fn get_custom_oids(attrs: &[syn::Attribute]) -> (u32, u32) {
+    let mut oid: u32 = 0;
+    let mut array_oid: u32 = 0;
+    for attr in attrs {
+        if !attr.path().is_ident("pg_type") {
+            continue;
+        }
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("oid") {
+                let value = meta.value()?;
+                let lit: syn::LitInt = value.parse()?;
+                oid = lit.base10_parse().unwrap_or(0);
+            } else if meta.path.is_ident("array_oid") {
+                let value = meta.value()?;
+                let lit: syn::LitInt = value.parse()?;
+                array_oid = lit.base10_parse().unwrap_or(0);
+            }
+            Ok(())
+        });
+    }
+    (oid, array_oid)
 }

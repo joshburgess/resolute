@@ -567,6 +567,18 @@ resolute::migrate::run("postgres://user:pass@localhost/mydb", "migrations").awai
 
 **Explicit integer enum discriminants.** Integer-backed enums require `= N` on every variant. This prevents silent breakage when variants are reordered or inserted.
 
-**OID = 0 for custom types.** `PgEnum`, `PgComposite`, and `PgDomain` all set `OID = 0` (Unspecified), letting PostgreSQL infer the type from context (column type, cast, etc.). This avoids requiring users to know or hardcode OIDs, at the cost of less precise error messages when types mismatch.
+**OID = 0 for custom types by default.** `PgEnum`, `PgComposite`, and `PgDomain` default to `OID = 0` (Unspecified), letting PostgreSQL infer the type from context (column type, cast, etc.). For better error messages or explicit type identity, you can provide OIDs via `#[pg_type(oid = N, array_oid = N)]`:
+
+```rust
+#[derive(PgEnum)]
+#[pg_type(oid = 16384, array_oid = 16385)]
+enum Mood { Happy, Sad }
+
+#[derive(PgDomain)]
+#[pg_type(oid = 16386)]
+struct Email(String);  // array_oid still inherited from String if not specified
+```
+
+You can discover your custom type OIDs at runtime with `client.lookup_type_oids("mood")`.
 
 **Non-consuming Executor.** The `Executor` trait uses `&self` instead of consuming `self`. This is a deliberate departure from sqlx, enabling natural multi-query reuse in generic functions without lifetime gymnastics.
