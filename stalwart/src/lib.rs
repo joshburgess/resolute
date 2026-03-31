@@ -75,15 +75,52 @@
 //! # Custom PostgreSQL types
 //!
 //! ```ignore
+//! // String-based enum (PostgreSQL CREATE TYPE ... AS ENUM):
 //! #[derive(PgEnum)]
 //! #[pg_type(rename_all = "snake_case")]
 //! enum Mood { Happy, Sad }
 //!
+//! // Integer-backed enum (stored as int4 in PostgreSQL):
+//! #[derive(PgEnum)]
+//! #[repr(i32)]
+//! enum Status { Active = 1, Inactive = 2, Deleted = 3 }
+//!
 //! #[derive(PgComposite)]
 //! struct Address { street: String, city: String, zip: Option<String> }
 //!
+//! // Domain type — inherits array OID from inner type:
 //! #[derive(PgDomain)]
-//! struct Email(String);
+//! struct Email(String);  // ARRAY_OID = 1009 (text[])
+//! ```
+//!
+//! # FromRow derive
+//!
+//! ```ignore
+//! #[derive(FromRow)]
+//! struct User {
+//!     id: i32,
+//!     #[from_row(rename = "email_address")]
+//!     email: String,
+//!     #[from_row(skip)]
+//!     computed: String,        // Default::default()
+//!     #[from_row(default)]
+//!     retries: i32,            // 0 if missing or NULL
+//!     #[from_row(json)]
+//!     metadata: MyStruct,      // deserialized from jsonb
+//!     #[from_row(try_from = "i32")]
+//!     status: MyStatus,        // decoded as i32, then TryFrom
+//!     #[from_row(flatten)]
+//!     address: Address,        // nested FromRow, shares the row
+//! }
+//! ```
+//!
+//! # Query type overrides
+//!
+//! ```ignore
+//! // Override inferred types in query! macros:
+//! let row = query!(r#"SELECT id as "id: UserId" FROM users"#)
+//!     .fetch_one(&client).await?;
+//! // row.id is UserId, not i32
 //! ```
 //!
 //! # Performance over sqlx

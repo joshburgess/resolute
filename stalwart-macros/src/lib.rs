@@ -868,3 +868,148 @@ fn parse_pg_uri(uri: &str) -> Option<(String, String, String, u16, String)> {
         database.to_string(),
     ))
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- parse_type_override tests --
+
+    #[test]
+    fn test_type_override_basic() {
+        let (name, ty) = parse_type_override("id: UserId");
+        assert_eq!(name, "id");
+        assert!(ty.is_some());
+    }
+
+    #[test]
+    fn test_type_override_with_module_path() {
+        let (name, ty) = parse_type_override("id: crate::types::UserId");
+        assert_eq!(name, "id");
+        assert!(ty.is_some());
+    }
+
+    #[test]
+    fn test_type_override_no_override() {
+        let (name, ty) = parse_type_override("user_name");
+        assert_eq!(name, "user_name");
+        assert!(ty.is_none());
+    }
+
+    #[test]
+    fn test_type_override_skips_double_colon_cast() {
+        let (name, ty) = parse_type_override("created_at::text");
+        assert_eq!(name, "created_at::text");
+        assert!(ty.is_none(), ":: should not trigger type override");
+    }
+
+    #[test]
+    fn test_type_override_invalid_type_string() {
+        let (name, ty) = parse_type_override("col: 123invalid");
+        assert_eq!(name, "col: 123invalid");
+        assert!(ty.is_none(), "invalid Rust type should fall back");
+    }
+
+    #[test]
+    fn test_type_override_empty_after_colon() {
+        let (name, ty) = parse_type_override("col:");
+        assert_eq!(name, "col:");
+        assert!(ty.is_none());
+    }
+
+    #[test]
+    fn test_type_override_with_spaces() {
+        let (name, ty) = parse_type_override("  id  :  UserId  ");
+        assert_eq!(name, "id");
+        assert!(ty.is_some());
+    }
+
+    #[test]
+    fn test_type_override_option_type() {
+        let (name, ty) = parse_type_override("email: Option<String>");
+        assert_eq!(name, "email");
+        assert!(ty.is_some());
+    }
+
+    #[test]
+    fn test_type_override_vec_type() {
+        let (name, ty) = parse_type_override("tags: Vec<String>");
+        assert_eq!(name, "tags");
+        assert!(ty.is_some());
+    }
+
+    // -- rewrite_named_params tests --
+
+    #[test]
+    fn test_named_params_basic() {
+        let (sql, names) = rewrite_named_params("SELECT :id, :name");
+        assert_eq!(sql, "SELECT $1, $2");
+        assert_eq!(names, vec!["id", "name"]);
+    }
+
+    #[test]
+    fn test_named_params_duplicate() {
+        let (sql, names) = rewrite_named_params("SELECT :id WHERE :id > 0");
+        assert_eq!(sql, "SELECT $1 WHERE $1 > 0");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_with_cast() {
+        let (sql, names) = rewrite_named_params("SELECT :val::int4");
+        assert_eq!(sql, "SELECT $1::int4");
+        assert_eq!(names, vec!["val"]);
+    }
+
+    #[test]
+    fn test_named_params_in_string_literal() {
+        let (sql, names) = rewrite_named_params("SELECT ':not_a_param'");
+        assert_eq!(sql, "SELECT ':not_a_param'");
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn test_named_params_empty() {
+        let (sql, names) = rewrite_named_params("SELECT 1");
+        assert_eq!(sql, "SELECT 1");
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn test_named_params_underscore_prefix() {
+        let (sql, names) = rewrite_named_params("SELECT :_private");
+        assert_eq!(sql, "SELECT $1");
+        assert_eq!(names, vec!["_private"]);
+    }
+
+    // -- parse_pg_uri tests --
+
+    #[test]
+    fn test_parse_uri_full() {
+        let (u, p, h, port, db) = parse_pg_uri("postgres://user:pass@host:1234/mydb").unwrap();
+        assert_eq!(u, "user");
+        assert_eq!(p, "pass");
+        assert_eq!(h, "host");
+        assert_eq!(port, 1234);
+        assert_eq!(db, "mydb");
+    }
+
+    #[test]
+    fn test_parse_uri_defaults() {
+        let (u, p, h, port, db) = parse_pg_uri("postgres://user:pass@localhost/mydb").unwrap();
+        assert_eq!(h, "localhost");
+        assert_eq!(port, 5432);
+        assert_eq!(u, "user");
+        assert_eq!(p, "pass");
+        assert_eq!(db, "mydb");
+    }
+
+    #[test]
+    fn test_parse_uri_invalid() {
+        assert!(parse_pg_uri("mysql://user:pass@host/db").is_none());
+    }
+}

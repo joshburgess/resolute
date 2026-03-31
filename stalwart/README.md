@@ -11,7 +11,12 @@ stalwart validates SQL against a live database at compile time (or offline via c
 - **`Executor` trait**: Write generic functions that work with Client, Transaction, or Pool — no sqlx lifetime gymnastics
 - **`atomic()` with savepoint nesting**: Auto-BEGIN on Client, auto-SAVEPOINT on Transaction — same function, correct behavior in any context
 - **Custom PG types**: `#[derive(PgEnum)]`, `#[derive(PgComposite)]`, `#[derive(PgDomain)]`
+- **Integer-backed enums**: `#[repr(i32)]` on PgEnum for integer column storage
+- **Domain type arrays**: `PgDomain` newtypes inherit array OIDs from their inner type
+- **Query type overrides**: `"col: CustomType"` syntax in query macros for custom type mapping
+- **Rich FromRow derive**: `skip`, `default`, `json`, `try_from`, `flatten` attributes
 - **Generic arrays**: `Vec<T>` for all Encode/Decode types (bool, i16, i32, i64, f32, f64, String, UUID, chrono types, JSON, numeric, inet)
+- **Pool lifecycle hooks**: `before_acquire`, `on_create`, `on_checkout`, `on_checkin`, `after_release`, `on_destroy`
 - **Offline builds**: `.sqlx/` cache + `stalwart-cli prepare` for CI/Docker
 - **Connection pooling**: `TypedPool` with typed checkout
 - **LISTEN/NOTIFY**: `PgListener` for real-time notifications
@@ -68,6 +73,28 @@ let rows = client.query_named(
     &[("id", &42i32 as &dyn SqlParam)],
 ).await?;
 ```
+
+## Query type overrides
+
+Use `"column_name: RustType"` syntax in SELECT aliases to override the inferred Rust type in `query!` and `query_scalar!` macros. This is useful for mapping columns to custom newtypes:
+
+```rust
+#[derive(PgDomain)]
+struct UserId(i32);
+
+// Without override: id would be inferred as i32
+// With override: id field is typed as UserId
+let row = query!(r#"SELECT id as "id: UserId" FROM users WHERE id = $1"#, 1i32)
+    .fetch_one(&client)
+    .await?;
+
+// row.id is UserId, not i32
+let user_id: UserId = row.id;
+```
+
+Type overrides work with nullable columns too — if the column is nullable, the field becomes `Option<UserId>`.
+
+The parser correctly ignores `::` casts (e.g., `created_at::text`) and falls back to the inferred type if the string after `:` isn't a valid Rust type.
 
 ## Executor trait — generic over Client, Transaction, and Pool
 
@@ -136,7 +163,9 @@ txn.commit().await?;
 
 ## Custom PostgreSQL types
 
-### Enums
+### String enums
+
+Map to PostgreSQL `CREATE TYPE ... AS ENUM` types:
 
 ```rust
 #[derive(PgEnum)]
@@ -151,6 +180,30 @@ enum Mood {
 
 Supported `rename_all` strategies: `snake_case`, `lowercase`, `UPPERCASE`, `SCREAMING_SNAKE_CASE`, `camelCase`, `PascalCase`, `kebab-case`.
 
+### Integer-backed enums
+
+Store enum values as integers in PostgreSQL (`int2`, `int4`, or `int8` columns):
+
+```rust
+#[derive(PgEnum)]
+#[repr(i32)]
+enum Status {
+    Active = 1,
+    Inactive = 2,
+    Deleted = 3,
+}
+
+// Encodes as int4 (4 bytes, big-endian). PgType::OID = 23, ARRAY_OID = 1007.
+let mut buf = BytesMut::new();
+Status::Active.encode(&mut buf);  // encodes as 1i32
+
+// Decodes from binary or text:
+let decoded = Status::decode(&buf)?;      // from binary int4
+let decoded = Status::decode_text("2")?;  // from text → Inactive
+```
+
+Supported repr types: `#[repr(i16)]` (int2), `#[repr(i32)]` (int4), `#[repr(i64)]` (int8). All variants must have explicit discriminants. Negative values are supported.
+
 ### Composite types
 
 ```rust
@@ -162,17 +215,33 @@ struct Address {
 }
 ```
 
-### Domain types
+### Domain types (newtypes)
+
+Transparent wrappers over base PostgreSQL types. All encoding/decoding delegates to the inner type:
 
 ```rust
 #[derive(PgDomain)]
 struct Email(String);
 
 #[derive(PgDomain)]
-struct PositiveInt(i32);
+struct UserId(i64);
+```
+
+Domain types automatically inherit the array OID from their inner type, so PostgreSQL knows how to handle them in array context:
+
+```rust
+use stalwart::PgType;
+
+// Email wraps String (text) → ARRAY_OID = 1009 (text[])
+assert_eq!(<Email as PgType>::ARRAY_OID, 1009);
+
+// UserId wraps i64 (int8) → ARRAY_OID = 1016 (int8[])
+assert_eq!(<UserId as PgType>::ARRAY_OID, 1016);
 ```
 
 ## FromRow derive
+
+Basic usage with rename and nullable fields:
 
 ```rust
 #[derive(FromRow)]
@@ -184,6 +253,87 @@ struct Author {
     bio: Option<String>,
 }
 ```
+
+### FromRow attributes
+
+#### `skip` — ignore field, use `Default::default()`
+
+```rust
+#[derive(FromRow)]
+struct UserView {
+    id: i32,
+    name: String,
+    #[from_row(skip)]
+    computed_field: String,  // not read from the row, defaults to ""
+}
+```
+
+#### `default` — fall back to `Default::default()` if column is missing or NULL
+
+```rust
+#[derive(FromRow)]
+struct Config {
+    id: i32,
+    #[from_row(default)]
+    retries: i32,  // 0 if column is missing or NULL
+    #[from_row(default)]
+    label: Option<String>,  // None if column is missing
+}
+```
+
+#### `json` — deserialize a JSON/JSONB column via serde
+
+```rust
+#[derive(FromRow)]
+struct Event {
+    id: i32,
+    #[from_row(json)]
+    payload: MyPayload,  // deserialized from jsonb column via serde_json
+    #[from_row(json)]
+    metadata: Option<Metadata>,  // None if NULL, deserialized if present
+}
+```
+
+#### `try_from` — decode as one type, convert via `TryFrom`
+
+```rust
+struct NonZeroId(i32);
+
+impl TryFrom<i32> for NonZeroId {
+    type Error = String;
+    fn try_from(v: i32) -> Result<Self, Self::Error> {
+        if v == 0 { Err("must be non-zero".into()) }
+        else { Ok(NonZeroId(v)) }
+    }
+}
+
+#[derive(FromRow)]
+struct User {
+    #[from_row(try_from = "i32")]
+    id: NonZeroId,  // decoded as i32, then TryFrom::try_from
+    name: String,
+}
+```
+
+#### `flatten` — embed a nested `FromRow` struct
+
+```rust
+#[derive(FromRow)]
+struct Address {
+    street: String,
+    city: String,
+}
+
+#[derive(FromRow)]
+struct UserWithAddress {
+    id: i32,
+    name: String,
+    #[from_row(flatten)]
+    address: Address,  // reads street, city from the same row
+}
+```
+
+`flatten` shares the same row — the nested struct's column names must not conflict with the outer struct's columns.
 
 ## Array types
 
@@ -206,6 +356,54 @@ let rows = client.query("SELECT 1::int4 AS n", &[]).await?;
 // Named params work through the pool too:
 let rows = client.query_named("SELECT :id::int4", &[("id", &1i32 as &dyn SqlParam)]).await?;
 ```
+
+## Pool lifecycle hooks
+
+Customize pool behavior with lifecycle hooks. Connection-aware hooks receive a `&C` reference:
+
+```rust
+use pg_pool::LifecycleHooks;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+let checkout_count = Arc::new(AtomicU64::new(0));
+let cc = Arc::clone(&checkout_count);
+
+let release_count = Arc::new(AtomicU64::new(0));
+let rc = Arc::clone(&release_count);
+
+let hooks = LifecycleHooks {
+    on_create: Some(Box::new(|_conn| {
+        println!("new connection created");
+    })),
+    before_acquire: Some(Box::new(|| {
+        println!("about to check out a connection");
+    })),
+    on_checkout: Some(Box::new(move |_conn| {
+        cc.fetch_add(1, Ordering::Relaxed);
+    })),
+    on_checkin: Some(Box::new(|_conn| {
+        println!("connection returned to pool");
+    })),
+    after_release: Some(Box::new(move || {
+        rc.fetch_add(1, Ordering::Relaxed);
+    })),
+    on_destroy: Some(Box::new(|| {
+        println!("connection destroyed");
+    })),
+};
+
+let pool = TypedPool::new(config, hooks).await?;
+```
+
+| Hook | Parameter | When |
+|------|-----------|------|
+| `before_acquire` | none | Before checkout starts |
+| `on_create` | `&C` | After a new connection is created |
+| `on_checkout` | `&C` | When a connection is handed to the caller |
+| `on_checkin` | `&C` | When a connection passes health checks on return |
+| `after_release` | none | After a connection is fully released (all paths) |
+| `on_destroy` | none | When a connection is destroyed (expired/invalid/drain) |
 
 ## Streaming queries
 
