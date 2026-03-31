@@ -168,10 +168,11 @@ async fn test_hooks_all_fire() {
     let (l1, l2, l3, l4) = (log.clone(), log.clone(), log.clone(), log.clone());
 
     let hooks = LifecycleHooks {
-        on_create: Some(Box::new(move || { l1.lock().unwrap().push("create"); })),
-        on_checkout: Some(Box::new(move || { l2.lock().unwrap().push("checkout"); })),
-        on_checkin: Some(Box::new(move || { l3.lock().unwrap().push("checkin"); })),
+        on_create: Some(Box::new(move |_| { l1.lock().unwrap().push("create"); })),
+        on_checkout: Some(Box::new(move |_| { l2.lock().unwrap().push("checkout"); })),
+        on_checkin: Some(Box::new(move |_| { l3.lock().unwrap().push("checkin"); })),
         on_destroy: Some(Box::new(move || { l4.lock().unwrap().push("destroy"); })),
+        ..Default::default()
     };
 
     let mut config = test_config();

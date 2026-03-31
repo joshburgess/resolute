@@ -433,7 +433,7 @@ async fn test_lifecycle_hooks_on_create() {
     let counter = Arc::new(AtomicU64::new(0));
     let c = Arc::clone(&counter);
     let hooks = LifecycleHooks {
-        on_create: Some(Box::new(move || {
+        on_create: Some(Box::new(move |_| {
             c.fetch_add(1, Ordering::Relaxed);
         })),
         ..Default::default()
@@ -457,7 +457,7 @@ async fn test_lifecycle_hooks_on_checkout() {
     let counter = Arc::new(AtomicU64::new(0));
     let c = Arc::clone(&counter);
     let hooks = LifecycleHooks {
-        on_checkout: Some(Box::new(move || {
+        on_checkout: Some(Box::new(move |_| {
             c.fetch_add(1, Ordering::Relaxed);
         })),
         ..Default::default()
@@ -479,7 +479,7 @@ async fn test_lifecycle_hooks_on_checkin() {
     let counter = Arc::new(AtomicU64::new(0));
     let c = Arc::clone(&counter);
     let hooks = LifecycleHooks {
-        on_checkin: Some(Box::new(move || {
+        on_checkin: Some(Box::new(move |_| {
             c.fetch_add(1, Ordering::Relaxed);
         })),
         ..Default::default()
@@ -523,10 +523,11 @@ async fn test_all_hooks_fire_in_sequence() {
     let l4 = Arc::clone(&log);
 
     let hooks = LifecycleHooks {
-        on_create: Some(Box::new(move || { l1.lock().unwrap().push("create"); })),
-        on_checkout: Some(Box::new(move || { l2.lock().unwrap().push("checkout"); })),
-        on_checkin: Some(Box::new(move || { l3.lock().unwrap().push("checkin"); })),
+        on_create: Some(Box::new(move |_| { l1.lock().unwrap().push("create"); })),
+        on_checkout: Some(Box::new(move |_| { l2.lock().unwrap().push("checkout"); })),
+        on_checkin: Some(Box::new(move |_| { l3.lock().unwrap().push("checkin"); })),
         on_destroy: Some(Box::new(move || { l4.lock().unwrap().push("destroy"); })),
+        ..Default::default()
     };
 
     let mut config = test_config();

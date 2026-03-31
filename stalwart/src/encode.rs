@@ -156,7 +156,7 @@ impl Encode for crate::newtypes::PgInet {
 // ---------------------------------------------------------------------------
 
 /// Encode a PG array header: ndim=1, has_null, element_oid, dim_len, lower_bound=1.
-fn encode_array_header(buf: &mut BytesMut, has_null: bool, element_oid: u32, len: usize) {
+pub fn encode_array_header(buf: &mut BytesMut, has_null: bool, element_oid: u32, len: usize) {
     buf.put_i32(1); // ndim
     buf.put_i32(if has_null { 1 } else { 0 });
     buf.put_u32(element_oid);

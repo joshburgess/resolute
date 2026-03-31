@@ -78,6 +78,11 @@ impl Row {
         self.get_opt(idx)
     }
 
+    /// Check whether a column with the given name exists.
+    pub fn has_column(&self, name: &str) -> bool {
+        self.columns.iter().any(|c| c == name)
+    }
+
     /// Look up column index by name.
     fn column_index(&self, name: &str) -> Result<usize, TypedError> {
         self.columns

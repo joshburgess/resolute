@@ -131,13 +131,43 @@ impl Default for ConnPoolConfig {
 // Lifecycle hooks
 // ---------------------------------------------------------------------------
 
+/// A hook that receives a connection reference.
+type ConnHook<C> = Option<Box<dyn Fn(&C) + Send + Sync>>;
+/// A hook with no parameters.
+type Hook = Option<Box<dyn Fn() + Send + Sync>>;
+
 /// Lifecycle hook callbacks. All hooks are optional.
-#[derive(Default)]
-pub struct LifecycleHooks {
-    pub on_create: Option<Box<dyn Fn() + Send + Sync>>,
-    pub on_checkout: Option<Box<dyn Fn() + Send + Sync>>,
-    pub on_checkin: Option<Box<dyn Fn() + Send + Sync>>,
-    pub on_destroy: Option<Box<dyn Fn() + Send + Sync>>,
+///
+/// Connection-aware hooks (`on_create`, `on_checkout`, `on_checkin`) receive a `&C`
+/// reference to the connection. Non-connection hooks (`before_acquire`, `after_release`,
+/// `on_destroy`) take no parameters — `on_destroy` because the connection may be invalid,
+/// and `before_acquire`/`after_release` because no specific connection is involved yet.
+pub struct LifecycleHooks<C> {
+    /// Called after a new connection is created.
+    pub on_create: ConnHook<C>,
+    /// Called before attempting to acquire a connection (checkout starts).
+    pub before_acquire: Hook,
+    /// Called when a connection is checked out and ready to use.
+    pub on_checkout: ConnHook<C>,
+    /// Called when a connection passes health checks and is about to return to the pool.
+    pub on_checkin: ConnHook<C>,
+    /// Called after a connection is fully released (all exit paths from return).
+    pub after_release: Hook,
+    /// Called when a connection is destroyed (expired, invalid, or during drain).
+    pub on_destroy: Hook,
+}
+
+impl<C> Default for LifecycleHooks<C> {
+    fn default() -> Self {
+        Self {
+            on_create: None,
+            before_acquire: None,
+            on_checkout: None,
+            on_checkin: None,
+            after_release: None,
+            on_destroy: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +207,7 @@ struct Waiter<C> {
 /// Production-grade connection pool, generic over connection type `C`.
 pub struct ConnPool<C: Poolable> {
     config: ConnPoolConfig,
-    hooks: LifecycleHooks,
+    hooks: LifecycleHooks<C>,
     idle: Mutex<VecDeque<IdleConn<C>>>,
     waiters: Mutex<VecDeque<Waiter<C>>>,
     total_count: AtomicUsize,
@@ -195,7 +225,7 @@ impl<C: Poolable> ConnPool<C> {
     /// Create a new connection pool and spawn the maintenance task.
     pub async fn new(
         config: ConnPoolConfig,
-        hooks: LifecycleHooks,
+        hooks: LifecycleHooks<C>,
     ) -> Result<Arc<Self>, PoolError<C::Error>> {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
@@ -241,11 +271,15 @@ impl<C: Poolable> ConnPool<C> {
             return Err(PoolError::Draining);
         }
 
+        if let Some(ref hook) = self.hooks.before_acquire {
+            hook();
+        }
+
         if let Some(conn) = self.try_get_idle().await {
             self.in_use_count.fetch_add(1, Ordering::Relaxed);
             self.total_checkouts.fetch_add(1, Ordering::Relaxed);
             if let Some(ref hook) = self.hooks.on_checkout {
-                hook();
+                hook(&conn);
             }
             return Ok(PoolGuard {
                 conn: Some(conn),
@@ -259,7 +293,7 @@ impl<C: Poolable> ConnPool<C> {
                     self.in_use_count.fetch_add(1, Ordering::Relaxed);
                     self.total_checkouts.fetch_add(1, Ordering::Relaxed);
                     if let Some(ref hook) = self.hooks.on_checkout {
-                        hook();
+                        hook(&conn);
                     }
                     return Ok(PoolGuard {
                         conn: Some(conn),
@@ -283,7 +317,7 @@ impl<C: Poolable> ConnPool<C> {
                 self.in_use_count.fetch_add(1, Ordering::Relaxed);
                 self.total_checkouts.fetch_add(1, Ordering::Relaxed);
                 if let Some(ref hook) = self.hooks.on_checkout {
-                    hook();
+                    hook(&conn);
                 }
                 Ok(PoolGuard {
                     conn: Some(conn),
@@ -331,7 +365,7 @@ impl<C: Poolable> ConnPool<C> {
 
         self.total_created.fetch_add(1, Ordering::Relaxed);
         if let Some(ref hook) = self.hooks.on_create {
-            hook();
+            hook(&conn);
         }
 
         let jitter = jittered_duration(self.config.max_lifetime, self.config.max_lifetime_jitter);
@@ -370,6 +404,9 @@ impl<C: Poolable> ConnPool<C> {
             if let Some(ref hook) = self.hooks.on_destroy {
                 hook();
             }
+            if let Some(ref hook) = self.hooks.after_release {
+                hook();
+            }
             self.maybe_notify_drain();
             return;
         }
@@ -381,12 +418,15 @@ impl<C: Poolable> ConnPool<C> {
             if let Some(ref hook) = self.hooks.on_destroy {
                 hook();
             }
+            if let Some(ref hook) = self.hooks.after_release {
+                hook();
+            }
             self.maybe_notify_drain();
             return;
         }
 
         if let Some(ref hook) = self.hooks.on_checkin {
-            hook();
+            hook(&conn);
         }
 
         self.in_use_count.fetch_sub(1, Ordering::Relaxed);
@@ -394,6 +434,9 @@ impl<C: Poolable> ConnPool<C> {
         if self.draining.load(Ordering::Relaxed) {
             self.destroy_conn_stats();
             if let Some(ref hook) = self.hooks.on_destroy {
+                hook();
+            }
+            if let Some(ref hook) = self.hooks.after_release {
                 hook();
             }
             self.maybe_notify_drain();
@@ -405,7 +448,12 @@ impl<C: Poolable> ConnPool<C> {
             let mut waiters = self.waiters.lock().await;
             while let Some(waiter) = waiters.pop_front() {
                 match waiter.tx.send(conn) {
-                    Ok(()) => return,
+                    Ok(()) => {
+                        if let Some(ref hook) = self.hooks.after_release {
+                            hook();
+                        }
+                        return;
+                    }
                     Err(returned_conn) => {
                         conn = returned_conn;
                         continue;
@@ -420,6 +468,9 @@ impl<C: Poolable> ConnPool<C> {
             conn,
             expires_at: Instant::now() + jitter,
         });
+        if let Some(ref hook) = self.hooks.after_release {
+            hook();
+        }
     }
 
     fn maybe_notify_drain(&self) {

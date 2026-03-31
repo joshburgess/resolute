@@ -8,6 +8,9 @@
 //! The inner type must implement Encode, Decode, DecodeText, and PgType.
 //! All trait impls delegate to the inner type, with `type_oid` returning
 //! `Unspecified` so the server infers the domain's OID from context.
+//!
+//! Array support is automatic: `Vec<Email>` works if the inner type has
+//! a non-zero ARRAY_OID (e.g., String → text[] OID 1009).
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -55,8 +58,9 @@ pub fn derive(input: DeriveInput) -> TokenStream {
 
         impl #impl_generics stalwart::PgType for #name #ty_generics #where_clause {
             const OID: u32 = 0;
-            const ARRAY_OID: u32 = 0;
+            const ARRAY_OID: u32 = <#inner_type as stalwart::PgType>::ARRAY_OID;
         }
+
     };
 
     TokenStream::from(expanded)

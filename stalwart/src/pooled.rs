@@ -25,7 +25,7 @@ impl TypedPool {
     /// Create a new typed pool.
     pub async fn new(
         config: ConnPoolConfig,
-        hooks: LifecycleHooks,
+        hooks: LifecycleHooks<AsyncPoolable>,
     ) -> Result<Self, PoolError<pg_wired::PgWireError>> {
         let pool = ConnPool::new(config, hooks).await?;
         Ok(Self { pool })

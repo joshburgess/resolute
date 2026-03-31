@@ -1,5 +1,6 @@
 //! Derive macro for PostgreSQL enum types.
 //!
+//! String-based enums (PostgreSQL CREATE TYPE ... AS ENUM):
 //! ```ignore
 //! #[derive(PgEnum)]
 //! #[pg_type(rename_all = "snake_case")]  // default
@@ -10,15 +11,23 @@
 //!     SoSo,
 //! }
 //! ```
+//!
+//! Integer-backed enums (stored as int2/int4/int8 in PostgreSQL):
+//! ```ignore
+//! #[derive(PgEnum)]
+//! #[repr(i32)]
+//! enum Status {
+//!     Active = 1,
+//!     Inactive = 2,
+//!     Deleted = 3,
+//! }
+//! ```
 
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, LitStr};
 
 pub fn derive(input: DeriveInput) -> TokenStream {
-    let name = &input.ident;
-    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
-
     let variants = match &input.data {
         Data::Enum(data) => &data.variants,
         _ => panic!("PgEnum can only be derived for enums"),
@@ -33,6 +42,23 @@ pub fn derive(input: DeriveInput) -> TokenStream {
             );
         }
     }
+
+    if let Some(repr) = get_repr_int(&input.attrs) {
+        derive_int_enum(&input, &repr)
+    } else {
+        derive_string_enum(&input)
+    }
+}
+
+/// Generate impls for string-based PostgreSQL enum types.
+fn derive_string_enum(input: &DeriveInput) -> TokenStream {
+    let name = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let variants = match &input.data {
+        Data::Enum(data) => &data.variants,
+        _ => unreachable!(),
+    };
 
     let rename_all = get_container_rename_all(&input.attrs);
 
@@ -105,6 +131,144 @@ pub fn derive(input: DeriveInput) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+/// Generate impls for integer-backed enums (`#[repr(i16/i32/i64)]`).
+fn derive_int_enum(input: &DeriveInput, repr: &str) -> TokenStream {
+    let name = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let variants = match &input.data {
+        Data::Enum(data) => &data.variants,
+        _ => unreachable!(),
+    };
+
+    let repr_type: proc_macro2::TokenStream = repr.parse().unwrap();
+    let name_str = name.to_string();
+
+    // Determine OIDs based on repr type.
+    let (oid, array_oid, byte_len) = match repr {
+        "i16" => (21u32, 1005u32, 2usize),
+        "i32" => (23u32, 1007u32, 4usize),
+        "i64" => (20u32, 1016u32, 8usize),
+        _ => unreachable!(),
+    };
+
+    // Validate all variants have explicit discriminants.
+    for v in variants {
+        if v.discriminant.is_none() {
+            panic!(
+                "PgEnum with #[repr({repr})]: variant `{}` must have an explicit discriminant (e.g., = 1)",
+                v.ident
+            );
+        }
+    }
+
+    let encode_arms: Vec<_> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.ident;
+            let (_, expr) = v.discriminant.as_ref().unwrap();
+            quote! { #name::#ident => (#expr) as #repr_type }
+        })
+        .collect();
+
+    let decode_arms: Vec<_> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.ident;
+            let (_, expr) = v.discriminant.as_ref().unwrap();
+            quote! { x if x == (#expr) as #repr_type => Ok(#name::#ident) }
+        })
+        .collect();
+
+    let decode_text_arms: Vec<_> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.ident;
+            let (_, expr) = v.discriminant.as_ref().unwrap();
+            quote! { x if x == (#expr) as #repr_type => Ok(#name::#ident) }
+        })
+        .collect();
+
+    let expanded = quote! {
+        impl #impl_generics stalwart::Encode for #name #ty_generics #where_clause {
+            fn type_oid(&self) -> stalwart::TypeOid {
+                <#repr_type as stalwart::Encode>::type_oid(&(0 as #repr_type))
+            }
+
+            fn encode(&self, buf: &mut stalwart::BytesMut) {
+                let val: #repr_type = match self {
+                    #(#encode_arms,)*
+                };
+                stalwart::Encode::encode(&val, buf);
+            }
+        }
+
+        impl #impl_generics stalwart::Decode for #name #ty_generics #where_clause {
+            fn decode(buf: &[u8]) -> Result<Self, stalwart::TypedError> {
+                if buf.len() < #byte_len {
+                    return Err(stalwart::TypedError::Decode {
+                        column: 0,
+                        message: format!("{}: expected {} bytes, got {}", #name_str, #byte_len, buf.len()),
+                    });
+                }
+                let val = <#repr_type as stalwart::Decode>::decode(buf)?;
+                match val {
+                    #(#decode_arms,)*
+                    other => Err(stalwart::TypedError::Decode {
+                        column: 0,
+                        message: format!("unknown {} discriminant: {}", #name_str, other),
+                    }),
+                }
+            }
+        }
+
+        impl #impl_generics stalwart::DecodeText for #name #ty_generics #where_clause {
+            fn decode_text(s: &str) -> Result<Self, stalwart::TypedError> {
+                let val: #repr_type = s.parse().map_err(|e| stalwart::TypedError::Decode {
+                    column: 0,
+                    message: format!("{}: failed to parse integer: {}", #name_str, e),
+                })?;
+                match val {
+                    #(#decode_text_arms,)*
+                    other => Err(stalwart::TypedError::Decode {
+                        column: 0,
+                        message: format!("unknown {} discriminant: {}", #name_str, other),
+                    }),
+                }
+            }
+        }
+
+        impl #impl_generics stalwart::PgType for #name #ty_generics #where_clause {
+            const OID: u32 = #oid;
+            const ARRAY_OID: u32 = #array_oid;
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// Check for `#[repr(i16)]`, `#[repr(i32)]`, or `#[repr(i64)]`.
+fn get_repr_int(attrs: &[syn::Attribute]) -> Option<String> {
+    for attr in attrs {
+        if !attr.path().is_ident("repr") {
+            continue;
+        }
+        let mut repr_type = None;
+        let _ = attr.parse_nested_meta(|meta| {
+            for candidate in &["i16", "i32", "i64"] {
+                if meta.path.is_ident(candidate) {
+                    repr_type = Some(candidate.to_string());
+                }
+            }
+            Ok(())
+        });
+        if let Some(r) = repr_type {
+            return Some(r);
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,16 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput, Data, Fields, LitStr};
 
+/// Derive `FromRow` for structs with named fields.
+///
+/// # Field attributes
+///
+/// - `#[from_row(rename = "col")]` — use a different column name
+/// - `#[from_row(skip)]` — skip the field, use `Default::default()`
+/// - `#[from_row(default)]` — use `Default::default()` if column is NULL or missing
+/// - `#[from_row(json)]` — deserialize a JSON/JSONB column via serde
+/// - `#[from_row(try_from = "SourceType")]` — decode as SourceType, then `TryFrom` convert
+/// - `#[from_row(flatten)]` — call `FromRow::from_row` on a nested struct
 #[proc_macro_derive(FromRow, attributes(from_row))]
 pub fn derive_from_row(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -26,20 +36,110 @@ pub fn derive_from_row(input: TokenStream) -> TokenStream {
     let field_extractions = fields.iter().map(|field| {
         let field_name = field.ident.as_ref().unwrap();
         let field_type = &field.ty;
+        let attrs = FromRowFieldAttrs::parse(field);
 
-        // Check for #[from_row(rename = "...")] attribute.
-        let col_name = get_rename_attr(field)
+        let col_name = attrs.rename
             .unwrap_or_else(|| field_name.to_string());
 
-        // Check if the field type is Option<T>.
+        if attrs.skip {
+            return quote! { #field_name: Default::default() };
+        }
+
+        if attrs.flatten {
+            return quote! {
+                #field_name: <#field_type as stalwart::FromRow>::from_row(row)?
+            };
+        }
+
+        if let Some(ref source_type) = attrs.try_from {
+            if is_option_type(field_type) {
+                return quote! {
+                    #field_name: {
+                        let __opt: Option<#source_type> = row.get_opt_by_name(#col_name)?;
+                        match __opt {
+                            Some(__src) => Some(
+                                <_ as std::convert::TryFrom<#source_type>>::try_from(__src)
+                                    .map_err(|e| stalwart::TypedError::Decode {
+                                        column: 0,
+                                        message: format!("try_from({}): {}", #col_name, e),
+                                    })?
+                            ),
+                            None => None,
+                        }
+                    }
+                };
+            } else {
+                return quote! {
+                    #field_name: {
+                        let __src: #source_type = row.get_by_name(#col_name)?;
+                        <#field_type as std::convert::TryFrom<#source_type>>::try_from(__src)
+                            .map_err(|e| stalwart::TypedError::Decode {
+                                column: 0,
+                                message: format!("try_from({}): {}", #col_name, e),
+                            })?
+                    }
+                };
+            }
+        }
+
+        if attrs.json {
+            if is_option_type(field_type) {
+                return quote! {
+                    #field_name: {
+                        let __opt: Option<serde_json::Value> = row.get_opt_by_name(#col_name)?;
+                        match __opt {
+                            Some(__v) => Some(
+                                serde_json::from_value(__v).map_err(|e| stalwart::TypedError::Decode {
+                                    column: 0,
+                                    message: format!("json({}): {}", #col_name, e),
+                                })?
+                            ),
+                            None => None,
+                        }
+                    }
+                };
+            } else {
+                return quote! {
+                    #field_name: {
+                        let __v: serde_json::Value = row.get_by_name(#col_name)?;
+                        serde_json::from_value(__v).map_err(|e| stalwart::TypedError::Decode {
+                            column: 0,
+                            message: format!("json({}): {}", #col_name, e),
+                        })?
+                    }
+                };
+            }
+        }
+
+        if attrs.default {
+            if is_option_type(field_type) {
+                return quote! {
+                    #field_name: if row.has_column(#col_name) {
+                        row.get_opt_by_name(#col_name)?
+                    } else {
+                        None
+                    }
+                };
+            } else {
+                return quote! {
+                    #field_name: if row.has_column(#col_name) {
+                        match row.get_by_name(#col_name) {
+                            Ok(v) => v,
+                            Err(stalwart::TypedError::UnexpectedNull(_)) => Default::default(),
+                            Err(e) => return Err(e),
+                        }
+                    } else {
+                        Default::default()
+                    }
+                };
+            }
+        }
+
+        // Normal field — no special attributes.
         if is_option_type(field_type) {
-            quote! {
-                #field_name: row.get_opt_by_name(#col_name)?
-            }
+            quote! { #field_name: row.get_opt_by_name(#col_name)? }
         } else {
-            quote! {
-                #field_name: row.get_by_name(#col_name)?
-            }
+            quote! { #field_name: row.get_by_name(#col_name)? }
         }
     });
 
@@ -56,26 +156,72 @@ pub fn derive_from_row(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-/// Extract the `rename = "..."` value from `#[from_row(rename = "...")]`.
-fn get_rename_attr(field: &syn::Field) -> Option<String> {
-    for attr in &field.attrs {
-        if !attr.path().is_ident("from_row") {
-            continue;
-        }
-        let mut rename_value = None;
-        attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("rename") {
-                let value = meta.value()?;
-                let s: LitStr = value.parse()?;
-                rename_value = Some(s.value());
+// ---------------------------------------------------------------------------
+// FromRow attribute parsing
+// ---------------------------------------------------------------------------
+
+/// Parsed attributes for a single field in `#[derive(FromRow)]`.
+struct FromRowFieldAttrs {
+    rename: Option<String>,
+    skip: bool,
+    default: bool,
+    json: bool,
+    try_from: Option<syn::Type>,
+    flatten: bool,
+}
+
+impl FromRowFieldAttrs {
+    fn parse(field: &syn::Field) -> Self {
+        let mut attrs = Self {
+            rename: None,
+            skip: false,
+            default: false,
+            json: false,
+            try_from: None,
+            flatten: false,
+        };
+
+        for attr in &field.attrs {
+            if !attr.path().is_ident("from_row") {
+                continue;
             }
-            Ok(())
-        }).ok();
-        if let Some(v) = rename_value {
-            return Some(v);
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("rename") {
+                    let value = meta.value()?;
+                    let s: LitStr = value.parse()?;
+                    attrs.rename = Some(s.value());
+                } else if meta.path.is_ident("skip") {
+                    attrs.skip = true;
+                } else if meta.path.is_ident("default") {
+                    attrs.default = true;
+                } else if meta.path.is_ident("json") {
+                    attrs.json = true;
+                } else if meta.path.is_ident("try_from") {
+                    let value = meta.value()?;
+                    let s: LitStr = value.parse()?;
+                    let ty: syn::Type = syn::parse_str(&s.value())
+                        .expect("from_row(try_from = \"...\") must be a valid Rust type");
+                    attrs.try_from = Some(ty);
+                } else if meta.path.is_ident("flatten") {
+                    attrs.flatten = true;
+                }
+                Ok(())
+            }).ok();
         }
+
+        // Validate incompatible combinations.
+        if attrs.skip && (attrs.rename.is_some() || attrs.default || attrs.json || attrs.try_from.is_some() || attrs.flatten) {
+            panic!("from_row(skip) cannot be combined with other attributes");
+        }
+        if attrs.flatten && (attrs.rename.is_some() || attrs.json || attrs.try_from.is_some()) {
+            panic!("from_row(flatten) cannot be combined with rename, json, or try_from");
+        }
+        if attrs.json && attrs.try_from.is_some() {
+            panic!("from_row(json) cannot be combined with try_from");
+        }
+
+        attrs
     }
-    None
 }
 
 /// Check if a type is `Option<T>`.

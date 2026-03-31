@@ -115,7 +115,7 @@ mod types;
 
 pub use checked::{CheckedQuery, UncheckedQuery};
 pub use decode::{Decode, DecodeText};
-pub use encode::{Encode, SqlParam};
+pub use encode::{Encode, SqlParam, encode_array_header};
 pub use error::TypedError;
 pub use executor::Executor;
 pub use oid::TypeOid;

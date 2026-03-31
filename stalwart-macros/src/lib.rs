@@ -340,14 +340,25 @@ fn query_impl(input: QueryInput) -> TokenStream {
         })
         .collect();
 
-    let field_names: Vec<_> = column_infos
+    // Parse type overrides from column names (e.g., "id: UserId").
+    let overrides: Vec<_> = column_infos
         .iter()
-        .map(|c| format_ident!("{}", sanitize_ident(&c.name)))
+        .map(|c| parse_type_override(&c.name))
+        .collect();
+
+    let field_names: Vec<_> = overrides
+        .iter()
+        .map(|(name, _)| format_ident!("{}", sanitize_ident(name)))
         .collect();
     let field_types: Vec<_> = column_infos
         .iter()
-        .map(|c| {
-            let base = oid_to_rust_type(c.type_oid);
+        .zip(overrides.iter())
+        .map(|(c, (_, type_override))| {
+            let base = if let Some(ref custom) = type_override {
+                custom.clone()
+            } else {
+                oid_to_rust_type(c.type_oid)
+            };
             if c.nullable {
                 quote! { Option<#base> }
             } else {
@@ -510,7 +521,10 @@ fn query_scalar_impl(input: QueryInput) -> TokenStream {
             .into();
     }
 
-    let scalar_type = oid_to_rust_type(column_infos[0].type_oid);
+    let scalar_type = {
+        let (_, type_override) = parse_type_override(&column_infos[0].name);
+        type_override.unwrap_or_else(|| oid_to_rust_type(column_infos[0].type_oid))
+    };
     let param_refs: Vec<_> = params
         .iter()
         .map(|p| quote! { &#p as &dyn stalwart::SqlParam })
@@ -727,6 +741,33 @@ fn sanitize_ident(name: &str) -> String {
     } else {
         s
     }
+}
+
+/// Parse a type override from a column name.
+///
+/// Supports `"col_name: RustType"` syntax (e.g., `"id: UserId"`).
+/// Skips `::` (PostgreSQL casts) to avoid false positives.
+/// Returns `(actual_name, Some(type))` if override found, or `(original_name, None)`.
+fn parse_type_override(column_name: &str) -> (String, Option<proc_macro2::TokenStream>) {
+    let bytes = column_name.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b':' {
+            // Skip `::` (PostgreSQL cast syntax).
+            let prev_colon = i > 0 && bytes[i - 1] == b':';
+            let next_colon = i + 1 < bytes.len() && bytes[i + 1] == b':';
+            if prev_colon || next_colon {
+                continue;
+            }
+            let name = column_name[..i].trim();
+            let type_str = column_name[i + 1..].trim();
+            if !type_str.is_empty() {
+                if let Ok(ty) = syn::parse_str::<syn::Type>(type_str) {
+                    return (name.to_string(), Some(quote! { #ty }));
+                }
+            }
+        }
+    }
+    (column_name.to_string(), None)
 }
 
 /// FNV-1a hash.
