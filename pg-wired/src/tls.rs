@@ -74,10 +74,40 @@ impl MaybeTlsStream {
 ///
 /// Sends SSLRequest. If the server responds `S`, upgrades the connection
 /// using rustls. If `N`, returns the plain stream.
+/// TLS configuration for PostgreSQL connections.
+#[cfg(feature = "tls")]
+pub struct TlsConfig {
+    /// Custom root CA certificates. If empty, uses system root CAs.
+    pub root_certs: Vec<Vec<u8>>,
+    /// Client certificate and private key for mTLS (optional).
+    pub client_cert: Option<(Vec<Vec<u8>>, Vec<u8>)>,
+}
+
+#[cfg(feature = "tls")]
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self {
+            root_certs: Vec::new(),
+            client_cert: None,
+        }
+    }
+}
+
+/// Negotiate TLS with default configuration (system root CAs, no client cert).
 #[cfg(feature = "tls")]
 pub async fn negotiate_tls(
+    stream: TcpStream,
+    hostname: &str,
+) -> Result<MaybeTlsStream, crate::error::PgWireError> {
+    negotiate_tls_with_config(stream, hostname, &TlsConfig::default()).await
+}
+
+/// Negotiate TLS with custom configuration (custom CAs, client certs).
+#[cfg(feature = "tls")]
+pub async fn negotiate_tls_with_config(
     mut stream: TcpStream,
     hostname: &str,
+    config: &TlsConfig,
 ) -> Result<MaybeTlsStream, crate::error::PgWireError> {
     use bytes::{BufMut, BytesMut};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -96,13 +126,43 @@ pub async fn negotiate_tls(
         b'S' => {
             // Server supports SSL — upgrade.
             let mut root_store = rustls::RootCertStore::empty();
-            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            if config.root_certs.is_empty() {
+                // Use system root CAs.
+                root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            } else {
+                // Use custom root CAs.
+                for cert_der in &config.root_certs {
+                    root_store
+                        .add(rustls_pki_types::CertificateDer::from(cert_der.clone()))
+                        .map_err(|e| crate::error::PgWireError::Protocol(
+                            format!("invalid root certificate: {e}"),
+                        ))?;
+                }
+            }
 
-            let config = rustls::ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_no_client_auth();
+            let tls_config = if let Some((ref cert_chain, ref key_der)) = config.client_cert {
+                // mTLS: client certificate authentication.
+                let certs: Vec<rustls_pki_types::CertificateDer<'static>> = cert_chain
+                    .iter()
+                    .map(|c| rustls_pki_types::CertificateDer::from(c.clone()))
+                    .collect();
+                let key = rustls_pki_types::PrivateKeyDer::try_from(key_der.clone())
+                    .map_err(|e| crate::error::PgWireError::Protocol(
+                        format!("invalid client private key: {e}"),
+                    ))?;
+                rustls::ClientConfig::builder()
+                    .with_root_certificates(root_store)
+                    .with_client_auth_cert(certs, key)
+                    .map_err(|e| crate::error::PgWireError::Protocol(
+                        format!("TLS client auth config error: {e}"),
+                    ))?
+            } else {
+                rustls::ClientConfig::builder()
+                    .with_root_certificates(root_store)
+                    .with_no_client_auth()
+            };
 
-            let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config));
+            let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(tls_config));
             let server_name = rustls_pki_types::ServerName::try_from(hostname.to_string())
                 .map_err(|e| crate::error::PgWireError::Protocol(format!("invalid hostname: {e}")))?;
 

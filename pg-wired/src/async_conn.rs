@@ -188,7 +188,8 @@ impl AsyncConn {
 
     /// Look up or allocate a statement name.
     /// Uses an LRU-style eviction: when the cache is full, the oldest entry
-    /// (by insertion order / counter) is removed to make room.
+    /// (by insertion order / counter) is removed and a Close message is queued
+    /// to free the server-side prepared statement.
     pub fn lookup_or_alloc(&self, sql: &str) -> (Vec<u8>, bool) {
         let mut cache = match self.stmt_cache.lock() {
             Ok(c) => c,
@@ -197,14 +198,32 @@ impl AsyncConn {
         if let Some((name, _)) = cache.get(sql) {
             return (name.as_bytes().to_vec(), false);
         }
-        // LRU eviction: remove the entry with the lowest counter value.
+        // LRU eviction: remove the entry with the lowest counter value
+        // and send a Close message to free the server-side prepared statement.
         if cache.len() >= 256 {
-            if let Some(oldest_key) = cache
+            if let Some((oldest_key, oldest_name)) = cache
                 .iter()
                 .min_by_key(|(_, (_, counter))| *counter)
-                .map(|(k, _)| k.clone())
+                .map(|(k, (name, _))| (k.clone(), name.clone()))
             {
                 cache.remove(&oldest_key);
+                // Queue a Close + Sync to free the server-side statement.
+                // Fire-and-forget: if the channel is full or closed, skip it.
+                let mut close_buf = BytesMut::with_capacity(32);
+                frontend::encode_message(
+                    &FrontendMsg::Close {
+                        kind: b'S',
+                        name: oldest_name.as_bytes(),
+                    },
+                    &mut close_buf,
+                );
+                frontend::encode_message(&FrontendMsg::Sync, &mut close_buf);
+                let (tx, _rx) = oneshot::channel();
+                let _ = self.request_tx.try_send(PipelineRequest {
+                    messages: close_buf,
+                    collector: ResponseCollector::Drain,
+                    response_tx: tx,
+                });
             }
         }
         let n = self.stmt_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -238,6 +257,45 @@ impl AsyncConn {
             PipelineResponse::Rows { command_tag, .. } => {
                 Ok(parse_copy_count(&command_tag))
             }
+            PipelineResponse::Done => Ok(0),
+        }
+    }
+
+    /// Execute COPY FROM STDIN with streaming: sends the COPY command, then
+    /// reads data from an async reader in chunks, avoiding buffering the entire
+    /// payload in memory.
+    ///
+    /// ```ignore
+    /// use tokio::fs::File;
+    /// let file = File::open("data.csv").await?;
+    /// let count = conn.copy_in_stream("COPY users FROM STDIN WITH (FORMAT csv)", file).await?;
+    /// ```
+    pub async fn copy_in_stream<R: tokio::io::AsyncRead + Unpin>(
+        &self,
+        copy_sql: &str,
+        mut reader: R,
+    ) -> Result<u64, PgWireError> {
+        use tokio::io::AsyncReadExt;
+        const CHUNK_SIZE: usize = 1024 * 1024; // 1MB chunks
+
+        // Send the COPY command.
+        let mut buf = BytesMut::with_capacity(copy_sql.len() + 16);
+        frontend::encode_message(&FrontendMsg::Query(copy_sql.as_bytes()), &mut buf);
+
+        // Read and send data in chunks.
+        let mut chunk = vec![0u8; CHUNK_SIZE];
+        loop {
+            let n = reader.read(&mut chunk).await?;
+            if n == 0 {
+                break;
+            }
+            frontend::encode_message(&FrontendMsg::CopyData(&chunk[..n]), &mut buf);
+        }
+        frontend::encode_message(&FrontendMsg::CopyDone, &mut buf);
+
+        let resp = self.submit(buf, ResponseCollector::CopyIn { data: Vec::new() }).await?;
+        match resp {
+            PipelineResponse::Rows { command_tag, .. } => Ok(parse_copy_count(&command_tag)),
             PipelineResponse::Done => Ok(0),
         }
     }
@@ -298,6 +356,8 @@ impl AsyncConn {
     }
 
     /// Execute a parameterized query with automatic statement caching.
+    /// If a cached statement is invalidated by a schema change (PG error 26000
+    /// or 0A000), automatically evicts the cache entry, re-parses, and retries once.
     pub async fn exec_query(
         &self,
         sql: &str,
@@ -305,8 +365,18 @@ impl AsyncConn {
         param_oids: &[u32],
     ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
         let (stmt_name, needs_parse) = self.lookup_or_alloc(sql);
-        self.query(sql, params, param_oids, &stmt_name, needs_parse)
-            .await
+        match self.query(sql, params, param_oids, &stmt_name, needs_parse).await {
+            Ok(rows) => Ok(rows),
+            Err(PgWireError::Pg(ref pg_err))
+                if !needs_parse && is_stale_statement_error(pg_err) =>
+            {
+                tracing::debug!(sql = sql, "prepared statement invalidated — re-parsing");
+                self.invalidate_statement(sql);
+                let (stmt_name, _) = self.lookup_or_alloc(sql);
+                self.query(sql, params, param_oids, &stmt_name, true).await
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Maximum time to wait for a response from the reader task.
@@ -559,7 +629,11 @@ async fn writer_task(
         // Wait for the first request.
         let first = match rx.recv().await {
             Some(req) => req,
-            None => return, // Channel closed.
+            None => {
+                // Channel closed — drain any pending responses with ConnectionClosed.
+                drain_pending_on_exit(&pending).await;
+                return;
+            }
         };
 
         // Drain any additional queued requests (batch coalescing).
@@ -598,6 +672,8 @@ async fn writer_task(
                     msg.clone(),
                 ))));
             }
+            // Drain any already-pending responses so the reader doesn't hang.
+            drain_pending_on_exit(&pending).await;
             return;
         }
 
@@ -610,6 +686,15 @@ async fn writer_task(
         }
         // Wake the reader task to process the newly enqueued responses.
         pending_notify.notify_one();
+    }
+}
+
+/// On writer exit, drain all pending responses with ConnectionClosed errors
+/// so callers don't wait for the 5-minute timeout.
+async fn drain_pending_on_exit(pending: &Arc<Mutex<VecDeque<PendingResponse>>>) {
+    let mut pq = pending.lock().await;
+    while let Some(pr) = pq.pop_front() {
+        let _ = pr.response_tx.send(Err(PgWireError::ConnectionClosed));
     }
 }
 
@@ -865,6 +950,13 @@ async fn collect_copy_out(
             _ => {}
         }
     }
+}
+
+/// Check if a PostgreSQL error indicates a stale/invalidated prepared statement.
+/// Error codes: 26000 (invalid_sql_statement_name), 0A000 (feature_not_supported
+/// — used when cached plan changes type).
+fn is_stale_statement_error(err: &crate::protocol::types::PgError) -> bool {
+    matches!(err.code.as_str(), "26000" | "0A000")
 }
 
 fn parse_copy_count(tag: &str) -> u64 {

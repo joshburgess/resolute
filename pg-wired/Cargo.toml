@@ -12,6 +12,7 @@ hmac = "0.12"
 base64 = "0.22"
 rand = "0.9"
 thiserror = "2"
+socket2 = "0.5"
 tracing = "0.1"
 rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-rustls = { version = "0.26", optional = true }

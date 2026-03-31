@@ -158,7 +158,26 @@ pub fn encode_message(msg: &FrontendMsg<'_>, buf: &mut BytesMut) {
 }
 
 /// Encode the startup message (no message type tag, special format).
-pub fn encode_startup(user: &str, database: &str, buf: &mut BytesMut) {
+/// `extra_params` are key-value pairs for additional startup parameters
+/// (e.g., `application_name`, `client_encoding`, `options`).
+pub fn encode_startup(
+    user: &str,
+    database: &str,
+    buf: &mut BytesMut,
+) {
+    encode_startup_with_params(user, database, &[], buf);
+}
+
+/// Encode a startup message with additional parameters.
+///
+/// Standard parameters include `application_name`, `client_encoding`,
+/// `options`, `search_path`, etc. These appear in `pg_stat_activity`.
+pub fn encode_startup_with_params(
+    user: &str,
+    database: &str,
+    extra_params: &[(&str, &str)],
+    buf: &mut BytesMut,
+) {
     let mut body = BytesMut::new();
     body.put_i32(196608); // Protocol version 3.0
     body.put_slice(b"user\0");
@@ -167,6 +186,12 @@ pub fn encode_startup(user: &str, database: &str, buf: &mut BytesMut) {
     body.put_slice(b"database\0");
     body.put_slice(database.as_bytes());
     body.put_u8(0);
+    for (key, value) in extra_params {
+        body.put_slice(key.as_bytes());
+        body.put_u8(0);
+        body.put_slice(value.as_bytes());
+        body.put_u8(0);
+    }
     body.put_u8(0); // End of parameters
 
     buf.put_i32((4 + body.len()) as i32);

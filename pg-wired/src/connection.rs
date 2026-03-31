@@ -23,6 +23,40 @@ pub struct WireConn {
 const RECV_BUF_SIZE: usize = 32 * 1024; // 32KB recv buffer
 
 impl WireConn {
+    /// Choose the best SCRAM mechanism based on TLS state and server support.
+    /// Returns (ChannelBinding, mechanism_name_bytes).
+    fn choose_scram_mechanism(
+        &self,
+        mechanisms: &[String],
+    ) -> Result<(crate::scram::ChannelBinding, &'static [u8]), PgWireError> {
+        // If TLS is active and server supports SCRAM-SHA-256-PLUS, use channel binding.
+        #[cfg(feature = "tls")]
+        if let MaybeTlsStream::Tls(ref tls) = self.stream {
+            if mechanisms.iter().any(|m| m == "SCRAM-SHA-256-PLUS") {
+                if let Some(certs) = tls.get_ref().1.peer_certificates() {
+                    if let Some(cert) = certs.first() {
+                        use sha2::{Digest, Sha256};
+                        let hash = Sha256::digest(cert.as_ref()).to_vec();
+                        return Ok((
+                            crate::scram::ChannelBinding::TlsServerEndPoint(hash),
+                            b"SCRAM-SHA-256-PLUS",
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Fall back to plain SCRAM-SHA-256.
+        if mechanisms.iter().any(|m| m == "SCRAM-SHA-256") {
+            Ok((crate::scram::ChannelBinding::None, b"SCRAM-SHA-256"))
+        } else {
+            Err(PgWireError::Protocol(format!(
+                "No supported SASL mechanism: {:?}",
+                mechanisms
+            )))
+        }
+    }
+
     /// Check if the connection has unconsumed data in the receive buffer.
     pub fn has_pending_data(&self) -> bool {
         !self.recv_buf.is_empty()
@@ -35,8 +69,36 @@ impl WireConn {
         password: &str,
         database: &str,
     ) -> Result<Self, PgWireError> {
+        Self::connect_with_params(addr, user, password, database, &[]).await
+    }
+
+    /// Connect with additional startup parameters.
+    ///
+    /// Parameters are sent in the startup message and appear in `pg_stat_activity`.
+    /// Common parameters: `application_name`, `client_encoding`, `options`.
+    ///
+    /// ```ignore
+    /// let conn = WireConn::connect_with_params(
+    ///     "127.0.0.1:5432", "user", "pass", "mydb",
+    ///     &[("application_name", "my-service")],
+    /// ).await?;
+    /// ```
+    pub async fn connect_with_params(
+        addr: &str,
+        user: &str,
+        password: &str,
+        database: &str,
+        startup_params: &[(&str, &str)],
+    ) -> Result<Self, PgWireError> {
         let stream = TcpStream::connect(addr).await?;
         stream.set_nodelay(true)?;
+
+        // Enable TCP keepalive to detect dead connections behind firewalls/LBs.
+        let socket = socket2::SockRef::from(&stream);
+        let keepalive = socket2::TcpKeepalive::new()
+            .with_time(std::time::Duration::from_secs(60))
+            .with_interval(std::time::Duration::from_secs(15));
+        let _ = socket.set_tcp_keepalive(&keepalive);
 
         // TLS negotiation (if feature enabled).
         #[cfg(feature = "tls")]
@@ -55,9 +117,9 @@ impl WireConn {
             params: std::collections::HashMap::new(),
         };
 
-        // Send startup message.
+        // Send startup message with optional extra parameters.
         let mut buf = BytesMut::new();
-        frontend::encode_startup(user, database, &mut buf);
+        frontend::encode_startup_with_params(user, database, startup_params, &mut buf);
         conn.send_raw(&buf).await?;
 
         // Authentication loop.
@@ -77,18 +139,13 @@ impl WireConn {
                     conn.send_raw(&buf).await?;
                 }
                 BackendMsg::AuthenticationSASL { mechanisms } => {
-                    if !mechanisms.iter().any(|m| m == "SCRAM-SHA-256") {
-                        return Err(PgWireError::Protocol(
-                            format!("No supported SASL mechanism: {:?}", mechanisms),
-                        ));
-                    }
-                    // Use channel binding if TLS is active.
-                    let cb = crate::scram::ChannelBinding::None;
+                    // Prefer SCRAM-SHA-256-PLUS (with channel binding) when TLS is active.
+                    let (cb, mechanism) = conn.choose_scram_mechanism(&mechanisms)?;
                     let (scram, client_first) = ScramClient::new(password, cb);
                     let mut buf = BytesMut::new();
                     frontend::encode_message(
                         &FrontendMsg::SASLInitialResponse {
-                            mechanism: b"SCRAM-SHA-256",
+                            mechanism,
                             data: &client_first,
                         },
                         &mut buf,
