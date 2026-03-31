@@ -4,7 +4,7 @@
 >
 > *adjective* — admirably purposeful, determined, and unwavering.
 >
-> *noun* — one who is determined.
+> *noun* — one who is steadfast and unyielding in purpose, firm in conviction even in the face of opposition or difficulty.
 
 A ground-up PostgreSQL client stack for Rust. Compile-time checked queries, binary wire protocol, async connection pool — no dependencies on tokio-postgres, sqlx, deadpool, bb8, or any other existing PostgreSQL or connection pool library.
 
