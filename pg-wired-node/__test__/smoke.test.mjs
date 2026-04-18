@@ -33,18 +33,112 @@ test('connect + simpleQuery returns server version', async (t) => {
   assert.match(version, /PostgreSQL/);
 });
 
-test('parameterized query exposes field names', async (t) => {
+test('parameterized query decodes binary int4 natively', async (t) => {
   if (!urlStr) return t.skip('PG_URL not set');
-  const { connect } = await loadDriver();
+  const { connect, binary } = await loadDriver();
   const conn = await connect(parseUrl(urlStr));
+  const OID = binary.TYPE_OID;
   const res = await conn.query(
     'SELECT $1::int + $2::int AS sum',
-    [Buffer.from('2'), Buffer.from('3')],
-    [],
+    [2, 3],
+    [OID.INT4, OID.INT4],
   );
   assert.equal(res.rows.length, 1);
-  assert.equal(res.rows[0][0], '5');
+  assert.equal(res.rows[0][0], 5);
   assert.equal(res.fields[0].name, 'sum');
+  assert.equal(res.fields[0].format, 1);
+});
+
+test('query decodes bool, int8, float8, text, uuid, timestamptz natively', async (t) => {
+  if (!urlStr) return t.skip('PG_URL not set');
+  const { connect, binary } = await loadDriver();
+  const conn = await connect(urlStr);
+  const OID = binary.TYPE_OID;
+  const uuidStr = '550e8400-e29b-41d4-a716-446655440000';
+  const date = new Date('2024-06-01T12:34:56.000Z');
+  const res = await conn.query(
+    'SELECT $1::bool AS b, $2::int8 AS i8, $3::float8 AS f, $4::text AS t, $5::uuid AS u, $6::timestamptz AS ts',
+    [true, 9_999_999_999n, 3.14, 'hello', uuidStr, date],
+    [OID.BOOL, OID.INT8, OID.FLOAT8, OID.TEXT, OID.UUID, OID.TIMESTAMPTZ],
+  );
+  const [b, i8, f, tStr, u, ts] = res.rows[0];
+  assert.equal(b, true);
+  assert.equal(i8, 9_999_999_999n);
+  assert.equal(f, 3.14);
+  assert.equal(tStr, 'hello');
+  assert.equal(u, uuidStr);
+  assert.ok(ts instanceof Date);
+  assert.equal(ts.getTime(), date.getTime());
+  await conn.close();
+});
+
+test('query infers oids from JS values when not given', async (t) => {
+  if (!urlStr) return t.skip('PG_URL not set');
+  const { connect } = await loadDriver();
+  const conn = await connect(urlStr);
+  const res = await conn.query('SELECT $1::text AS s, $2::bool AS b', ['world', false]);
+  assert.equal(res.rows[0][0], 'world');
+  assert.equal(res.rows[0][1], false);
+  await conn.close();
+});
+
+test('query handles null params and null cells', async (t) => {
+  if (!urlStr) return t.skip('PG_URL not set');
+  const { connect, binary } = await loadDriver();
+  const conn = await connect(urlStr);
+  const res = await conn.query(
+    'SELECT $1::int AS n, NULL::text AS t',
+    [null],
+    [binary.TYPE_OID.INT4],
+  );
+  assert.equal(res.rows[0][0], null);
+  assert.equal(res.rows[0][1], null);
+  await conn.close();
+});
+
+test('pool.query decodes binary results natively', async (t) => {
+  if (!urlStr) return t.skip('PG_URL not set');
+  const { createPool, binary } = await loadDriver();
+  const pool = await createPool(urlStr, 2);
+  const OID = binary.TYPE_OID;
+  const res = await pool.query(
+    'SELECT $1::int AS n, $2::text AS s',
+    [7, 'ok'],
+    [OID.INT4, OID.TEXT],
+  );
+  assert.equal(res.rows[0][0], 7);
+  assert.equal(res.rows[0][1], 'ok');
+  await pool.close();
+});
+
+test('query round-trips date as midnight UTC', async (t) => {
+  if (!urlStr) return t.skip('PG_URL not set');
+  const { connect, binary } = await loadDriver();
+  const conn = await connect(urlStr);
+  const d = new Date('2024-06-01T00:00:00.000Z');
+  const res = await conn.query(
+    'SELECT $1::date AS d',
+    [d],
+    [binary.TYPE_OID.DATE],
+  );
+  const got = res.rows[0][0];
+  assert.ok(got instanceof Date);
+  assert.equal(got.getTime(), d.getTime());
+  await conn.close();
+});
+
+test('query round-trips jsonb natively', async (t) => {
+  if (!urlStr) return t.skip('PG_URL not set');
+  const { connect, binary } = await loadDriver();
+  const conn = await connect(urlStr);
+  const payload = { a: 1, b: [true, null, 'x'] };
+  const res = await conn.query(
+    'SELECT $1::jsonb AS j',
+    [payload],
+    [binary.TYPE_OID.JSONB],
+  );
+  assert.deepEqual(res.rows[0][0], payload);
+  await conn.close();
 });
 
 test('pool round-robins across connections', async (t) => {
