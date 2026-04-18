@@ -791,6 +791,41 @@ Object.defineProperty(native.Pool.prototype, 'query', {
   configurable: true,
 });
 
+// Pipeline: replace push with a JS-value binary encoder, and wrap execute to
+// decode each result's rows per-field. Pipeline.execute is already wrapped for
+// error reshaping above.
+const _nativePipelinePush = native.Pipeline.prototype.push;
+const _wrappedPipelineExecute = native.Pipeline.prototype.execute;
+
+Object.defineProperty(native.Pipeline.prototype, 'push', {
+  value: function (sql, params = [], oids) {
+    const oidList = Array.isArray(oids) ? oids : [];
+    const { buffers, formats, oids: resolvedOids } = encodeParams(params, oidList);
+    _nativePipelinePush.call(this, sql, buffers, resolvedOids, formats, [1]);
+    return this;
+  },
+  writable: true,
+  configurable: true,
+});
+
+Object.defineProperty(native.Pipeline.prototype, 'execute', {
+  value: async function () {
+    const raws = await _wrappedPipelineExecute.call(this);
+    const out = new Array(raws.length);
+    for (let i = 0; i < raws.length; i++) {
+      const r = raws[i];
+      out[i] = {
+        fields: r.fields,
+        rows: decodeRows(r.rows, r.fields),
+        commandTag: r.commandTag,
+      };
+    }
+    return out;
+  },
+  writable: true,
+  configurable: true,
+});
+
 const binary = Object.freeze({
   encodeBool,
   encodeInt2,

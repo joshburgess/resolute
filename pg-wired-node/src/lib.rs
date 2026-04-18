@@ -782,6 +782,8 @@ struct QueuedQuery {
     sql: String,
     params: Vec<Option<Buffer>>,
     param_oids: Vec<u32>,
+    param_formats: Vec<FormatCode>,
+    result_formats: Vec<FormatCode>,
 }
 
 #[napi]
@@ -794,20 +796,30 @@ pub struct Pipeline {
 #[napi]
 impl Pipeline {
     /// Queue a parameterized query. No I/O happens until `execute()`.
+    ///
+    /// `paramFormats` / `resultFormats` match the PostgreSQL Bind semantics:
+    /// empty = all text; length 1 = apply to all; length N = per-slot.
     #[napi]
     pub fn push(
         &self,
         sql: String,
         params: Vec<Option<Buffer>>,
         param_oids: Vec<u32>,
-    ) {
+        param_formats: Vec<i16>,
+        result_formats: Vec<i16>,
+    ) -> Result<()> {
+        let param_fmts = to_format_codes(&param_formats)?;
+        let result_fmts = to_format_codes(&result_formats)?;
         if let Ok(mut q) = self.queued.lock() {
             q.push(QueuedQuery {
                 sql,
                 params,
                 param_oids,
+                param_formats: param_fmts,
+                result_formats: result_fmts,
             });
         }
+        Ok(())
     }
 
     /// Number of queries currently queued.
@@ -832,14 +844,14 @@ impl Pipeline {
     ///
     /// Results are returned in push-order.
     #[napi]
-    pub async fn execute(&self) -> Result<Vec<QueryResult>> {
+    pub async fn execute(&self) -> Result<Vec<RawQueryResult>> {
         let queued: Vec<QueuedQuery> = match self.queued.lock() {
             Ok(mut q) => std::mem::take(&mut *q),
             Err(poisoned) => std::mem::take(&mut *poisoned.into_inner()),
         };
 
         let n = queued.len();
-        let mut slots: Vec<Option<QueryResult>> = (0..n).map(|_| None).collect();
+        let mut slots: Vec<Option<RawQueryResult>> = (0..n).map(|_| None).collect();
 
         // Partition: cold-first (must serialize) vs warm-or-repeat (may parallelize).
         let (serial, parallel) = {
@@ -863,7 +875,15 @@ impl Pipeline {
         // Phase 1: run cold firsts in order, marking warm as we go.
         for (i, q) in serial {
             let refs = borrow_params(&q.params);
-            let r = exec_query_full(&self.conn, &q.sql, &refs, &q.param_oids).await?;
+            let r = exec_query_raw(
+                &self.conn,
+                &q.sql,
+                &refs,
+                &q.param_oids,
+                &q.param_formats,
+                &q.result_formats,
+            )
+            .await?;
             self.warm.lock().await.insert(q.sql);
             slots[i] = Some(r);
         }
@@ -876,7 +896,15 @@ impl Pipeline {
                 i,
                 tokio::spawn(async move {
                     let refs = borrow_params(&q.params);
-                    exec_query_full(&conn, &q.sql, &refs, &q.param_oids).await
+                    exec_query_raw(
+                        &conn,
+                        &q.sql,
+                        &refs,
+                        &q.param_oids,
+                        &q.param_formats,
+                        &q.result_formats,
+                    )
+                    .await
                 }),
             ));
         }
