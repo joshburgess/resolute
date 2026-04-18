@@ -1,0 +1,19 @@
+[package]
+name = "pg-wired-node"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pg-wired = { path = "../pg-wired", features = ["tls"] }
+napi = { version = "2", default-features = false, features = ["napi9", "async", "tokio_rt"] }
+napi-derive = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
+bytes = "1"
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"
