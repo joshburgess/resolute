@@ -411,6 +411,27 @@ impl AsyncConn {
         }
     }
 
+    /// Send a Terminate message to the server and wait for the writer/reader
+    /// tasks to exit. After this returns, the connection is unusable; further
+    /// calls fail with `ConnectionClosed`. Idempotent: calling `close` on an
+    /// already-closed connection is a no-op and returns `Ok`.
+    pub async fn close(&self) -> Result<(), PgWireError> {
+        if !self.is_alive() {
+            return Ok(());
+        }
+        let mut buf = BytesMut::with_capacity(5);
+        frontend::encode_message(&FrontendMsg::Terminate, &mut buf);
+        // Submit Terminate through the writer so ordering is preserved wrt
+        // any in-flight requests ahead of us. The server replies with nothing
+        // and closes the socket, so we expect `ConnectionClosed` back from
+        // the drain collector — treat that as a successful close.
+        match self.submit(buf, ResponseCollector::Drain).await {
+            Ok(_) | Err(PgWireError::ConnectionClosed) => Ok(()),
+            Err(PgWireError::Io(e)) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Submit a streaming request. Returns the column header and an mpsc receiver
     /// that yields rows one at a time.
     pub async fn submit_stream(
@@ -568,10 +589,46 @@ impl AsyncConn {
         stmt_name: &[u8],
         needs_parse: bool,
     ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
+        self.query_with_formats(sql, params, param_oids, &[], &[], stmt_name, needs_parse)
+            .await
+    }
+
+    /// Execute a parameterized query with explicit per-param and per-result
+    /// format codes (text = 0, binary = 1).
+    ///
+    /// `param_formats` is interpreted per PostgreSQL wire protocol rules:
+    /// - empty: all params are text
+    /// - length 1: the single code applies to every param
+    /// - length N (== params.len()): one code per param
+    ///
+    /// Same rules apply to `result_formats` for output columns (empty → all
+    /// text; single code → applies to all columns; per-column list otherwise).
+    pub async fn query_with_formats(
+        &self,
+        sql: &str,
+        params: &[Option<&[u8]>],
+        param_oids: &[u32],
+        param_formats: &[FormatCode],
+        result_formats: &[FormatCode],
+        stmt_name: &[u8],
+        needs_parse: bool,
+    ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
         let mut buf = BytesMut::with_capacity(512);
 
-        let text_fmts: Vec<FormatCode> = vec![FormatCode::Text; params.len().max(1)];
-        let result_fmts = [FormatCode::Text];
+        // Default to all-text if caller passes empty slices.
+        let text_param_fmts: Vec<FormatCode>;
+        let param_fmts_slice: &[FormatCode] = if param_formats.is_empty() {
+            text_param_fmts = vec![FormatCode::Text; params.len().max(1)];
+            &text_param_fmts[..params.len()]
+        } else {
+            param_formats
+        };
+        let default_result_fmts = [FormatCode::Text];
+        let result_fmts_slice: &[FormatCode] = if result_formats.is_empty() {
+            &default_result_fmts
+        } else {
+            result_formats
+        };
 
         if needs_parse {
             frontend::encode_message(
@@ -588,9 +645,9 @@ impl AsyncConn {
             &FrontendMsg::Bind {
                 portal: b"",
                 statement: stmt_name,
-                param_formats: &text_fmts[..params.len()],
+                param_formats: param_fmts_slice,
                 params,
-                result_formats: &result_fmts,
+                result_formats: result_fmts_slice,
             },
             &mut buf,
         );
@@ -609,6 +666,51 @@ impl AsyncConn {
         match resp {
             PipelineResponse::Rows { rows, .. } => Ok(rows),
             PipelineResponse::Done => Ok(Vec::new()),
+        }
+    }
+
+    /// Variant of `exec_query` with per-param and per-result format codes.
+    /// See `query_with_formats` for format code semantics.
+    pub async fn exec_query_with_formats(
+        &self,
+        sql: &str,
+        params: &[Option<&[u8]>],
+        param_oids: &[u32],
+        param_formats: &[FormatCode],
+        result_formats: &[FormatCode],
+    ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
+        let (stmt_name, needs_parse) = self.lookup_or_alloc(sql);
+        match self
+            .query_with_formats(
+                sql,
+                params,
+                param_oids,
+                param_formats,
+                result_formats,
+                &stmt_name,
+                needs_parse,
+            )
+            .await
+        {
+            Ok(rows) => Ok(rows),
+            Err(PgWireError::Pg(ref pg_err))
+                if !needs_parse && is_stale_statement_error(pg_err) =>
+            {
+                tracing::debug!(sql = sql, "prepared statement invalidated — re-parsing");
+                self.invalidate_statement(sql);
+                let (stmt_name, _) = self.lookup_or_alloc(sql);
+                self.query_with_formats(
+                    sql,
+                    params,
+                    param_oids,
+                    param_formats,
+                    result_formats,
+                    &stmt_name,
+                    true,
+                )
+                .await
+            }
+            Err(e) => Err(e),
         }
     }
 }

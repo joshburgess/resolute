@@ -15,6 +15,24 @@ pub enum MaybeTlsStream {
     Tls(tokio_rustls::client::TlsStream<TcpStream>),
 }
 
+/// How to handle TLS negotiation with the server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TlsMode {
+    /// Do not send SSLRequest. Use plain TCP.
+    Disable,
+    /// Send SSLRequest. Upgrade if the server agrees (`S`), fall back to
+    /// plain TCP if the server refuses (`N`). Default.
+    Prefer,
+    /// Send SSLRequest. Error out if the server refuses.
+    Require,
+}
+
+impl Default for TlsMode {
+    fn default() -> Self {
+        TlsMode::Prefer
+    }
+}
+
 impl AsyncRead for MaybeTlsStream {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -70,10 +88,6 @@ impl MaybeTlsStream {
     }
 }
 
-/// Negotiate TLS with the PostgreSQL server.
-///
-/// Sends SSLRequest. If the server responds `S`, upgrades the connection
-/// using rustls. If `N`, returns the plain stream.
 /// TLS configuration for PostgreSQL connections.
 #[cfg(feature = "tls")]
 pub struct TlsConfig {
@@ -94,23 +108,36 @@ impl Default for TlsConfig {
 }
 
 /// Negotiate TLS with default configuration (system root CAs, no client cert).
+///
+/// Uses `TlsMode::Prefer`: sends SSLRequest, upgrades on `S`, falls back to
+/// plain TCP on `N`.
 #[cfg(feature = "tls")]
 pub async fn negotiate_tls(
     stream: TcpStream,
     hostname: &str,
 ) -> Result<MaybeTlsStream, crate::error::PgWireError> {
-    negotiate_tls_with_config(stream, hostname, &TlsConfig::default()).await
+    negotiate_tls_with_config(stream, hostname, &TlsConfig::default(), TlsMode::Prefer).await
 }
 
 /// Negotiate TLS with custom configuration (custom CAs, client certs).
+///
+/// Behavior depends on `mode`:
+/// - `Disable`: skip SSLRequest, return plain stream.
+/// - `Prefer`: send SSLRequest, upgrade on `S`, fall back on `N`.
+/// - `Require`: send SSLRequest, error if server responds `N`.
 #[cfg(feature = "tls")]
 pub async fn negotiate_tls_with_config(
     mut stream: TcpStream,
     hostname: &str,
     config: &TlsConfig,
+    mode: TlsMode,
 ) -> Result<MaybeTlsStream, crate::error::PgWireError> {
     use bytes::{BufMut, BytesMut};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    if mode == TlsMode::Disable {
+        return Ok(MaybeTlsStream::Plain(stream));
+    }
 
     // Send SSLRequest: length=8, code=80877103
     let mut buf = BytesMut::with_capacity(8);
@@ -170,7 +197,12 @@ pub async fn negotiate_tls_with_config(
             Ok(MaybeTlsStream::Tls(tls_stream))
         }
         b'N' => {
-            // Server doesn't support SSL — continue with plain TCP.
+            if mode == TlsMode::Require {
+                return Err(crate::error::PgWireError::Protocol(
+                    "server does not support TLS but sslmode=require".to_string(),
+                ));
+            }
+            // Prefer mode: server doesn't support SSL, continue with plain TCP.
             Ok(MaybeTlsStream::Plain(stream))
         }
         other => Err(crate::error::PgWireError::Protocol(format!(

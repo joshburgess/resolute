@@ -1,0 +1,15 @@
+{
+  "name": "pg-wired-bench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "node setup.mjs",
+    "bench": "node bench.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.13.1",
+    "postgres": "^3.4.5",
+    "pg-wired": "file:.."
+  }
+}

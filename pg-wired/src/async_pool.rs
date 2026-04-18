@@ -12,6 +12,7 @@ use tokio::sync::RwLock;
 use crate::async_conn::AsyncConn;
 use crate::connection::WireConn;
 use crate::error::PgWireError;
+use crate::tls::TlsMode;
 
 /// Connection configuration for reconnection.
 #[derive(Clone)]
@@ -20,6 +21,7 @@ pub struct ConnConfig {
     pub user: String,
     pub password: String,
     pub database: String,
+    pub tls_mode: TlsMode,
 }
 
 /// A pool of N AsyncConns for parallel PostgreSQL backend utilization.
@@ -39,6 +41,18 @@ impl AsyncPool {
         database: &str,
         size: usize,
     ) -> Result<Arc<Self>, PgWireError> {
+        Self::connect_with_tls(addr, user, password, database, size, TlsMode::default()).await
+    }
+
+    /// Create a pool with an explicit TLS mode.
+    pub async fn connect_with_tls(
+        addr: &str,
+        user: &str,
+        password: &str,
+        database: &str,
+        size: usize,
+        tls_mode: TlsMode,
+    ) -> Result<Arc<Self>, PgWireError> {
         if size == 0 {
             return Err(PgWireError::Protocol("pool size must be >= 1".into()));
         }
@@ -47,11 +61,20 @@ impl AsyncPool {
             user: user.to_string(),
             password: password.to_string(),
             database: database.to_string(),
+            tls_mode,
         };
 
         let mut conns = Vec::with_capacity(size);
         for _ in 0..size {
-            let wire = WireConn::connect(addr, user, password, database).await?;
+            let wire = WireConn::connect_with_options(
+                addr,
+                user,
+                password,
+                database,
+                &[],
+                tls_mode,
+            )
+            .await?;
             conns.push(RwLock::new(Arc::new(AsyncConn::new(wire))));
         }
 
@@ -93,11 +116,13 @@ impl AsyncPool {
 
     /// Replace a dead connection at the given index.
     async fn reconnect(&self, idx: usize) -> Result<(), PgWireError> {
-        let wire = WireConn::connect(
+        let wire = WireConn::connect_with_options(
             &self.config.addr,
             &self.config.user,
             &self.config.password,
             &self.config.database,
+            &[],
+            self.config.tls_mode,
         )
         .await?;
         let new_conn = Arc::new(AsyncConn::new(wire));
@@ -125,6 +150,17 @@ impl AsyncPool {
         count
     }
 
+    /// Close all connections in the pool by sending Terminate on each and
+    /// waiting for the writer/reader tasks to exit. Idempotent: dead slots
+    /// are skipped.
+    pub async fn close(&self) -> Result<(), PgWireError> {
+        for slot in &self.conns {
+            let conn = slot.read().await;
+            let _ = conn.close().await;
+        }
+        Ok(())
+    }
+
     /// Execute a pipelined transaction on the next available connection.
     pub async fn exec_transaction(
         &self,
@@ -149,6 +185,22 @@ impl AsyncPool {
         self.get_async()
             .await
             .exec_query(sql, params, param_oids)
+            .await
+    }
+
+    /// Execute a parameterized query with explicit per-param and per-result
+    /// format codes on the next available connection.
+    pub async fn exec_query_with_formats(
+        &self,
+        sql: &str,
+        params: &[Option<&[u8]>],
+        param_oids: &[u32],
+        param_formats: &[crate::protocol::types::FormatCode],
+        result_formats: &[crate::protocol::types::FormatCode],
+    ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
+        self.get_async()
+            .await
+            .exec_query_with_formats(sql, params, param_oids, param_formats, result_formats)
             .await
     }
 }

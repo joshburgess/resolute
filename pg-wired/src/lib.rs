@@ -15,3 +15,4 @@ pub use pipeline::PgPipeline;
 pub use async_conn::{AsyncConn, PipelineResponse, ResponseCollector};
 pub use async_pool::AsyncPool;
 pub use protocol::types::{FormatCode, Oid, PgError};
+pub use tls::TlsMode;

@@ -7,7 +7,7 @@ use crate::protocol::backend;
 use crate::protocol::frontend;
 use crate::protocol::types::{BackendMsg, FrontendMsg};
 use crate::scram::ScramClient;
-use crate::tls::MaybeTlsStream;
+use crate::tls::{MaybeTlsStream, TlsMode};
 
 /// Raw PostgreSQL wire connection.
 /// Handles TCP I/O, buffered reading, and authentication.
@@ -69,7 +69,7 @@ impl WireConn {
         password: &str,
         database: &str,
     ) -> Result<Self, PgWireError> {
-        Self::connect_with_params(addr, user, password, database, &[]).await
+        Self::connect_with_options(addr, user, password, database, &[], TlsMode::default()).await
     }
 
     /// Connect with additional startup parameters.
@@ -90,6 +90,26 @@ impl WireConn {
         database: &str,
         startup_params: &[(&str, &str)],
     ) -> Result<Self, PgWireError> {
+        Self::connect_with_options(
+            addr,
+            user,
+            password,
+            database,
+            startup_params,
+            TlsMode::default(),
+        )
+        .await
+    }
+
+    /// Connect with startup parameters and an explicit TLS mode.
+    pub async fn connect_with_options(
+        addr: &str,
+        user: &str,
+        password: &str,
+        database: &str,
+        startup_params: &[(&str, &str)],
+        tls_mode: TlsMode,
+    ) -> Result<Self, PgWireError> {
         let stream = TcpStream::connect(addr).await?;
         stream.set_nodelay(true)?;
 
@@ -104,10 +124,23 @@ impl WireConn {
         #[cfg(feature = "tls")]
         let stream = {
             let hostname = parse_hostname(addr);
-            crate::tls::negotiate_tls(stream, &hostname).await?
+            crate::tls::negotiate_tls_with_config(
+                stream,
+                &hostname,
+                &crate::tls::TlsConfig::default(),
+                tls_mode,
+            )
+            .await?
         };
         #[cfg(not(feature = "tls"))]
-        let stream = MaybeTlsStream::Plain(stream);
+        let stream = {
+            if tls_mode == TlsMode::Require {
+                return Err(PgWireError::Protocol(
+                    "sslmode=require but pg-wired was built without the `tls` feature".into(),
+                ));
+            }
+            MaybeTlsStream::Plain(stream)
+        };
 
         let mut conn = WireConn {
             stream,

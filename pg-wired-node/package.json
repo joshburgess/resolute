@@ -1,0 +1,40 @@
+{
+  "name": "pg-wired",
+  "version": "0.1.0",
+  "description": "High-performance native Node.js driver for PostgreSQL, binding the pg-wired Rust wire-protocol implementation via napi-rs.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "napi": {
+    "name": "pg-wired",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-pc-windows-msvc",
+        "x86_64-pc-windows-msvc"
+      ]
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "lib/",
+    "README.md"
+  ],
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">= 18"
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "node --test __test__/*.test.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4"
+  }
+}
