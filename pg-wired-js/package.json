@@ -1,7 +1,7 @@
 {
   "name": "pg-wired",
   "version": "0.1.0",
-  "description": "High-performance native Node.js driver for PostgreSQL, binding the pg-wired Rust wire-protocol implementation via napi-rs.",
+  "description": "High-performance native PostgreSQL driver for Node.js, Bun, and Deno, binding the pg-wired Rust wire-protocol implementation via napi-rs.",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "napi": {
@@ -32,7 +32,10 @@
   "scripts": {
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
-    "test": "node --test __test__/*.test.mjs"
+    "test": "node --test __test__/*.test.mjs",
+    "test:bun": "bun test __test__/smoke.test.mjs",
+    "test:deno": "deno test --allow-all --unstable-node-globals --unstable-detect-cjs __test__/smoke.test.mjs",
+    "test:matrix": "node scripts/test-matrix.mjs"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4"
