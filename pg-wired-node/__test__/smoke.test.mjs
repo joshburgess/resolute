@@ -154,21 +154,38 @@ test('pool round-robins across connections', async (t) => {
   assert.ok(pids.size >= 1);
 });
 
-test('pipeline batches multiple queries', async (t) => {
+test('pipeline batches multiple queries with binary decode', async (t) => {
   if (!urlStr) return t.skip('PG_URL not set');
-  const { connect } = await loadDriver();
+  const { connect, binary } = await loadDriver();
   const conn = await connect(parseUrl(urlStr));
+  const OID = binary.TYPE_OID;
   const pipe = conn.pipeline();
-  pipe.push('SELECT $1::int AS n', [Buffer.from('10')], []);
-  pipe.push('SELECT $1::int AS n', [Buffer.from('20')], []);
-  pipe.push('SELECT $1::int AS n', [Buffer.from('30')], []);
+  pipe.push('SELECT $1::int AS n', [10], [OID.INT4]);
+  pipe.push('SELECT $1::int AS n', [20], [OID.INT4]);
+  pipe.push('SELECT $1::int AS n', [30], [OID.INT4]);
   assert.equal(pipe.len(), 3);
   const results = await pipe.execute();
   assert.equal(results.length, 3);
-  assert.equal(results[0].rows[0][0], '10');
-  assert.equal(results[1].rows[0][0], '20');
-  assert.equal(results[2].rows[0][0], '30');
+  assert.equal(results[0].rows[0][0], 10);
+  assert.equal(results[1].rows[0][0], 20);
+  assert.equal(results[2].rows[0][0], 30);
   assert.equal(pipe.len(), 0);
+});
+
+test('pipeline decodes heterogeneous types per push', async (t) => {
+  if (!urlStr) return t.skip('PG_URL not set');
+  const { connect, binary } = await loadDriver();
+  const conn = await connect(parseUrl(urlStr));
+  const OID = binary.TYPE_OID;
+  const pipe = conn.pipeline();
+  pipe.push('SELECT $1::int8 AS n', [9_999_999_999n], [OID.INT8]);
+  pipe.push('SELECT $1::bool AS b', [true], [OID.BOOL]);
+  pipe.push('SELECT $1::text AS s', ['pipe'], [OID.TEXT]);
+  const [a, b, c] = await pipe.execute();
+  assert.equal(a.rows[0][0], 9_999_999_999n);
+  assert.equal(b.rows[0][0], true);
+  assert.equal(c.rows[0][0], 'pipe');
+  await conn.close();
 });
 
 test('streaming query yields rows via async iterator', async (t) => {

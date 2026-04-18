@@ -1,7 +1,8 @@
 import pg from 'pg';
 import postgres from 'postgres';
 import pgw from 'pg-wired';
-const { connect: pgwConnect, parsePgUrl, columnarCell } = pgw;
+const { connect: pgwConnect, parsePgUrl, columnarCell, binary } = pgw;
+const OID = binary.TYPE_OID;
 
 const url = process.env.PG_URL;
 if (!url) {
@@ -133,9 +134,9 @@ r2.push(
 r2.push(
   await run('pg-wired     ', async () => {
     await wired.query(
-      'SELECT id, name, score FROM bench_rows WHERE id = $1::bigint',
-      [Buffer.from('1')],
-      [],
+      'SELECT id, name, score FROM bench_rows WHERE id = $1',
+      [1n],
+      [OID.INT8],
     );
   }),
 );
@@ -199,9 +200,9 @@ r4.push(
     const pipe = wired.pipeline();
     for (let i = 0; i < BATCH; i++) {
       pipe.push(
-        'SELECT id FROM bench_rows WHERE id = $1::bigint',
-        [Buffer.from(String(i + 1))],
-        [],
+        'SELECT id FROM bench_rows WHERE id = $1',
+        [BigInt(i + 1)],
+        [OID.INT8],
       );
     }
     await pipe.execute();
