@@ -11,23 +11,31 @@ Cross-cutting performance analysis lives in [`PERFORMANCE.md`](PERFORMANCE.md).
 
 ## Layer responsibilities
 
+Dependency graph:
+
 ```
-+-------------------+  resolute-cli   (offline cache mgmt, migrations)
-|                   |
-|    resolute       |  typed queries, Executor trait, atomic(), derives
-|   /         \     |  FromRow / PgEnum / PgComposite / PgDomain
-|  /           \    |  pooled wrappers, reconnect, retry, listener
-| v             v   |
-|resolute-macros  resolute-derive   (proc-macros)
-|      |                            |
-|      v                            v
-|   pg-wired                     pg-pool
-|   (wire protocol v3)           (generic async pool)
-|      \                        /
-|       \                      /
-|        \--------->  tokio
-+-------------------+
+resolute-cli
+  ├── resolute
+  └── pg-wired       (directly, for describe in prepare/check)
+
+resolute
+  ├── resolute-macros    (proc-macro, compile-time)
+  ├── resolute-derive    (proc-macro, compile-time)
+  ├── pg-wired
+  └── pg-pool
+
+pg-wired, pg-pool  ──►  tokio
 ```
+
+| Crate | Role |
+|---|---|
+| `resolute-cli` | Offline cache management (`prepare`, `check`), migrations, database lifecycle |
+| `resolute` | Typed query surface: `Executor` trait, `atomic()`, `Client`, `TypedPool`, `ReconnectingClient`, `RetryPolicy`, `PgListener`, `Encode`/`Decode`, `FromRow` |
+| `resolute-macros` | Compile-time query validation (`query!` and variants), named-param rewriter, offline cache |
+| `resolute-derive` | Proc-macro derives: `FromRow`, `PgEnum`, `PgComposite`, `PgDomain` |
+| `pg-wired` | PostgreSQL wire protocol v3: async connection, statement cache, TCP coalescing, TLS, SCRAM |
+| `pg-pool` | Generic async connection pool (agnostic to PostgreSQL), lifecycle hooks, drain |
+| `tokio` | Async runtime (external dependency) |
 
 A few invariants fall out of this layout:
 
