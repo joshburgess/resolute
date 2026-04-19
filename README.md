@@ -14,11 +14,11 @@ A ground-up PostgreSQL client stack for Rust. Compile-time checked queries, bina
 |-------|-------------|
 | **pg-wired** | PostgreSQL wire protocol v3. Async connections, extended query protocol (Parse/Bind/Describe/Execute/Sync), binary format, statement caching, pipelining, LISTEN/NOTIFY, COPY, cancellation, optional TLS (rustls). |
 | **pg-pool** | Generic async connection pool. Checkout/checkin, 6 lifecycle hooks (`before_acquire`/`on_create`/`on_checkout`/`on_checkin`/`after_release`/`on_destroy`, connection-aware where applicable), idle timeout, health monitoring, metrics, min/max connections, drain. Works with any connection type via the `Poolable` trait. |
+| **pg-wired-js** | JavaScript bindings for `pg-wired` via napi-rs. Published to npm as `pg-wired`. One prebuilt native binding per platform, same artifact works in Node.js >= 22.6, Bun >= 1.1, and Deno >= 2.1. Full binary wire protocol, extended-protocol prepared statements, pipelining, connection pool, transactions with savepoints, `AbortSignal` cancellation, TLS, LISTEN/NOTIFY, streaming, COPY. |
 | **resolute** | Compile-time checked queries. 7 query macros with type overrides (`"col: Type"`), `Executor` trait, `atomic()` with savepoint nesting, named params, `FromRow` (with `skip`/`default`/`json`/`try_from`/`flatten`), `PgEnum` (string + integer-backed), `PgComposite`, `PgDomain` (with array OID inheritance), `TypedPool` with lifecycle hooks, `PgListener`, streaming, pipelining, COPY, retry, auto-reconnect, metrics. |
 | **resolute-derive** | Proc-macro crate. `FromRow`, `PgEnum`, `PgComposite`, `PgDomain` derives and `#[resolute::test]` attribute macro. |
 | **resolute-macros** | Proc-macro crate. Compile-time query validation against a live database or offline cache. Named parameter rewriting. |
 | **resolute-cli** | CLI tool. Offline cache management (`prepare`, `check`), migrations (`create`, `run`, `revert`, `status`, `info`, `validate`, `seed`), database lifecycle (`create`, `drop`). |
-| **pg-wired-js** | JavaScript bindings for `pg-wired` via napi-rs. Published to npm as `pg-wired`. One prebuilt native binding per platform, same artifact works in Node.js >= 22.6, Bun >= 1.1, and Deno >= 2.1. Full binary wire protocol, extended-protocol prepared statements, pipelining, connection pool, transactions with savepoints, `AbortSignal` cancellation, TLS, LISTEN/NOTIFY, streaming, COPY. |
 
 ## Quick Start
 
