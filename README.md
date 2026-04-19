@@ -46,6 +46,7 @@ Resolute is for you if:
 - You have used sqlx and like its workflow and general selling points: compile-time checked queries against a live database, offline cache for CI, derive-driven `FromRow`. You do not want to give any of that up.
 - You only target PostgreSQL. You are not looking for a cross-database abstraction and you do not want the lowest-common-denominator API that comes with one. You would rather have first-class support for PostgreSQL features (LISTEN/NOTIFY, advisory locks, COPY, composites, domains, ranges, integer-backed enums) than portability to MySQL or SQLite.
 - You want a more flexible, more convenient API than sqlx offers: named parameters that survive dollar-quoting and casts, an `Executor` trait that takes `&self` so generic helpers compose, an `atomic()` method that dispatches `BEGIN` or `SAVEPOINT` based on the receiver so transactional helpers nest without knowing the caller's context, and richer `FromRow` attributes. See "Why Resolute" below for the full list.
+- You care about performance. Resolute owns the full stack (wire protocol, pool, typed surface) and uses binary format everywhere, so it measures 2-5x faster than sqlx on encode benchmarks and roughly 2.4x faster on end-to-end query latency against the same PostgreSQL instance. The numbers are in the "Performance" section below.
 
 If that sounds like you, keep reading.
 
