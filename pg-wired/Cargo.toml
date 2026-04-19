@@ -2,6 +2,7 @@
 name = "pg-wired"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 
 [dependencies]
 tokio = { version = "1", features = ["net", "io-util", "sync", "rt", "macros", "time"] }

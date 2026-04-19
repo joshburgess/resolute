@@ -1,3 +1,6 @@
 [workspace]
 members = ["pg-wired", "pg-wired-js", "pg-pool", "resolute", "resolute-derive", "resolute-macros", "resolute-cli"]
 resolver = "2"
+
+[workspace.package]
+license = "MIT OR Apache-2.0"

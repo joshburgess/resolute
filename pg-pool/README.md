@@ -49,4 +49,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## License
 
-MIT. See the [workspace root](../README.md) for the broader project.
+MIT OR Apache-2.0. See the [workspace root](../README.md) for the broader project.

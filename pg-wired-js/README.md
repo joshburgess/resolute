@@ -98,4 +98,4 @@ PG_URL=... npm run test:matrix   # runs the same suite under every installed run
 
 ## License
 
-MIT.
+MIT OR Apache-2.0. See the [workspace root](../README.md) for the broader project.
