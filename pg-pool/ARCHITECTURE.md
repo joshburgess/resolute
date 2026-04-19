@@ -78,7 +78,7 @@ The entire pool is always wrapped in `Arc<ConnPool<C>>`.
 1. **Drain check** (line 280). `draining.load(Acquire)` is read first. A draining pool rejects new checkouts with `PoolError::Draining`.
 2. **`before_acquire` hook** (line 284). Fires before any contention, giving users a place to hook tracing or admission control.
 3. **Fast path: an idle connection exists** (line 361, `try_get_idle`). Lock `idle`, `pop_front`. While popping, eagerly discard expired entries (`Instant::now() >= expires_at`) and optionally dirty entries (`has_pending_data()` when `test_on_checkout = true`). Each eviction fires `on_destroy`. First clean entry is returned.
-4. **Slow path: create or wait**. If `total_count < max_size`, call `create_and_track` (line 403) which does `fetch_add(1, Release)` then attempts `C::connect()`. If `connect` fails or another task raced past us and we ended up over `max_size`, the increment is rolled back. Otherwise `on_create` fires and the new connection is returned. If `total_count == max_size`, enqueue a waiter (step below).
+4. **Slow path: create or wait**. If `total_count < max_size`, call `create_and_track` (line 403) which does `fetch_add(1, Release)` then attempts `C::connect()`. If `connect` fails or another task raced past and the count ended up over `max_size`, the increment is rolled back. Otherwise `on_create` fires and the new connection is returned. If `total_count == max_size`, enqueue a waiter (step below).
 
 ### Waiter enqueue
 

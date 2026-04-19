@@ -69,7 +69,7 @@ Implementors: `Client`, `Transaction<'_>`, `PooledTypedClient` ([`src/executor.r
 
 1. Records a tracing span with `sql`, `rows`, `elapsed_us`.
 2. Calls `conn.exec_query(sql, params, ...)`.
-3. On `PgWireError::Pg(err)` with SQLSTATE `26000` or `0A000` (stale prepared statement), invalidates the cache entry and retries once. This handles the `DISCARD ALL` race where a prepared statement has been dropped server-side out from under us.
+3. On `PgWireError::Pg(err)` with SQLSTATE `26000` or `0A000` (stale prepared statement), invalidates the cache entry and retries once. This handles the `DISCARD ALL` race where a prepared statement has been dropped server-side out from under the client cache.
 4. Maps `PgWireError` into `TypedError`, tags with SQL via `.with_sql(sql)` so error messages always include context.
 5. Records metrics (`record_query(elapsed_us)` or `record_query_error()`).
 
@@ -103,7 +103,7 @@ Explicit commit is required:
 
 - `commit(mut self)` sets `done = true`, sends `COMMIT`.
 - `rollback(mut self)` same, with `ROLLBACK`.
-- `Drop` ([`src/query.rs:853`](src/query.rs)) checks `!self.done` and emits `tracing::warn!`. It cannot send `ROLLBACK` because `Drop::drop` is not async. The comment at line 863 notes that PostgreSQL auto-rolls-back the open transaction on the next statement, so the correctness concern is "the DB will recover," not "we might leak a lock."
+- `Drop` ([`src/query.rs:853`](src/query.rs)) checks `!self.done` and emits `tracing::warn!`. It cannot send `ROLLBACK` because `Drop::drop` is not async. The comment at line 863 notes that PostgreSQL auto-rolls-back the open transaction on the next statement, so the correctness concern is "the DB will recover," not "a lock might leak."
 
 This is a deliberate choice over a Drop-based auto-rollback: an async drop would require blocking the runtime or spawning a task, both of which are surprising failure modes. Explicit `.commit()` / `.rollback()` keeps the call site honest.
 
