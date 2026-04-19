@@ -9,7 +9,7 @@ import { existsSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
-const testFile = resolve(repoRoot, '__test__/smoke.test.mjs');
+const testFile = resolve(repoRoot, '__test__/smoke.test.mts');
 
 if (!process.env.PG_URL) {
   console.error('PG_URL is required');
@@ -20,9 +20,15 @@ if (!existsSync(testFile)) {
   process.exit(2);
 }
 
-const runtimes = [
+interface Runtime {
+  name: string;
+  cmd: string;
+  args: string[];
+}
+
+const runtimes: Runtime[] = [
   { name: 'node', cmd: 'node', args: ['--test', testFile] },
-  { name: 'bun',  cmd: 'bun',  args: ['test', testFile] },
+  { name: 'bun', cmd: 'bun', args: ['test', testFile] },
   {
     name: 'deno',
     cmd: 'deno',
@@ -31,21 +37,30 @@ const runtimes = [
       '--allow-all',
       '--unstable-node-globals',
       '--unstable-detect-cjs',
+      '--no-check',
       testFile,
     ],
   },
 ];
 
-function which(cmd) {
+function which(cmd: string): Promise<string | null> {
   return new Promise((res) => {
     const p = spawn('which', [cmd], { stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
-    p.stdout.on('data', (b) => (out += b.toString()));
-    p.on('close', (code) => res(code === 0 ? out.trim() : null));
+    p.stdout.on('data', (b: Buffer) => (out += b.toString()));
+    p.on('close', (code: number | null) => res(code === 0 ? out.trim() : null));
   });
 }
 
-function runOne(rt) {
+interface RunResult {
+  rt: Runtime;
+  code: number | null;
+  ms: number;
+  stdout: string;
+  stderr: string;
+}
+
+function runOne(rt: Runtime): Promise<RunResult> {
   return new Promise((res) => {
     const start = Date.now();
     const child = spawn(rt.cmd, rt.args, {
@@ -55,15 +70,17 @@ function runOne(rt) {
     });
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (b) => (stdout += b.toString()));
-    child.stderr.on('data', (b) => (stderr += b.toString()));
-    child.on('close', (code) => {
+    child.stdout!.on('data', (b: Buffer) => (stdout += b.toString()));
+    child.stderr!.on('data', (b: Buffer) => (stderr += b.toString()));
+    child.on('close', (code: number | null) => {
       res({ rt, code, ms: Date.now() - start, stdout, stderr });
     });
   });
 }
 
-const results = [];
+type Entry = (RunResult & { skipped?: false }) | { rt: Runtime; skipped: true };
+
+const results: Entry[] = [];
 for (const rt of runtimes) {
   const found = await which(rt.cmd);
   if (!found) {

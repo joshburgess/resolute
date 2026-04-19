@@ -20,8 +20,8 @@ await client.query(`
 `);
 
 const rows = 10_000;
-const values = [];
-const params = [];
+const values: string[] = [];
+const params: Array<string | number> = [];
 for (let i = 1; i <= rows; i++) {
   values.push(`($${params.length + 1}, $${params.length + 2}, $${params.length + 3})`);
   params.push(i, `name-${i}`, (i * 2654435761) & 0x7fffffff);

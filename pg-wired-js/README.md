@@ -8,9 +8,9 @@ The published package ships one prebuilt native binding per platform triple. The
 
 | runtime | supported | notes |
 |---|---|---|
-| Node.js >= 18 | yes | no flags needed |
-| Bun >= 1.1    | yes | no flags needed |
-| Deno >= 2.1   | yes | run with `--allow-all --unstable-node-globals --unstable-detect-cjs` (or equivalent `deno.json` config) |
+| Node.js >= 22.6 | yes | no flags needed |
+| Bun >= 1.1      | yes | no flags needed |
+| Deno >= 2.1     | yes | run with `--allow-all --unstable-node-globals --unstable-detect-cjs` (or equivalent `deno.json` config) |
 
 There are no runtime-specific packages (no `pg-wired-node`, `pg-wired-bun`, `pg-wired-deno`). One install covers all three.
 
@@ -76,13 +76,22 @@ If no OIDs are supplied, each value is inferred (bigint → int8, number → flo
 - `conn.simpleQuery(sql)` uses the simple-query protocol (always text). Useful for DDL and multi-statement scripts.
 - `conn.queryColumnar(sql, params, oids)` returns a flat `(data, offsets, nulls)` triple for minimum allocation overhead on large result sets.
 
+## Source
+
+The driver is authored in TypeScript (`src-ts/index.ts`) and compiled to CommonJS in `lib/`. Tests, benches, and scripts are `.mts` files that run directly under Node's native type-stripping, Bun, and Deno (no transpile step).
+
+```
+npm run build          # napi build + tsc
+npm run typecheck      # tsc -p tsconfig.check.json (src + tests + bench + scripts)
+```
+
 ## Testing
 
 ```
-PG_URL=postgres://user:pass@localhost:5432/db pnpm test            # node
-PG_URL=... pnpm test:bun
-PG_URL=... pnpm test:deno
-PG_URL=... pnpm test:matrix   # runs the same suite under every installed runtime
+PG_URL=postgres://user:pass@localhost:5432/db npm test             # node --test __test__/*.test.mts
+PG_URL=... npm run test:bun
+PG_URL=... npm run test:deno
+PG_URL=... npm run test:matrix   # runs the same suite under every installed runtime
 ```
 
 `test:matrix` skips any runtime that isn't on `PATH`, so CI can run it everywhere.

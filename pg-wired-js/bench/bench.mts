@@ -1,6 +1,7 @@
 import pg from 'pg';
 import postgres from 'postgres';
 import pgw from 'pg-wired';
+
 const { connect: pgwConnect, parsePgUrl, columnarCell, binary } = pgw;
 const OID = binary.TYPE_OID;
 
@@ -13,16 +14,21 @@ if (!url) {
 const ITERATIONS = Number(process.env.ITER ?? 5_000);
 const WARMUP = Number(process.env.WARMUP ?? 500);
 
-function percentile(sorted, p) {
-  if (sorted.length === 0) return 0;
-  const idx = Math.min(
-    sorted.length - 1,
-    Math.floor((p / 100) * sorted.length),
-  );
-  return sorted[idx];
+interface Row {
+  label: string;
+  ops: string;
+  meanUs: string;
+  p50Us: string;
+  p99Us: string;
 }
 
-function summarize(label, samples, totalMs) {
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
+  return sorted[idx]!;
+}
+
+function summarize(label: string, samples: number[], totalMs: number): Row {
   samples.sort((a, b) => a - b);
   const p50 = percentile(samples, 50);
   const p99 = percentile(samples, 99);
@@ -37,9 +43,9 @@ function summarize(label, samples, totalMs) {
   };
 }
 
-async function run(label, fn) {
+async function run(label: string, fn: () => Promise<unknown>): Promise<Row> {
   for (let i = 0; i < WARMUP; i++) await fn();
-  const samples = new Array(ITERATIONS);
+  const samples = new Array<number>(ITERATIONS);
   const t0 = performance.now();
   for (let i = 0; i < ITERATIONS; i++) {
     const s = performance.now();
@@ -50,32 +56,28 @@ async function run(label, fn) {
   return summarize(label, samples, total);
 }
 
-function printTable(title, rows) {
+function printTable(title: string, rows: Row[]): void {
   console.log(`\n== ${title} ==`);
   const header = ['driver', 'ops/s', 'mean(us)', 'p50(us)', 'p99(us)'];
   const widths = header.map((h) => h.length);
   for (const r of rows) {
-    widths[0] = Math.max(widths[0], r.label.length);
-    widths[1] = Math.max(widths[1], r.ops.length);
-    widths[2] = Math.max(widths[2], r.meanUs.length);
-    widths[3] = Math.max(widths[3], r.p50Us.length);
-    widths[4] = Math.max(widths[4], r.p99Us.length);
+    widths[0] = Math.max(widths[0]!, r.label.length);
+    widths[1] = Math.max(widths[1]!, r.ops.length);
+    widths[2] = Math.max(widths[2]!, r.meanUs.length);
+    widths[3] = Math.max(widths[3]!, r.p50Us.length);
+    widths[4] = Math.max(widths[4]!, r.p99Us.length);
   }
-  const pad = (s, w) => s.padEnd(w);
-  console.log(header.map((h, i) => pad(h, widths[i])).join('  '));
+  const pad = (s: string, w: number): string => s.padEnd(w);
+  console.log(header.map((h, i) => pad(h, widths[i]!)).join('  '));
   console.log(widths.map((w) => '-'.repeat(w)).join('  '));
   for (const r of rows) {
     console.log(
       [r.label, r.ops, r.meanUs, r.p50Us, r.p99Us]
-        .map((v, i) => pad(v, widths[i]))
+        .map((v, i) => pad(v, widths[i]!))
         .join('  '),
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// Setup clients
-// ---------------------------------------------------------------------------
 
 const pgClient = new pg.Client({ connectionString: url });
 await pgClient.connect();
@@ -94,11 +96,7 @@ const sql = postgres({
 
 const wired = await pgwConnect(url);
 
-// ---------------------------------------------------------------------------
-// Bench 1: SELECT 1 (simple, no params)
-// ---------------------------------------------------------------------------
-
-const r1 = [];
+const r1: Row[] = [];
 r1.push(
   await run('pg           ', async () => {
     await pgClient.query('SELECT 1');
@@ -116,11 +114,7 @@ r1.push(
 );
 printTable('SELECT 1 (simple)', r1);
 
-// ---------------------------------------------------------------------------
-// Bench 2: parameterized point-select
-// ---------------------------------------------------------------------------
-
-const r2 = [];
+const r2: Row[] = [];
 r2.push(
   await run('pg           ', async () => {
     await pgClient.query('SELECT id, name, score FROM bench_rows WHERE id = $1', [1]);
@@ -142,11 +136,7 @@ r2.push(
 );
 printTable('Parameterized point-select', r2);
 
-// ---------------------------------------------------------------------------
-// Bench 3: 100-row result (SELECT LIMIT 100)
-// ---------------------------------------------------------------------------
-
-const r3 = [];
+const r3: Row[] = [];
 r3.push(
   await run('pg           ', async () => {
     await pgClient.query('SELECT id, name, score FROM bench_rows ORDER BY id LIMIT 100');
@@ -167,7 +157,6 @@ r3.push(
     const res = await wired.simpleQueryColumnar(
       'SELECT id, name, score FROM bench_rows ORDER BY id LIMIT 100',
     );
-    // touch every cell to match the cost model of the row-oriented variants
     for (let r = 0; r < res.rowCount; r++) {
       for (let c = 0; c < res.cols; c++) columnarCell(res, r, c);
     }
@@ -175,12 +164,8 @@ r3.push(
 );
 printTable('100-row scan', r3);
 
-// ---------------------------------------------------------------------------
-// Bench 4: pipeline / batch of 10 point-selects
-// ---------------------------------------------------------------------------
-
 const BATCH = 10;
-const r4 = [];
+const r4: Row[] = [];
 r4.push(
   await run('pg (seq)     ', async () => {
     for (let i = 0; i < BATCH; i++) {
@@ -191,7 +176,10 @@ r4.push(
 r4.push(
   await run('postgres.js  ', async () => {
     await Promise.all(
-      Array.from({ length: BATCH }, (_, i) => sql`SELECT id FROM bench_rows WHERE id = ${i + 1}`),
+      Array.from(
+        { length: BATCH },
+        (_, i) => sql`SELECT id FROM bench_rows WHERE id = ${i + 1}`,
+      ),
     );
   }),
 );
@@ -210,16 +198,14 @@ r4.push(
 );
 printTable(`Batch of ${BATCH} point-selects`, r4);
 
-// ---------------------------------------------------------------------------
-// Bench 5: streaming 1000 rows
-// ---------------------------------------------------------------------------
-
-const r5 = [];
+const r5: Row[] = [];
 r5.push(
   await run('pg           ', async () => {
-    const res = await pgClient.query('SELECT id, name, score FROM bench_rows ORDER BY id LIMIT 1000');
+    const res = await pgClient.query(
+      'SELECT id, name, score FROM bench_rows ORDER BY id LIMIT 1000',
+    );
     let count = 0;
-    for (const row of res.rows) count++;
+    for (const _row of res.rows) count++;
     if (count !== 1000) throw new Error('bad count');
   }),
 );
@@ -227,7 +213,7 @@ r5.push(
   await run('postgres.js  ', async () => {
     const rows = await sql`SELECT id, name, score FROM bench_rows ORDER BY id LIMIT 1000`;
     let count = 0;
-    for (const r of rows) count++;
+    for (const _r of rows) count++;
     if (count !== 1000) throw new Error('bad count');
   }),
 );
@@ -267,10 +253,6 @@ r5.push(
   }),
 );
 printTable('Stream 1000 rows', r5);
-
-// ---------------------------------------------------------------------------
-// Teardown
-// ---------------------------------------------------------------------------
 
 await pgClient.end();
 await sql.end();
