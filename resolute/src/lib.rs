@@ -9,7 +9,8 @@
 //! ```ignore
 //! use resolute::{Client, query};
 //!
-//! let client = Client::connect("127.0.0.1:5432", "user", "pass", "mydb").await?;
+//! let url = std::env::var("DATABASE_URL")?;
+//! let client = Client::connect_from_str(&url).await?;
 //!
 //! // Compile-time checked with positional params:
 //! let row = query!("SELECT id, name FROM users WHERE id = $1", user_id)
