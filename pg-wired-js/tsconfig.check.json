@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "rootDir": "."
+  },
+  "include": [
+    "src-ts/**/*.ts",
+    "__test__/**/*.mts",
+    "bench/**/*.mts",
+    "scripts/**/*.mts"
+  ]
+}

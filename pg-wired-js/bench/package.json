@@ -4,12 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "node setup.mjs",
-    "bench": "node bench.mjs"
+    "setup": "node setup.mts",
+    "bench": "node bench.mts"
   },
   "dependencies": {
     "pg": "^8.13.1",
-    "postgres": "^3.4.5",
-    "pg-wired": "file:.."
+    "pg-wired": "file:..",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
   }
 }
