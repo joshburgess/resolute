@@ -18,14 +18,10 @@
       ]
     }
   },
-  "files": [
-    "index.js",
-    "index.d.ts",
-    "lib/",
-    "README.md"
-  ],
+  "files": ["index.js", "index.d.ts", "lib/", "README.md"],
   "license": "MIT",
   "private": true,
+  "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": ">= 22.6"
   },
@@ -33,12 +29,16 @@
     "build": "napi build --platform --release && tsc",
     "build:debug": "napi build --platform && tsc",
     "typecheck": "tsc -p tsconfig.check.json",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
     "test": "node --test __test__/*.test.mts",
     "test:bun": "bun test __test__/smoke.test.mts",
     "test:deno": "deno test --allow-all --unstable-node-globals --unstable-detect-cjs --no-check __test__/smoke.test.mts",
     "test:matrix": "node scripts/test-matrix.mts"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "@napi-rs/cli": "^2.18.4",
     "@types/node": "^25.6.0",
     "typescript": "^6.0.3"

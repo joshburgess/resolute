@@ -6,10 +6,5 @@
     "moduleResolution": "nodenext",
     "rootDir": "."
   },
-  "include": [
-    "src-ts/**/*.ts",
-    "__test__/**/*.mts",
-    "bench/**/*.mts",
-    "scripts/**/*.mts"
-  ]
+  "include": ["src-ts/**/*.ts", "__test__/**/*.mts", "bench/**/*.mts", "scripts/**/*.mts"]
 }
