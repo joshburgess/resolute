@@ -64,13 +64,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Architecture
 
 ```
-resolute          ── query macros, Executor trait, typed API
+resolute               ── query macros, Executor trait, typed API
   ├── resolute-derive  ── proc-macro derives
   ├── resolute-macros  ── compile-time query validation
-  ├── pg-wired          ── PostgreSQL wire protocol v3
+  ├── pg-wired         ── PostgreSQL wire protocol v3
   └── pg-pool          ── generic async connection pool
 
-resolute-cli      ── offline cache + migrations CLI
+resolute-cli           ── offline cache + migrations CLI
   └── pg-wired
 ```
 
