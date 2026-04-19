@@ -18,6 +18,7 @@ A ground-up PostgreSQL client stack for Rust. Compile-time checked queries, bina
 | **resolute-derive** | Proc-macro crate. `FromRow`, `PgEnum`, `PgComposite`, `PgDomain` derives and `#[resolute::test]` attribute macro. |
 | **resolute-macros** | Proc-macro crate. Compile-time query validation against a live database or offline cache. Named parameter rewriting. |
 | **resolute-cli** | CLI tool. Offline cache management (`prepare`, `check`), migrations (`create`, `run`, `revert`, `status`, `info`, `validate`, `seed`), database lifecycle (`create`, `drop`). |
+| **pg-wired-js** | JavaScript bindings for `pg-wired` via napi-rs. Published to npm as `pg-wired`. One prebuilt native binding per platform, same artifact works in Node.js >= 22.6, Bun >= 1.1, and Deno >= 2.1. Full binary wire protocol, extended-protocol prepared statements, pipelining, connection pool, transactions with savepoints, `AbortSignal` cancellation, TLS, LISTEN/NOTIFY, streaming, COPY. |
 
 ## Quick Start
 
@@ -83,6 +84,9 @@ resolute               ── query macros, Executor trait, typed API
   └── pg-pool          ── generic async connection pool
 
 resolute-cli           ── offline cache + migrations CLI
+  └── pg-wired
+
+pg-wired-js            ── JS bindings (Node, Bun, Deno) via napi-rs
   └── pg-wired
 ```
 
