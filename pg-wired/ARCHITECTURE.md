@@ -35,21 +35,12 @@ Both tasks share an `Arc<AtomicBool>` liveness flag. Either task setting `alive 
 
 ### Submit flow
 
-```
-caller                     writer task                reader task               server
-  |                            |                          |                        |
-  | submit(buf, collector) --> |                          |                        |
-  |    (bytes + collector)     |                          |                        |
-  |                            | build write_buf          |                        |
-  |                            | single write_all() ----------------------->       |
-  |                            | push(collector) -------> | pending deque          |
-  |                            | notify                   |                        |
-  |                            |                          | pop front              |
-  |                            |                          | <------------ parse_message
-  |                            |                          | feed collector         |
-  |                            |                          |                        |
-  | <------------------------- oneshot::Sender::send(result) ---------------------- |
-```
+A single `submit(buf, collector)` call moves through four actors:
+
+1. **Caller** sends a `PipelineRequest { messages, collector, response_tx }` on the writer's mpsc channel and `await`s `response_rx`.
+2. **Writer task** wakes on `rx.recv()`, drains any concurrently queued requests with `try_recv()`, concatenates their bytes into a reusable `write_buf`, issues one `stream.write_all(&write_buf)`, then pushes the batch of `PendingResponse { collector, response_tx }` entries onto the shared deque and signals the reader via `Notify`.
+3. **Reader task** pops the head of the deque, calls `parse_message` on incoming bytes, and feeds each `BackendMsg` to the collector until `ReadyForQuery` arrives.
+4. **Reader task** resolves the collector into a `Result` and sends it on the oneshot `response_tx`, unblocking the caller.
 
 The key invariant is **FIFO correlation**: the Nth entry pushed to the deque matches the Nth `ReadyForQuery` response arriving from the backend. PostgreSQL v3 guarantees response ordering matches request ordering on a single connection, so the deque position is sufficient. There is no request id, no hash map, no per-request lookup cost.
 
