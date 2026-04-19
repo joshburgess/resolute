@@ -3,8 +3,8 @@
 //! Run: cargo run -p resolute --example retry_pool
 //! Requires: docker compose up -d
 
-use resolute::TypedPool;
 use resolute::retry::RetryPolicy;
+use resolute::TypedPool;
 use std::time::Duration;
 
 const ADDR: &str = "127.0.0.1:54322";
@@ -22,8 +22,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Pool query result: {n}");
 
     // Retry policy with exponential backoff.
-    let policy = RetryPolicy::new(3, Duration::from_millis(100))
-        .with_max_backoff(Duration::from_secs(5));
+    let policy =
+        RetryPolicy::new(3, Duration::from_millis(100)).with_max_backoff(Duration::from_secs(5));
 
     let rows = policy
         .execute(&client, |db| {
@@ -39,7 +39,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Application metrics.
     let app_metrics = resolute::metrics::snapshot();
-    println!("Query count: {}, errors: {}", app_metrics.query_count, app_metrics.query_error_count);
+    println!(
+        "Query count: {}, errors: {}",
+        app_metrics.query_count, app_metrics.query_error_count
+    );
 
     Ok(())
 }

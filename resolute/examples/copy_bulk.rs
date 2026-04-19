@@ -28,7 +28,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Verify
     let rows = client
-        .query("SELECT count(*)::int4, avg(score)::float8 FROM bulk_demo", &[])
+        .query(
+            "SELECT count(*)::int4, avg(score)::float8 FROM bulk_demo",
+            &[],
+        )
         .await?;
     let total: i32 = rows[0].get(0)?;
     let avg: f64 = rows[0].get(1)?;

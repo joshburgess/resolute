@@ -46,11 +46,16 @@ pub fn encode_message(msg: &FrontendMsg<'_>, buf: &mut BytesMut) {
                 })
                 .sum();
             let len = 4
-                + portal.len() + 1
-                + statement.len() + 1
-                + 2 + param_formats.len() * 2
-                + 2 + params_size
-                + 2 + result_formats.len() * 2;
+                + portal.len()
+                + 1
+                + statement.len()
+                + 1
+                + 2
+                + param_formats.len() * 2
+                + 2
+                + params_size
+                + 2
+                + result_formats.len() * 2;
             buf.put_u8(b'B');
             buf.put_i32(len as i32);
             buf.put_slice(portal);
@@ -160,11 +165,7 @@ pub fn encode_message(msg: &FrontendMsg<'_>, buf: &mut BytesMut) {
 /// Encode the startup message (no message type tag, special format).
 /// `extra_params` are key-value pairs for additional startup parameters
 /// (e.g., `application_name`, `client_encoding`, `options`).
-pub fn encode_startup(
-    user: &str,
-    database: &str,
-    buf: &mut BytesMut,
-) {
+pub fn encode_startup(user: &str, database: &str, buf: &mut BytesMut) {
     encode_startup_with_params(user, database, &[], buf);
 }
 

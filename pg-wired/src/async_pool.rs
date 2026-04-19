@@ -66,15 +66,9 @@ impl AsyncPool {
 
         let mut conns = Vec::with_capacity(size);
         for _ in 0..size {
-            let wire = WireConn::connect_with_options(
-                addr,
-                user,
-                password,
-                database,
-                &[],
-                tls_mode,
-            )
-            .await?;
+            let wire =
+                WireConn::connect_with_options(addr, user, password, database, &[], tls_mode)
+                    .await?;
             conns.push(RwLock::new(Arc::new(AsyncConn::new(wire))));
         }
 

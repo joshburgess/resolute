@@ -8,7 +8,12 @@ use resolute::{Client, Executor};
 const ADDR: &str = "127.0.0.1:54322";
 
 /// A generic function that works with any Executor (Client, Transaction, Pool).
-async fn insert_item(db: &impl Executor, table: &str, id: i32, name: &str) -> Result<(), resolute::TypedError> {
+async fn insert_item(
+    db: &impl Executor,
+    table: &str,
+    id: i32,
+    name: &str,
+) -> Result<(), resolute::TypedError> {
     db.execute(
         &format!("INSERT INTO {table} VALUES ($1, $2)"),
         &[&id, &name.to_string()],
@@ -33,26 +38,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Manual transaction committed");
 
     // -- Closure-based transaction --
-    client.with_transaction(|db| Box::pin(async move {
-        insert_item(db, "txn_demo", 3, "Carol").await?;
-        Ok(())
-    })).await?;
+    client
+        .with_transaction(|db| {
+            Box::pin(async move {
+                insert_item(db, "txn_demo", 3, "Carol").await?;
+                Ok(())
+            })
+        })
+        .await?;
     println!("Closure transaction committed");
 
     // -- atomic() — works in any context --
     // Called on Client → uses BEGIN/COMMIT:
-    client.atomic(|db| Box::pin(async move {
-        insert_item(db, "txn_demo", 4, "Dave").await?;
-        Ok(())
-    })).await?;
+    client
+        .atomic(|db| {
+            Box::pin(async move {
+                insert_item(db, "txn_demo", 4, "Dave").await?;
+                Ok(())
+            })
+        })
+        .await?;
     println!("atomic() on Client committed");
 
     // Called on Transaction → uses SAVEPOINT:
     let txn = client.begin().await?;
-    txn.atomic(|db| Box::pin(async move {
-        insert_item(db, "txn_demo", 5, "Eve").await?;
-        Ok(())
-    })).await?;
+    txn.atomic(|db| {
+        Box::pin(async move {
+            insert_item(db, "txn_demo", 5, "Eve").await?;
+            Ok(())
+        })
+    })
+    .await?;
     txn.commit().await?;
     println!("atomic() on Transaction used savepoint");
 

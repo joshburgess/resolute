@@ -44,9 +44,7 @@ pub fn parse_message(buf: &mut BytesMut) -> Result<Option<BackendMsg>, String> {
             if body.is_empty() {
                 return Err("ReadyForQuery: empty body".into());
             }
-            Ok(Some(BackendMsg::ReadyForQuery {
-                status: body[0],
-            }))
+            Ok(Some(BackendMsg::ReadyForQuery { status: body[0] }))
         }
         b'1' => Ok(Some(BackendMsg::ParseComplete)),
         b'2' => Ok(Some(BackendMsg::BindComplete)),
@@ -70,7 +68,11 @@ pub fn parse_message(buf: &mut BytesMut) -> Result<Option<BackendMsg>, String> {
         })),
         b'c' => Ok(Some(BackendMsg::CopyDone)),
         other => {
-            tracing::warn!("Unknown backend message tag: {} (0x{:02x})", other as char, other);
+            tracing::warn!(
+                "Unknown backend message tag: {} (0x{:02x})",
+                other as char,
+                other
+            );
             Ok(None) // Skip unknown messages instead of fabricating ReadyForQuery
         }
     }
@@ -98,9 +100,8 @@ fn parse_auth(body: &[u8]) -> Result<Option<BackendMsg>, String> {
             let mut offset = 4;
             while offset < body.len() && body[offset] != 0 {
                 let (name, _) = split_cstring(&body[offset..]);
-                let name_str = String::from_utf8(name.to_vec()).map_err(|e| {
-                    format!("SASL mechanism name is not valid UTF-8: {e}")
-                })?;
+                let name_str = String::from_utf8(name.to_vec())
+                    .map_err(|e| format!("SASL mechanism name is not valid UTF-8: {e}"))?;
                 mechanisms.push(name_str);
                 offset += name.len() + 1;
             }
@@ -152,10 +153,7 @@ fn parse_data_row(body: &[u8]) -> Result<Option<BackendMsg>, String> {
     if body.len() < 2 {
         return Err("DataRow: body too short for column count".into());
     }
-    let num_cols = i16_to_usize(
-        i16::from_be_bytes([body[0], body[1]]),
-        "DataRow",
-    )?;
+    let num_cols = i16_to_usize(i16::from_be_bytes([body[0], body[1]]), "DataRow")?;
     let mut columns = Vec::with_capacity(num_cols);
     let mut offset = 2;
 
@@ -176,7 +174,9 @@ fn parse_data_row(body: &[u8]) -> Result<Option<BackendMsg>, String> {
         if len == -1 {
             columns.push(None); // NULL
         } else if len < 0 {
-            return Err(format!("DataRow: invalid negative column length {len} at column {col_idx}"));
+            return Err(format!(
+                "DataRow: invalid negative column length {len} at column {col_idx}"
+            ));
         } else {
             let len = len as usize;
             if offset + len > body.len() {
@@ -197,10 +197,7 @@ fn parse_row_description(body: &[u8]) -> Result<Option<BackendMsg>, String> {
     if body.len() < 2 {
         return Err("RowDescription: body too short for field count".into());
     }
-    let num_fields = i16_to_usize(
-        i16::from_be_bytes([body[0], body[1]]),
-        "RowDescription",
-    )?;
+    let num_fields = i16_to_usize(i16::from_be_bytes([body[0], body[1]]), "RowDescription")?;
     let mut fields = Vec::with_capacity(num_fields);
     let mut offset = 2;
 
@@ -221,21 +218,37 @@ fn parse_row_description(body: &[u8]) -> Result<Option<BackendMsg>, String> {
             ));
         }
 
-        let table_oid = u32::from_be_bytes([body[offset], body[offset+1], body[offset+2], body[offset+3]]);
+        let table_oid = u32::from_be_bytes([
+            body[offset],
+            body[offset + 1],
+            body[offset + 2],
+            body[offset + 3],
+        ]);
         offset += 4;
-        let column_id = i16::from_be_bytes([body[offset], body[offset+1]]);
+        let column_id = i16::from_be_bytes([body[offset], body[offset + 1]]);
         offset += 2;
-        let type_oid = u32::from_be_bytes([body[offset], body[offset+1], body[offset+2], body[offset+3]]);
+        let type_oid = u32::from_be_bytes([
+            body[offset],
+            body[offset + 1],
+            body[offset + 2],
+            body[offset + 3],
+        ]);
         offset += 4;
-        let type_size = i16::from_be_bytes([body[offset], body[offset+1]]);
+        let type_size = i16::from_be_bytes([body[offset], body[offset + 1]]);
         offset += 2;
-        let type_modifier = i32::from_be_bytes([body[offset], body[offset+1], body[offset+2], body[offset+3]]);
+        let type_modifier = i32::from_be_bytes([
+            body[offset],
+            body[offset + 1],
+            body[offset + 2],
+            body[offset + 3],
+        ]);
         offset += 4;
-        let format = i16::from_be_bytes([body[offset], body[offset+1]]);
+        let format = i16::from_be_bytes([body[offset], body[offset + 1]]);
         offset += 2;
 
-        let name_str = String::from_utf8(name.to_vec())
-            .map_err(|e| format!("RowDescription field {field_idx} name is not valid UTF-8: {e}"))?;
+        let name_str = String::from_utf8(name.to_vec()).map_err(|e| {
+            format!("RowDescription field {field_idx} name is not valid UTF-8: {e}")
+        })?;
 
         fields.push(FieldDescription {
             name: name_str,
@@ -244,7 +257,11 @@ fn parse_row_description(body: &[u8]) -> Result<Option<BackendMsg>, String> {
             type_oid,
             type_size,
             type_modifier,
-            format: if format == 1 { FormatCode::Binary } else { FormatCode::Text },
+            format: if format == 1 {
+                FormatCode::Binary
+            } else {
+                FormatCode::Text
+            },
         });
     }
 
@@ -271,7 +288,10 @@ fn parse_parameter_description(body: &[u8]) -> Result<Option<BackendMsg>, String
     let mut offset = 2;
     for _ in 0..num_params {
         let oid = u32::from_be_bytes([
-            body[offset], body[offset + 1], body[offset + 2], body[offset + 3],
+            body[offset],
+            body[offset + 1],
+            body[offset + 2],
+            body[offset + 3],
         ]);
         type_oids.push(oid);
         offset += 4;
@@ -303,10 +323,7 @@ fn parse_copy_response(body: &[u8], is_in: bool) -> Result<Option<BackendMsg>, S
         return Err("CopyResponse: body too short".into());
     }
     let format = body[0];
-    let num_cols = i16_to_usize(
-        i16::from_be_bytes([body[1], body[2]]),
-        "CopyResponse",
-    )?;
+    let num_cols = i16_to_usize(i16::from_be_bytes([body[1], body[2]]), "CopyResponse")?;
     if body.len() < 3 + num_cols * 2 {
         return Err(format!(
             "CopyResponse: body too short for {num_cols} column formats"
@@ -394,7 +411,7 @@ mod tests {
 
     #[test]
     fn test_parse_ready_for_query() {
-        let mut buf = make_message(b'Z', &[b'I']);
+        let mut buf = make_message(b'Z', b"I");
         let msg = parse_message(&mut buf).unwrap().unwrap();
         assert!(matches!(msg, BackendMsg::ReadyForQuery { status: b'I' }));
     }
@@ -413,7 +430,13 @@ mod tests {
         body.extend_from_slice(&99i32.to_be_bytes());
         let mut buf = make_message(b'K', &body);
         let msg = parse_message(&mut buf).unwrap().unwrap();
-        assert!(matches!(msg, BackendMsg::BackendKeyData { pid: 42, secret: 99 }));
+        assert!(matches!(
+            msg,
+            BackendMsg::BackendKeyData {
+                pid: 42,
+                secret: 99
+            }
+        ));
     }
 
     #[test]
@@ -567,7 +590,7 @@ mod tests {
 
     #[test]
     fn test_parse_command_complete() {
-        let mut body = b"SELECT 42\0".to_vec();
+        let body = b"SELECT 42\0".to_vec();
         let mut buf = make_message(b'C', &body);
         let msg = parse_message(&mut buf).unwrap().unwrap();
         if let BackendMsg::CommandComplete { tag } = msg {
@@ -584,8 +607,11 @@ mod tests {
             let mut buf = make_message(tag, &[]);
             let result = parse_message(&mut buf);
             // Should be Err (body too short) or Ok(Some(...)) — must NOT panic.
-            assert!(result.is_ok() || result.is_err(),
-                "tag {}: should not panic on empty body", tag as char);
+            assert!(
+                result.is_ok() || result.is_err(),
+                "tag {}: should not panic on empty body",
+                tag as char
+            );
         }
     }
 }

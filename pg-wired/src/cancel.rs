@@ -38,8 +38,8 @@ impl CancelToken {
             // CancelRequest: no message type tag.
             // Length(i32) = 16, RequestCode(i32) = 80877102, PID(i32), Secret(i32)
             let mut buf = BytesMut::with_capacity(16);
-            buf.put_i32(16);          // total message length
-            buf.put_i32(80877102);    // cancel request code (1234 << 16 | 5678)
+            buf.put_i32(16); // total message length
+            buf.put_i32(80877102); // cancel request code (1234 << 16 | 5678)
             buf.put_i32(self.pid);
             buf.put_i32(self.secret);
 

@@ -318,7 +318,10 @@ where
             });
         }
         let len = i32::from_be_bytes([
-            buf[offset], buf[offset + 1], buf[offset + 2], buf[offset + 3],
+            buf[offset],
+            buf[offset + 1],
+            buf[offset + 2],
+            buf[offset + 3],
         ]);
         offset += 4;
         if len == -1 {
@@ -428,7 +431,8 @@ impl Decode for chrono::NaiveDate {
         if days == PG_DATE_INFINITY || days == PG_DATE_NEG_INFINITY {
             return Err(TypedError::Decode {
                 column: 0,
-                message: "NaiveDate: infinity cannot be represented by chrono (use PgDate instead)".into(),
+                message: "NaiveDate: infinity cannot be represented by chrono (use PgDate instead)"
+                    .into(),
             });
         }
         let pg_epoch = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
@@ -534,38 +538,56 @@ impl DecodeText for bool {
         match s {
             "t" | "true" | "1" => Ok(true),
             "f" | "false" | "0" => Ok(false),
-            _ => Err(TypedError::Decode { column: 0, message: format!("bool: {s:?}") }),
+            _ => Err(TypedError::Decode {
+                column: 0,
+                message: format!("bool: {s:?}"),
+            }),
         }
     }
 }
 
 impl DecodeText for i16 {
     fn decode_text(s: &str) -> Result<Self, TypedError> {
-        s.parse().map_err(|_| TypedError::Decode { column: 0, message: format!("i16: {s:?}") })
+        s.parse().map_err(|_| TypedError::Decode {
+            column: 0,
+            message: format!("i16: {s:?}"),
+        })
     }
 }
 
 impl DecodeText for i32 {
     fn decode_text(s: &str) -> Result<Self, TypedError> {
-        s.parse().map_err(|_| TypedError::Decode { column: 0, message: format!("i32: {s:?}") })
+        s.parse().map_err(|_| TypedError::Decode {
+            column: 0,
+            message: format!("i32: {s:?}"),
+        })
     }
 }
 
 impl DecodeText for i64 {
     fn decode_text(s: &str) -> Result<Self, TypedError> {
-        s.parse().map_err(|_| TypedError::Decode { column: 0, message: format!("i64: {s:?}") })
+        s.parse().map_err(|_| TypedError::Decode {
+            column: 0,
+            message: format!("i64: {s:?}"),
+        })
     }
 }
 
 impl DecodeText for f32 {
     fn decode_text(s: &str) -> Result<Self, TypedError> {
-        s.parse().map_err(|_| TypedError::Decode { column: 0, message: format!("f32: {s:?}") })
+        s.parse().map_err(|_| TypedError::Decode {
+            column: 0,
+            message: format!("f32: {s:?}"),
+        })
     }
 }
 
 impl DecodeText for f64 {
     fn decode_text(s: &str) -> Result<Self, TypedError> {
-        s.parse().map_err(|_| TypedError::Decode { column: 0, message: format!("f64: {s:?}") })
+        s.parse().map_err(|_| TypedError::Decode {
+            column: 0,
+            message: format!("f64: {s:?}"),
+        })
     }
 }
 
@@ -659,9 +681,13 @@ impl DecodeText for crate::newtypes::PgTimestamp {
         match s {
             "infinity" => Ok(crate::newtypes::PgTimestamp::Infinity),
             "-infinity" => Ok(crate::newtypes::PgTimestamp::NegInfinity),
-            _ => s.parse::<i64>().map(crate::newtypes::PgTimestamp::Value).map_err(|_| {
-                TypedError::Decode { column: 0, message: format!("PgTimestamp: {s:?}") }
-            }),
+            _ => s
+                .parse::<i64>()
+                .map(crate::newtypes::PgTimestamp::Value)
+                .map_err(|_| TypedError::Decode {
+                    column: 0,
+                    message: format!("PgTimestamp: {s:?}"),
+                }),
         }
     }
 }
@@ -671,9 +697,13 @@ impl DecodeText for crate::newtypes::PgDate {
         match s {
             "infinity" => Ok(crate::newtypes::PgDate::Infinity),
             "-infinity" => Ok(crate::newtypes::PgDate::NegInfinity),
-            _ => s.parse::<i32>().map(crate::newtypes::PgDate::Value).map_err(|_| {
-                TypedError::Decode { column: 0, message: format!("PgDate: {s:?}") }
-            }),
+            _ => s
+                .parse::<i32>()
+                .map(crate::newtypes::PgDate::Value)
+                .map_err(|_| TypedError::Decode {
+                    column: 0,
+                    message: format!("PgDate: {s:?}"),
+                }),
         }
     }
 }

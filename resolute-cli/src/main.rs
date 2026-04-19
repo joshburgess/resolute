@@ -7,16 +7,20 @@
 //!   resolute-cli migrate run           # Run pending migrations
 //!   resolute-cli migrate revert        # Revert the last migration
 //!   resolute-cli migrate status        # Show migration status
-
-mod database;
-mod migrate;
+//!
+//! Migration and database-lifecycle operations delegate to
+//! `resolute::migrate` and `resolute::admin`; this binary is a thin
+//! presentation layer on top of those modules.
 
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "resolute-cli", about = "Offline cache management for resolute query!() macro")]
+#[command(
+    name = "resolute-cli",
+    about = "Offline cache management for resolute query!() macro"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -140,54 +144,140 @@ struct CacheEntry {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Prepare { database_url, source_dir } => {
+        Command::Prepare {
+            database_url,
+            source_dir,
+        } => {
             prepare(&database_url, &source_dir).await?;
         }
         Command::Check { database_url } => {
             check(&database_url).await?;
         }
-        Command::Migrate { action } => match action {
-            MigrateAction::Create { name, dir } => {
-                migrate::create(&dir, &name)?;
-            }
-            MigrateAction::Run { database_url, dir } => {
-                migrate::run(&database_url, &dir).await?;
-            }
-            MigrateAction::Revert { database_url, dir } => {
-                migrate::revert(&database_url, &dir).await?;
-            }
-            MigrateAction::Status { database_url, dir } => {
-                migrate::status(&database_url, &dir).await?;
-            }
-            MigrateAction::Info { dir, database_url } => {
-                migrate::info(&database_url, &dir).await?;
-            }
-            MigrateAction::Validate { dir, database_url } => {
-                migrate::validate(&database_url, &dir).await?;
-            }
-            MigrateAction::Seed { file, database_url } => {
-                migrate::seed(&database_url, &file).await?;
-            }
-        },
-        Command::Database { action } => match action {
-            DatabaseAction::Create { database_url } => {
-                database::create(&database_url).await?;
-            }
-            DatabaseAction::Drop { database_url, force } => {
-                database::drop(&database_url, force).await?;
-            }
-        },
+        Command::Migrate { action } => run_migrate(action).await?,
+        Command::Database { action } => run_database(action).await?,
     }
     Ok(())
 }
 
+async fn run_migrate(action: MigrateAction) -> Result<(), Box<dyn std::error::Error>> {
+    match action {
+        MigrateAction::Create { name, dir } => {
+            let (up, down) = resolute::migrate::create(&dir, &name)?;
+            println!("Created:");
+            println!("  {}", up.display());
+            println!("  {}", down.display());
+        }
+        MigrateAction::Run { database_url, dir } => {
+            let applied = resolute::migrate::run(&database_url, &dir).await?;
+            if applied.is_empty() {
+                println!("No pending migrations.");
+            } else {
+                println!("{} pending migration(s):", applied.len());
+                for m in &applied {
+                    println!("  Applied {} ({}).", m.version, m.name);
+                }
+                println!("Applied {} migration(s).", applied.len());
+            }
+        }
+        MigrateAction::Revert { database_url, dir } => {
+            match resolute::migrate::revert(&database_url, &dir).await? {
+                Some(m) => println!("Reverted {} ({}).", m.version, m.name),
+                None => println!("No migrations to revert."),
+            }
+        }
+        MigrateAction::Status { database_url, dir } => {
+            let report = resolute::migrate::status(&database_url, &dir).await?;
+            if report.files.is_empty() && report.applied.is_empty() {
+                println!("No migrations found.");
+                return Ok(());
+            }
+            println!("{:<16} {:<30} STATUS", "VERSION", "NAME");
+            println!("{}", "-".repeat(70));
+            for m in &report.files {
+                let status = report
+                    .applied
+                    .iter()
+                    .find(|a| a.version == m.version)
+                    .map(|a| format!("applied {}", a.applied_at))
+                    .unwrap_or_else(|| "pending".to_string());
+                println!("{:<16} {:<30} {}", m.version, m.name, status);
+            }
+        }
+        MigrateAction::Info { dir, database_url } => {
+            let pending = resolute::migrate::info(&database_url, &dir).await?;
+            if pending.is_empty() {
+                println!("No pending migrations.");
+                return Ok(());
+            }
+            println!("{} pending migration(s):\n", pending.len());
+            for m in &pending {
+                let sql = std::fs::read_to_string(&m.up_path)?;
+                println!("--- {} ({}) ---", m.version, m.name);
+                println!("{}", sql.trim());
+                println!();
+            }
+        }
+        MigrateAction::Validate { dir, database_url } => {
+            let report = resolute::migrate::validate(&database_url, &dir).await?;
+            for (recorded, file) in &report.mismatched {
+                eprintln!(
+                    "  MISMATCH: version {} (DB has name '{}', file has '{}')",
+                    recorded.version, recorded.name, file.name
+                );
+            }
+            for missing in &report.missing {
+                eprintln!("  MISSING FILE: {} ({})", missing.version, missing.name);
+            }
+            println!(
+                "{} valid, {} mismatched, {} missing files",
+                report.ok.len(),
+                report.mismatched.len(),
+                report.missing.len()
+            );
+            if !report.is_clean() {
+                std::process::exit(1);
+            }
+        }
+        MigrateAction::Seed { file, database_url } => {
+            println!("Seeding from {}...", file.display());
+            resolute::migrate::seed(&database_url, &file).await?;
+            println!("Seed data loaded.");
+        }
+    }
+    Ok(())
+}
+
+async fn run_database(action: DatabaseAction) -> Result<(), Box<dyn std::error::Error>> {
+    match action {
+        DatabaseAction::Create { database_url } => {
+            let database = database_name(&database_url)?;
+            if resolute::admin::create_database(&database_url).await? {
+                println!("Created database '{database}'.");
+            } else {
+                println!("Database '{database}' already exists.");
+            }
+        }
+        DatabaseAction::Drop {
+            database_url,
+            force,
+        } => {
+            let database = database_name(&database_url)?;
+            resolute::admin::drop_database(&database_url, force).await?;
+            println!("Dropped database '{database}'.");
+        }
+    }
+    Ok(())
+}
+
+fn database_name(database_url: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let (_, _, _, _, database) = parse_pg_uri(database_url).ok_or("Invalid DATABASE_URL")?;
+    Ok(database)
+}
+
 /// Scan source files for query!() calls, describe each, write cache.
-async fn prepare(
-    database_url: &str,
-    source_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (user, password, host, port, database) = parse_pg_uri(database_url)
-        .ok_or("Invalid DATABASE_URL")?;
+async fn prepare(database_url: &str, source_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let (user, password, host, port, database) =
+        parse_pg_uri(database_url).ok_or("Invalid DATABASE_URL")?;
     let addr = format!("{host}:{port}");
 
     // Find all query!() SQL strings in .rs files.
@@ -249,8 +339,8 @@ async fn prepare(
 
 /// Check all cached queries against the live database.
 async fn check(database_url: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let (user, password, host, port, database) = parse_pg_uri(database_url)
-        .ok_or("Invalid DATABASE_URL")?;
+    let (user, password, host, port, database) =
+        parse_pg_uri(database_url).ok_or("Invalid DATABASE_URL")?;
     let addr = format!("{host}:{port}");
 
     let cache_dir = PathBuf::from(".sqlx");
@@ -349,7 +439,14 @@ fn scan_dir(dir: &Path, queries: &mut Vec<String>) -> Result<(), Box<dyn std::er
 fn scan_file(path: &Path, queries: &mut Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let source = std::fs::read_to_string(path)?;
     // Search for all three macro patterns.
-    for pattern in &["query!(", "query_as!(", "query_scalar!(", "query_file!(", "query_file_as!(", "query_file_scalar!("] {
+    for pattern in &[
+        "query!(",
+        "query_as!(",
+        "query_scalar!(",
+        "query_file!(",
+        "query_file_as!(",
+        "query_file_scalar!(",
+    ] {
         let mut pos = 0;
         while let Some(idx) = source[pos..].find(pattern) {
             let after_paren = pos + idx + pattern.len();
@@ -357,7 +454,9 @@ fn scan_file(path: &Path, queries: &mut Vec<String>) -> Result<(), Box<dyn std::
             let trimmed = rest.trim_start();
 
             // For query_as!/query_file_as!, skip the type argument and comma first.
-            let trimmed = if (*pattern == "query_as!(" || *pattern == "query_file_as!(") && !trimmed.starts_with('"') {
+            let trimmed = if (*pattern == "query_as!(" || *pattern == "query_file_as!(")
+                && !trimmed.starts_with('"')
+            {
                 // Skip to the first comma, then trim again.
                 if let Some(comma_pos) = trimmed.find(',') {
                     trimmed[comma_pos + 1..].trim_start()
@@ -377,7 +476,10 @@ fn scan_file(path: &Path, queries: &mut Vec<String>) -> Result<(), Box<dyn std::
             let quote_start = actual_start + 1; // After the `"`
             if let Some(end) = find_string_end(&source, quote_start) {
                 let raw = &source[quote_start..end];
-                let raw = raw.replace("\\\"", "\"").replace("\\n", "\n").replace("\\\\", "\\");
+                let raw = raw
+                    .replace("\\\"", "\"")
+                    .replace("\\n", "\n")
+                    .replace("\\\\", "\\");
 
                 // For query_file! variants, raw is a file path — read the SQL.
                 let sql = if pattern.starts_with("query_file") {
@@ -431,7 +533,7 @@ fn hash_sql(sql: &str) -> u64 {
     h
 }
 
-pub(crate) fn parse_pg_uri(uri: &str) -> Option<(String, String, String, u16, String)> {
+fn parse_pg_uri(uri: &str) -> Option<(String, String, String, u16, String)> {
     let rest = uri
         .strip_prefix("postgres://")
         .or_else(|| uri.strip_prefix("postgresql://"))?;

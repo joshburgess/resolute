@@ -41,11 +41,7 @@ pub struct TestDb {
 
 impl TestDb {
     /// Create a new temporary database with a random name.
-    pub async fn create(
-        addr: &str,
-        user: &str,
-        password: &str,
-    ) -> Result<Self, TypedError> {
+    pub async fn create(addr: &str, user: &str, password: &str) -> Result<Self, TypedError> {
         let database = format!(
             "resolute_test_{}",
             std::time::SystemTime::now()

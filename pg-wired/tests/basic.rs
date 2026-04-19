@@ -44,11 +44,7 @@ async fn test_parameterized_query() {
 async fn test_query_multiple_rows() {
     let mut pg = connect().await;
     let rows = pg
-        .query(
-            "SELECT id, name FROM api.authors ORDER BY id",
-            &[],
-            &[],
-        )
+        .query("SELECT id, name FROM api.authors ORDER BY id", &[], &[])
         .await
         .unwrap();
     assert!(rows.len() >= 3); // seed data has 3 authors
@@ -74,15 +70,9 @@ async fn test_query_with_filter() {
 async fn test_statement_cache() {
     let mut pg = connect().await;
     // First call: Parse + Bind + Execute + Sync
-    let rows1 = pg
-        .query("SELECT 1 AS n", &[], &[])
-        .await
-        .unwrap();
+    let rows1 = pg.query("SELECT 1 AS n", &[], &[]).await.unwrap();
     // Second call: cache hit — Bind + Execute + Sync (no Parse)
-    let rows2 = pg
-        .query("SELECT 1 AS n", &[], &[])
-        .await
-        .unwrap();
+    let rows2 = pg.query("SELECT 1 AS n", &[], &[]).await.unwrap();
     assert_eq!(rows1.len(), 1);
     assert_eq!(rows2.len(), 1);
 }
@@ -154,11 +144,7 @@ async fn test_error_recovery() {
 async fn test_null_parameter() {
     let mut pg = connect().await;
     let rows = pg
-        .query(
-            "SELECT $1::text AS val",
-            &[None],
-            &[0],
-        )
+        .query("SELECT $1::text AS val", &[None], &[0])
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);

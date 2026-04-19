@@ -9,6 +9,7 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 
 /// A stream that is either plain TCP or TLS-wrapped TCP.
+#[allow(clippy::large_enum_variant)]
 pub enum MaybeTlsStream {
     Plain(TcpStream),
     #[cfg(feature = "tls")]
@@ -16,21 +17,16 @@ pub enum MaybeTlsStream {
 }
 
 /// How to handle TLS negotiation with the server.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TlsMode {
     /// Do not send SSLRequest. Use plain TCP.
     Disable,
     /// Send SSLRequest. Upgrade if the server agrees (`S`), fall back to
     /// plain TCP if the server refuses (`N`). Default.
+    #[default]
     Prefer,
     /// Send SSLRequest. Error out if the server refuses.
     Require,
-}
-
-impl Default for TlsMode {
-    fn default() -> Self {
-        TlsMode::Prefer
-    }
 }
 
 impl AsyncRead for MaybeTlsStream {
@@ -90,21 +86,12 @@ impl MaybeTlsStream {
 
 /// TLS configuration for PostgreSQL connections.
 #[cfg(feature = "tls")]
+#[derive(Default)]
 pub struct TlsConfig {
     /// Custom root CA certificates. If empty, uses system root CAs.
     pub root_certs: Vec<Vec<u8>>,
     /// Client certificate and private key for mTLS (optional).
     pub client_cert: Option<(Vec<Vec<u8>>, Vec<u8>)>,
-}
-
-#[cfg(feature = "tls")]
-impl Default for TlsConfig {
-    fn default() -> Self {
-        Self {
-            root_certs: Vec::new(),
-            client_cert: None,
-        }
-    }
 }
 
 /// Negotiate TLS with default configuration (system root CAs, no client cert).
@@ -161,9 +148,11 @@ pub async fn negotiate_tls_with_config(
                 for cert_der in &config.root_certs {
                     root_store
                         .add(rustls_pki_types::CertificateDer::from(cert_der.clone()))
-                        .map_err(|e| crate::error::PgWireError::Protocol(
-                            format!("invalid root certificate: {e}"),
-                        ))?;
+                        .map_err(|e| {
+                            crate::error::PgWireError::Protocol(format!(
+                                "invalid root certificate: {e}"
+                            ))
+                        })?;
                 }
             }
 
@@ -173,16 +162,20 @@ pub async fn negotiate_tls_with_config(
                     .iter()
                     .map(|c| rustls_pki_types::CertificateDer::from(c.clone()))
                     .collect();
-                let key = rustls_pki_types::PrivateKeyDer::try_from(key_der.clone())
-                    .map_err(|e| crate::error::PgWireError::Protocol(
-                        format!("invalid client private key: {e}"),
-                    ))?;
+                let key =
+                    rustls_pki_types::PrivateKeyDer::try_from(key_der.clone()).map_err(|e| {
+                        crate::error::PgWireError::Protocol(format!(
+                            "invalid client private key: {e}"
+                        ))
+                    })?;
                 rustls::ClientConfig::builder()
                     .with_root_certificates(root_store)
                     .with_client_auth_cert(certs, key)
-                    .map_err(|e| crate::error::PgWireError::Protocol(
-                        format!("TLS client auth config error: {e}"),
-                    ))?
+                    .map_err(|e| {
+                        crate::error::PgWireError::Protocol(format!(
+                            "TLS client auth config error: {e}"
+                        ))
+                    })?
             } else {
                 rustls::ClientConfig::builder()
                     .with_root_certificates(root_store)
@@ -191,7 +184,9 @@ pub async fn negotiate_tls_with_config(
 
             let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(tls_config));
             let server_name = rustls_pki_types::ServerName::try_from(hostname.to_string())
-                .map_err(|e| crate::error::PgWireError::Protocol(format!("invalid hostname: {e}")))?;
+                .map_err(|e| {
+                    crate::error::PgWireError::Protocol(format!("invalid hostname: {e}"))
+                })?;
 
             let tls_stream = connector.connect(server_name, stream).await?;
             Ok(MaybeTlsStream::Tls(tls_stream))

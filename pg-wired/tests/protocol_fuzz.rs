@@ -16,29 +16,13 @@ fn make_message(tag: u8, body: &[u8]) -> BytesMut {
 }
 
 /// All known PostgreSQL backend message tags.
-const KNOWN_TAGS: &[u8] = &[
-    b'R', // Auth
-    b'S', // ParameterStatus
-    b'K', // BackendKeyData
-    b'Z', // ReadyForQuery
-    b'1', // ParseComplete
-    b'2', // BindComplete
-    b'3', // CloseComplete
-    b'n', // NoData
-    b'C', // CommandComplete
-    b'D', // DataRow
-    b'T', // RowDescription
-    b'E', // ErrorResponse
-    b'N', // NoticeResponse
-    b'I', // EmptyQueryResponse
-    b'A', // NotificationResponse
-    b't', // ParameterDescription
-    b's', // PortalSuspended
-    b'G', // CopyInResponse
-    b'H', // CopyOutResponse
-    b'd', // CopyData
-    b'c', // CopyDone
-];
+/// Letters: R Auth, S ParameterStatus, K BackendKeyData, Z ReadyForQuery,
+/// 1 ParseComplete, 2 BindComplete, 3 CloseComplete, n NoData,
+/// C CommandComplete, D DataRow, T RowDescription, E ErrorResponse,
+/// N NoticeResponse, I EmptyQueryResponse, A NotificationResponse,
+/// t ParameterDescription, s PortalSuspended, G CopyInResponse,
+/// H CopyOutResponse, d CopyData, c CopyDone.
+const KNOWN_TAGS: &[u8] = b"RSKZ123nCDTENIAtsGHdc";
 
 proptest! {
     /// Arbitrary bytes should never cause a panic in parse_message.
@@ -180,7 +164,9 @@ proptest! {
 fn test_incomplete_data_is_stable() {
     // 4 bytes is not enough for a complete message (need 5: tag + 4-byte length)
     let mut buf = BytesMut::from(&[b'Z', 0, 0, 0][..]);
-    assert!(pg_wired::protocol::backend::parse_message(&mut buf).unwrap().is_none());
+    assert!(pg_wired::protocol::backend::parse_message(&mut buf)
+        .unwrap()
+        .is_none());
     // Buffer should not be consumed
     assert_eq!(buf.len(), 4);
 }

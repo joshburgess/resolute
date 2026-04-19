@@ -25,6 +25,7 @@ const RECV_BUF_SIZE: usize = 32 * 1024; // 32KB recv buffer
 impl WireConn {
     /// Choose the best SCRAM mechanism based on TLS state and server support.
     /// Returns (ChannelBinding, mechanism_name_bytes).
+    #[allow(clippy::result_large_err)]
     fn choose_scram_mechanism(
         &self,
         mechanisms: &[String],
@@ -200,10 +201,7 @@ impl WireConn {
                         .process_server_first(&server_first)
                         .map_err(PgWireError::Protocol)?;
                     let mut buf = BytesMut::new();
-                    frontend::encode_message(
-                        &FrontendMsg::SASLResponse(&client_final),
-                        &mut buf,
-                    );
+                    frontend::encode_message(&FrontendMsg::SASLResponse(&client_final), &mut buf);
                     conn.send_raw(&buf).await?;
 
                     // Wait for server-final + AuthenticationOk.
@@ -251,8 +249,8 @@ impl WireConn {
     pub async fn recv_msg(&mut self) -> Result<BackendMsg, PgWireError> {
         loop {
             // Try to parse a message from the buffer.
-            if let Some(msg) = backend::parse_message(&mut self.recv_buf)
-                .map_err(PgWireError::Protocol)?
+            if let Some(msg) =
+                backend::parse_message(&mut self.recv_buf).map_err(PgWireError::Protocol)?
             {
                 return Ok(msg);
             }
@@ -261,8 +259,8 @@ impl WireConn {
             let n = self.stream.read_buf(&mut self.recv_buf).await?;
             if n == 0 {
                 // EOF — try to parse any remaining buffered data before giving up.
-                if let Some(msg) = backend::parse_message(&mut self.recv_buf)
-                    .map_err(PgWireError::Protocol)?
+                if let Some(msg) =
+                    backend::parse_message(&mut self.recv_buf).map_err(PgWireError::Protocol)?
                 {
                     return Ok(msg);
                 }
@@ -273,7 +271,9 @@ impl WireConn {
 
     /// Receive messages until ReadyForQuery, collecting DataRows.
     /// Returns (rows, command_tag).
-    pub async fn collect_rows(&mut self) -> Result<(Vec<Vec<Option<Vec<u8>>>>, String), PgWireError> {
+    pub async fn collect_rows(
+        &mut self,
+    ) -> Result<(Vec<Vec<Option<Vec<u8>>>>, String), PgWireError> {
         let mut rows = Vec::new();
         let mut tag = String::new();
 

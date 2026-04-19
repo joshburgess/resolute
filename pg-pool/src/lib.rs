@@ -22,10 +22,12 @@
 //! ).await?;
 //! ```
 
+#[cfg(feature = "wire")]
+pub mod async_wire;
 mod pool;
 #[cfg(feature = "wire")]
 pub mod wire;
-#[cfg(feature = "wire")]
-pub mod async_wire;
 
-pub use pool::{ConnPool, ConnPoolConfig, LifecycleHooks, PoolGuard, PoolMetrics, PoolError, Poolable};
+pub use pool::{
+    ConnPool, ConnPoolConfig, LifecycleHooks, PoolError, PoolGuard, PoolMetrics, Poolable,
+};

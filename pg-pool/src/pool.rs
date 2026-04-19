@@ -499,9 +499,7 @@ impl<C: Poolable> ConnPool<C> {
     }
 
     fn maybe_notify_drain(&self) {
-        if self.draining.load(Ordering::Acquire)
-            && self.total_count.load(Ordering::Acquire) == 0
-        {
+        if self.draining.load(Ordering::Acquire) && self.total_count.load(Ordering::Acquire) == 0 {
             self.drain_complete.notify_one();
         }
     }
@@ -536,7 +534,9 @@ impl<C: Poolable> ConnPool<C> {
     /// Useful for warming up on startup to avoid first-request latency.
     pub async fn warm_up(&self, target: usize) {
         let current = self.metrics().total;
-        let to_create = target.saturating_sub(current).min(self.config.max_size - current);
+        let to_create = target
+            .saturating_sub(current)
+            .min(self.config.max_size - current);
         let mut created = 0;
         for _ in 0..to_create {
             match self.create_connection().await {
@@ -567,7 +567,8 @@ impl<C: Poolable> ConnPool<C> {
             let count = idle.len();
             idle.clear();
             self.total_count.fetch_sub(count, Ordering::Release);
-            self.total_destroyed.fetch_add(count as u64, Ordering::Relaxed);
+            self.total_destroyed
+                .fetch_add(count as u64, Ordering::Relaxed);
             count
         };
         // Hooks called outside the lock.
@@ -620,17 +621,24 @@ pub struct PoolGuard<C: Poolable> {
 
 impl<C: Poolable> PoolGuard<C> {
     pub fn conn(&self) -> &C {
-        self.conn.as_ref().expect("PoolGuard: connection already taken via take()")
+        self.conn
+            .as_ref()
+            .expect("PoolGuard: connection already taken via take()")
     }
 
     pub fn conn_mut(&mut self) -> &mut C {
-        self.conn.as_mut().expect("PoolGuard: connection already taken via take()")
+        self.conn
+            .as_mut()
+            .expect("PoolGuard: connection already taken via take()")
     }
 
     /// Take ownership of the connection, removing it from the pool.
     /// After calling this, the guard must not be used — it will panic.
     pub fn take(mut self) -> C {
-        let conn = self.conn.take().expect("PoolGuard: connection already taken");
+        let conn = self
+            .conn
+            .take()
+            .expect("PoolGuard: connection already taken");
         self.pool.in_use_count.fetch_sub(1, Ordering::Release);
         self.pool.total_count.fetch_sub(1, Ordering::Release);
         conn
@@ -648,13 +656,17 @@ impl<C: Poolable> Drop for PoolGuard<C> {
 impl<C: Poolable> std::ops::Deref for PoolGuard<C> {
     type Target = C;
     fn deref(&self) -> &Self::Target {
-        self.conn.as_ref().expect("PoolGuard: connection already taken via take()")
+        self.conn
+            .as_ref()
+            .expect("PoolGuard: connection already taken via take()")
     }
 }
 
 impl<C: Poolable> std::ops::DerefMut for PoolGuard<C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.conn.as_mut().expect("PoolGuard: connection already taken via take()")
+        self.conn
+            .as_mut()
+            .expect("PoolGuard: connection already taken via take()")
     }
 }
 
@@ -662,7 +674,10 @@ impl<C: Poolable> std::ops::DerefMut for PoolGuard<C> {
 // Maintenance task
 // ---------------------------------------------------------------------------
 
-async fn maintenance_task<C: Poolable>(pool: Arc<ConnPool<C>>, mut shutdown_rx: mpsc::Receiver<()>) {
+async fn maintenance_task<C: Poolable>(
+    pool: Arc<ConnPool<C>>,
+    mut shutdown_rx: mpsc::Receiver<()>,
+) {
     let mut interval = tokio::time::interval(pool.config.maintenance_interval);
     interval.tick().await;
     loop {
@@ -686,7 +701,8 @@ async fn maintenance_task<C: Poolable>(pool: Arc<ConnPool<C>>, mut shutdown_rx: 
             let evicted = before - idle.len();
             if evicted > 0 {
                 pool.total_count.fetch_sub(evicted, Ordering::Release);
-                pool.total_destroyed.fetch_add(evicted as u64, Ordering::Relaxed);
+                pool.total_destroyed
+                    .fetch_add(evicted as u64, Ordering::Relaxed);
                 tracing::debug!("Evicted {evicted} expired connections");
             }
         }
@@ -696,8 +712,7 @@ async fn maintenance_task<C: Poolable>(pool: Arc<ConnPool<C>>, mut shutdown_rx: 
         let current_idle = total.saturating_sub(in_use);
 
         if current_idle < pool.config.min_idle && total < pool.config.max_size {
-            let to_create = (pool.config.min_idle - current_idle)
-                .min(pool.config.max_size - total);
+            let to_create = (pool.config.min_idle - current_idle).min(pool.config.max_size - total);
             for _ in 0..to_create {
                 match pool.create_and_track().await {
                     Ok(conn) => {
@@ -747,7 +762,9 @@ fn fastrand_u64() -> u64 {
         x ^= x << 13;
         x ^= x >> 7;
         x ^= x << 17;
-        if x == 0 { x = 1; }
+        if x == 0 {
+            x = 1;
+        }
         s.set(x);
         x
     })

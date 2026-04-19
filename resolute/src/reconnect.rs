@@ -92,19 +92,20 @@ impl ReconnectingClient {
             return Ok(());
         }
         tracing::info!(addr = %self.addr, database = %self.database, "reconnecting");
-        let new_client =
-            Self::connect_inner(&self.addr, &self.user, &self.password, &self.database, &self.init_sql)
-                .await?;
+        let new_client = Self::connect_inner(
+            &self.addr,
+            &self.user,
+            &self.password,
+            &self.database,
+            &self.init_sql,
+        )
+        .await?;
         self.client.store(Arc::new(new_client));
         Ok(())
     }
 
     /// Execute a query, auto-reconnecting on connection failure.
-    pub async fn query(
-        &self,
-        sql: &str,
-        params: &[&dyn SqlParam],
-    ) -> Result<Vec<Row>, TypedError> {
+    pub async fn query(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<Vec<Row>, TypedError> {
         let client = self.client.load();
         match client.query(sql, params).await {
             Ok(rows) => Ok(rows),
@@ -118,11 +119,7 @@ impl ReconnectingClient {
     }
 
     /// Execute a statement, auto-reconnecting on connection failure.
-    pub async fn execute(
-        &self,
-        sql: &str,
-        params: &[&dyn SqlParam],
-    ) -> Result<u64, TypedError> {
+    pub async fn execute(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<u64, TypedError> {
         let client = self.client.load();
         match client.execute(sql, params).await {
             Ok(n) => Ok(n),

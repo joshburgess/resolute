@@ -150,7 +150,9 @@ pub trait Executor: Send + Sync {
     /// ```
     fn atomic<'a, T: Send + 'a>(
         &'a self,
-        f: impl FnOnce(&'a Self) -> Pin<Box<dyn Future<Output = Result<T, TypedError>> + Send + 'a>> + Send + 'a,
+        f: impl FnOnce(&'a Self) -> Pin<Box<dyn Future<Output = Result<T, TypedError>> + Send + 'a>>
+            + Send
+            + 'a,
     ) -> impl Future<Output = Result<T, TypedError>> + Send + 'a;
 
     /// Ping the database to verify the connection is healthy.
@@ -231,7 +233,9 @@ impl Executor for crate::query::Client {
 
     fn atomic<'a, T: Send + 'a>(
         &'a self,
-        f: impl FnOnce(&'a Self) -> Pin<Box<dyn Future<Output = Result<T, TypedError>> + Send + 'a>> + Send + 'a,
+        f: impl FnOnce(&'a Self) -> Pin<Box<dyn Future<Output = Result<T, TypedError>> + Send + 'a>>
+            + Send
+            + 'a,
     ) -> impl Future<Output = Result<T, TypedError>> + Send + 'a {
         async move {
             self.simple_query("BEGIN").await?;
@@ -286,7 +290,9 @@ impl Executor for crate::query::Transaction<'_> {
 
     fn atomic<'a, T: Send + 'a>(
         &'a self,
-        f: impl FnOnce(&'a Self) -> Pin<Box<dyn Future<Output = Result<T, TypedError>> + Send + 'a>> + Send + 'a,
+        f: impl FnOnce(&'a Self) -> Pin<Box<dyn Future<Output = Result<T, TypedError>> + Send + 'a>>
+            + Send
+            + 'a,
     ) -> impl Future<Output = Result<T, TypedError>> + Send + 'a {
         async move {
             let id = SAVEPOINT_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -349,7 +355,9 @@ impl Executor for crate::pooled::PooledTypedClient {
 
     fn atomic<'a, T: Send + 'a>(
         &'a self,
-        f: impl FnOnce(&'a Self) -> Pin<Box<dyn Future<Output = Result<T, TypedError>> + Send + 'a>> + Send + 'a,
+        f: impl FnOnce(&'a Self) -> Pin<Box<dyn Future<Output = Result<T, TypedError>> + Send + 'a>>
+            + Send
+            + 'a,
     ) -> impl Future<Output = Result<T, TypedError>> + Send + 'a {
         async move {
             self.simple_query("BEGIN").await?;

@@ -97,18 +97,14 @@ fn resolve_named(
     for (n, _) in named {
         if !names.iter().any(|name| name == &n.to_string()) {
             let msg = format!("binding `{}` does not match any `:{}` in SQL", n, n);
-            return Err(syn::Error::new_spanned(n, msg)
-                .to_compile_error()
-                .into());
+            return Err(syn::Error::new_spanned(n, msg).to_compile_error().into());
         }
     }
     Ok((rewritten, ordered))
 }
 
 /// Resolve query metadata: try cache first, then live DB, then update cache.
-fn resolve_metadata(
-    sql: &str,
-) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), String> {
+fn resolve_metadata(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), String> {
     let sql_hash = hash_sql(sql);
     let offline = std::env::var("RESOLUTE_OFFLINE")
         .map(|v| v == "true" || v == "1")
@@ -211,17 +207,20 @@ fn describe_live(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), Stri
             if conn.send_raw(&buf).await.is_ok() {
                 if let Ok((rows, _)) = conn.collect_rows().await {
                     for row in &rows {
-                        let oid: u32 = row.first()
+                        let oid: u32 = row
+                            .first()
                             .and_then(|v| v.as_ref())
                             .and_then(|b| String::from_utf8(b.clone()).ok())
                             .and_then(|s| s.parse().ok())
                             .unwrap_or(0);
-                        let col: i16 = row.get(1)
+                        let col: i16 = row
+                            .get(1)
                             .and_then(|v| v.as_ref())
                             .and_then(|b| String::from_utf8(b.clone()).ok())
                             .and_then(|s| s.parse().ok())
                             .unwrap_or(0);
-                        let notnull: bool = row.get(2)
+                        let notnull: bool = row
+                            .get(2)
                             .and_then(|v| v.as_ref())
                             .map(|b| b == b"t")
                             .unwrap_or(false);
@@ -307,9 +306,7 @@ fn query_impl(input: QueryInput) -> TokenStream {
     let (param_oids, column_infos) = match resolve_metadata(&sql_str) {
         Ok(result) => result,
         Err(e) => {
-            return syn::Error::new_spanned(&sql, e)
-                .to_compile_error()
-                .into();
+            return syn::Error::new_spanned(&sql, e).to_compile_error().into();
         }
     };
 
@@ -319,9 +316,7 @@ fn query_impl(input: QueryInput) -> TokenStream {
             param_oids.len(),
             params.len()
         );
-        return syn::Error::new_spanned(&sql, msg)
-            .to_compile_error()
-            .into();
+        return syn::Error::new_spanned(&sql, msg).to_compile_error().into();
     }
 
     // Generate compile-time param type checks.
@@ -432,7 +427,12 @@ pub fn query_as(input: TokenStream) -> TokenStream {
 }
 
 fn query_as_impl(input: QueryAsInput) -> TokenStream {
-    let QueryAsInput { target_type, sql, params, named } = input;
+    let QueryAsInput {
+        target_type,
+        sql,
+        params,
+        named,
+    } = input;
     let sql_str = sql.value();
 
     let (sql_str, params) = match resolve_named(sql_str, params, &named, &sql) {
@@ -443,9 +443,7 @@ fn query_as_impl(input: QueryAsInput) -> TokenStream {
     let (param_oids, _column_infos) = match resolve_metadata(&sql_str) {
         Ok(result) => result,
         Err(e) => {
-            return syn::Error::new_spanned(&sql, e)
-                .to_compile_error()
-                .into();
+            return syn::Error::new_spanned(&sql, e).to_compile_error().into();
         }
     };
 
@@ -455,9 +453,7 @@ fn query_as_impl(input: QueryAsInput) -> TokenStream {
             param_oids.len(),
             params.len()
         );
-        return syn::Error::new_spanned(&sql, msg)
-            .to_compile_error()
-            .into();
+        return syn::Error::new_spanned(&sql, msg).to_compile_error().into();
     }
 
     let param_refs: Vec<_> = params
@@ -501,9 +497,7 @@ fn query_scalar_impl(input: QueryInput) -> TokenStream {
     let (param_oids, column_infos) = match resolve_metadata(&sql_str) {
         Ok(result) => result,
         Err(e) => {
-            return syn::Error::new_spanned(&sql, e)
-                .to_compile_error()
-                .into();
+            return syn::Error::new_spanned(&sql, e).to_compile_error().into();
         }
     };
 
@@ -513,9 +507,7 @@ fn query_scalar_impl(input: QueryInput) -> TokenStream {
             param_oids.len(),
             params.len()
         );
-        return syn::Error::new_spanned(&sql, msg)
-            .to_compile_error()
-            .into();
+        return syn::Error::new_spanned(&sql, msg).to_compile_error().into();
     }
 
     if column_infos.len() != 1 {
@@ -523,9 +515,7 @@ fn query_scalar_impl(input: QueryInput) -> TokenStream {
             "query_scalar! requires exactly 1 column, got {}",
             column_infos.len()
         );
-        return syn::Error::new_spanned(&sql, msg)
-            .to_compile_error()
-            .into();
+        return syn::Error::new_spanned(&sql, msg).to_compile_error().into();
     }
 
     let scalar_type = {
@@ -594,14 +584,23 @@ impl Parse for QueryAsInput {
                 return Err(input.error("cannot mix positional and named parameters"));
             }
         }
-        Ok(QueryAsInput { target_type, sql, params, named })
+        Ok(QueryAsInput {
+            target_type,
+            sql,
+            params,
+            named,
+        })
     }
 }
 
 /// `query_file!("path/to/query.sql", param1, param2, ...)` — like query! but reads SQL from a file.
 #[proc_macro]
 pub fn query_file(input: TokenStream) -> TokenStream {
-    let QueryInput { sql: path_lit, params, named: _ } = parse_macro_input!(input as QueryInput);
+    let QueryInput {
+        sql: path_lit,
+        params,
+        named: _,
+    } = parse_macro_input!(input as QueryInput);
     let file_path = path_lit.value();
 
     let sql_str = match read_sql_file(&file_path) {
@@ -615,15 +614,23 @@ pub fn query_file(input: TokenStream) -> TokenStream {
 
     // Reuse the query! logic with the file contents.
     let sql_lit = LitStr::new(&sql_str, path_lit.span());
-    let inner = QueryInput { sql: sql_lit, params, named: Vec::new() };
+    let inner = QueryInput {
+        sql: sql_lit,
+        params,
+        named: Vec::new(),
+    };
     query_impl(inner)
 }
 
 /// `query_file_as!(Type, "path/to/query.sql", param1, ...)` — like query_as! but reads SQL from a file.
 #[proc_macro]
 pub fn query_file_as(input: TokenStream) -> TokenStream {
-    let QueryAsInput { target_type, sql: path_lit, params, named: _ } =
-        parse_macro_input!(input as QueryAsInput);
+    let QueryAsInput {
+        target_type,
+        sql: path_lit,
+        params,
+        named: _,
+    } = parse_macro_input!(input as QueryAsInput);
     let file_path = path_lit.value();
 
     let sql_str = match read_sql_file(&file_path) {
@@ -636,14 +643,23 @@ pub fn query_file_as(input: TokenStream) -> TokenStream {
     };
 
     let sql_lit = LitStr::new(&sql_str, path_lit.span());
-    let inner = QueryAsInput { target_type, sql: sql_lit, params, named: Vec::new() };
+    let inner = QueryAsInput {
+        target_type,
+        sql: sql_lit,
+        params,
+        named: Vec::new(),
+    };
     query_as_impl(inner)
 }
 
 /// `query_file_scalar!("path/to/query.sql", param1, ...)` — file-based scalar query.
 #[proc_macro]
 pub fn query_file_scalar(input: TokenStream) -> TokenStream {
-    let QueryInput { sql: path_lit, params, named: _ } = parse_macro_input!(input as QueryInput);
+    let QueryInput {
+        sql: path_lit,
+        params,
+        named: _,
+    } = parse_macro_input!(input as QueryInput);
     let file_path = path_lit.value();
 
     let sql_str = match read_sql_file(&file_path) {
@@ -656,7 +672,11 @@ pub fn query_file_scalar(input: TokenStream) -> TokenStream {
     };
 
     let sql_lit = LitStr::new(&sql_str, path_lit.span());
-    let inner = QueryInput { sql: sql_lit, params, named: Vec::new() };
+    let inner = QueryInput {
+        sql: sql_lit,
+        params,
+        named: Vec::new(),
+    };
     query_scalar_impl(inner)
 }
 
@@ -665,7 +685,11 @@ pub fn query_file_scalar(input: TokenStream) -> TokenStream {
 /// Params are passed as-is; no type or count checking.
 #[proc_macro]
 pub fn query_unchecked(input: TokenStream) -> TokenStream {
-    let QueryInput { sql, params, named: _ } = parse_macro_input!(input as QueryInput);
+    let QueryInput {
+        sql,
+        params,
+        named: _,
+    } = parse_macro_input!(input as QueryInput);
 
     let param_refs: Vec<_> = params
         .iter()
@@ -746,7 +770,13 @@ fn oid_to_type_name(oid: u32) -> &'static str {
 fn sanitize_ident(name: &str) -> String {
     let s: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if s.starts_with(|c: char| c.is_ascii_digit()) {
         format!("_{s}")
@@ -795,7 +825,11 @@ pub(crate) fn hash_sql(sql: &str) -> u64 {
 }
 
 /// Rewrite `:name` named params to `$N` positional params.
-/// Returns (rewritten_sql, ordered_param_names).
+///
+/// Honours PostgreSQL token boundaries so `:name` tokens inside comments,
+/// string literals, quoted identifiers, and dollar-quoted bodies are left
+/// alone. Duplicate names reuse the same positional index. Returns
+/// `(rewritten_sql, ordered_param_names)`.
 fn rewrite_named_params(sql: &str) -> (String, Vec<String>) {
     let mut result = String::with_capacity(sql.len());
     let mut names: Vec<String> = Vec::new();
@@ -805,7 +839,34 @@ fn rewrite_named_params(sql: &str) -> (String, Vec<String>) {
     let mut i = 0;
 
     while i < len {
-        // Skip string literals.
+        // -- line comment: passes through verbatim, but any `:name` inside
+        // is treated as text, not a placeholder.
+        if i + 1 < len && chars[i] == '-' && chars[i + 1] == '-' {
+            while i < len && chars[i] != '\n' {
+                result.push(chars[i]);
+                i += 1;
+            }
+            continue;
+        }
+
+        // /* block comment */: same deal, pass through unchanged.
+        if i + 1 < len && chars[i] == '/' && chars[i + 1] == '*' {
+            result.push('/');
+            result.push('*');
+            i += 2;
+            while i + 1 < len && !(chars[i] == '*' && chars[i + 1] == '/') {
+                result.push(chars[i]);
+                i += 1;
+            }
+            if i + 1 < len {
+                result.push('*');
+                result.push('/');
+                i += 2;
+            }
+            continue;
+        }
+
+        // 'string literal' with '' escaping.
         if chars[i] == '\'' {
             result.push('\'');
             i += 1;
@@ -826,6 +887,66 @@ fn rewrite_named_params(sql: &str) -> (String, Vec<String>) {
             continue;
         }
 
+        // "quoted identifier": skip contents.
+        if chars[i] == '"' {
+            result.push('"');
+            i += 1;
+            while i < len {
+                result.push(chars[i]);
+                if chars[i] == '"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        // $tag$dollar-quoted body$tag$: skip contents (also handles $$...$$).
+        if chars[i] == '$' {
+            let tag_start = i;
+            i += 1;
+            while i < len && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            if i < len && chars[i] == '$' {
+                let tag: String = chars[tag_start..=i].iter().collect();
+                for c in tag.chars() {
+                    result.push(c);
+                }
+                i += 1;
+                let tag_chars: Vec<char> = tag.chars().collect();
+                let tag_len = tag_chars.len();
+                loop {
+                    if i >= len {
+                        break;
+                    }
+                    if chars[i] == '$' && i + tag_len <= len {
+                        let matches = chars[i..i + tag_len]
+                            .iter()
+                            .zip(tag_chars.iter())
+                            .all(|(a, b)| a == b);
+                        if matches {
+                            for c in &tag_chars {
+                                result.push(*c);
+                            }
+                            i += tag_len;
+                            break;
+                        }
+                    }
+                    result.push(chars[i]);
+                    i += 1;
+                }
+                continue;
+            } else {
+                // Bare `$` followed by non-tag (e.g. `$1` positional param).
+                i = tag_start;
+                result.push(chars[i]);
+                i += 1;
+                continue;
+            }
+        }
+
         // :: cast: pass through.
         if chars[i] == ':' && i + 1 < len && chars[i + 1] == ':' {
             result.push(':');
@@ -835,10 +956,7 @@ fn rewrite_named_params(sql: &str) -> (String, Vec<String>) {
         }
 
         // :name — named parameter.
-        if chars[i] == ':'
-            && i + 1 < len
-            && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_')
-        {
+        if chars[i] == ':' && i + 1 < len && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_') {
             i += 1;
             let start = i;
             while i < len && (chars[i].is_alphanumeric() || chars[i] == '_') {
@@ -1025,5 +1143,153 @@ mod tests {
     #[test]
     fn test_parse_uri_invalid() {
         assert!(parse_pg_uri("mysql://user:pass@host/db").is_none());
+    }
+
+    #[test]
+    fn test_parse_uri_postgresql_scheme() {
+        let parsed = parse_pg_uri("postgresql://user:pass@host:5433/mydb").unwrap();
+        assert_eq!(parsed.0, "user");
+        assert_eq!(parsed.3, 5433);
+        assert_eq!(parsed.4, "mydb");
+    }
+
+    #[test]
+    fn test_parse_uri_empty_password() {
+        let parsed = parse_pg_uri("postgres://user@host/db").unwrap();
+        assert_eq!(parsed.0, "user");
+        assert_eq!(parsed.1, "");
+        assert_eq!(parsed.2, "host");
+    }
+
+    #[test]
+    fn test_parse_uri_unset_database_defaults_to_postgres() {
+        let parsed = parse_pg_uri("postgres://user:pass@host").unwrap();
+        assert_eq!(parsed.4, "postgres");
+    }
+
+    // -- rewrite_named_params: comments and dollar quotes --
+
+    #[test]
+    fn test_named_params_line_comment_skipped() {
+        let (sql, names) = rewrite_named_params("SELECT :id -- :bogus\nFROM t");
+        assert_eq!(sql, "SELECT $1 -- :bogus\nFROM t");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_block_comment_skipped() {
+        let (sql, names) = rewrite_named_params("SELECT :id /* :bogus */ FROM t");
+        assert_eq!(sql, "SELECT $1 /* :bogus */ FROM t");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_dollar_quoted_body_skipped() {
+        let (sql, names) = rewrite_named_params("SELECT $$ :ignored $$ WHERE id = :id");
+        assert_eq!(sql, "SELECT $$ :ignored $$ WHERE id = $1");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_tagged_dollar_quote_skipped() {
+        let (sql, names) = rewrite_named_params("SELECT $tag$ :ignored $tag$ WHERE id = :id");
+        assert_eq!(sql, "SELECT $tag$ :ignored $tag$ WHERE id = $1");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_quoted_identifier_skipped() {
+        let (sql, names) = rewrite_named_params(r#"SELECT ":col" FROM t WHERE id = :id"#);
+        assert_eq!(sql, r#"SELECT ":col" FROM t WHERE id = $1"#);
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_positional_dollar_param_passthrough() {
+        let (sql, names) = rewrite_named_params("SELECT $1, :id FROM t");
+        assert_eq!(sql, "SELECT $1, $1 FROM t");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_escaped_single_quote_inside_literal() {
+        let (sql, names) = rewrite_named_params("SELECT 'it''s :nothing' , :real");
+        assert_eq!(sql, "SELECT 'it''s :nothing' , $1");
+        assert_eq!(names, vec!["real"]);
+    }
+
+    // -- hash_sql --
+
+    #[test]
+    fn test_hash_sql_stable() {
+        let sql = "SELECT id FROM t WHERE x = $1";
+        assert_eq!(hash_sql(sql), hash_sql(sql));
+    }
+
+    #[test]
+    fn test_hash_sql_differs_by_content() {
+        assert_ne!(hash_sql("SELECT 1"), hash_sql("SELECT 2"));
+    }
+
+    #[test]
+    fn test_hash_sql_empty() {
+        // FNV-1a offset basis for the empty input.
+        assert_eq!(hash_sql(""), 0xcbf29ce484222325);
+    }
+
+    // -- cache round-trip --
+
+    #[test]
+    fn test_cache_roundtrip() {
+        let tmp = std::env::temp_dir().join(format!(
+            "resolute-macros-cache-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("query.json");
+
+        let entry = cache::CacheEntry {
+            sql: "SELECT 1::int4 AS n".into(),
+            hash: 0xdeadbeef_cafebabe,
+            param_oids: vec![23, 25],
+            columns: vec![cache::CachedColumn {
+                name: "n".into(),
+                type_oid: 23,
+                nullable: true,
+            }],
+        };
+
+        let json = serde_json::to_string_pretty(&entry).unwrap();
+        std::fs::write(&path, &json).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let decoded: cache::CacheEntry = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(decoded.sql, entry.sql);
+        assert_eq!(decoded.hash, entry.hash);
+        assert_eq!(decoded.param_oids, entry.param_oids);
+        assert_eq!(decoded.columns.len(), 1);
+        assert_eq!(decoded.columns[0].name, "n");
+        assert_eq!(decoded.columns[0].type_oid, 23);
+        assert!(decoded.columns[0].nullable);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn test_cache_entry_missing_nullable_defaults_to_false() {
+        // Old cache files written before the `nullable` field existed must
+        // still deserialize — the field is `#[serde(default)]`.
+        let legacy = r#"{
+            "sql": "SELECT 1",
+            "hash": 1,
+            "param_oids": [],
+            "columns": [{"name": "n", "type_oid": 23}]
+        }"#;
+        let entry: cache::CacheEntry = serde_json::from_str(legacy).unwrap();
+        assert_eq!(entry.columns.len(), 1);
+        assert!(!entry.columns[0].nullable);
     }
 }

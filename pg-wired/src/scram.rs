@@ -140,8 +140,7 @@ fn hi(password: &str, salt: &[u8], iterations: u32) -> Result<Vec<u8>, String> {
 }
 
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
-    let mut mac = HmacSha256::new_from_slice(key)
-        .map_err(|e| format!("HMAC key error: {e}"))?;
+    let mut mac = HmacSha256::new_from_slice(key).map_err(|e| format!("HMAC key error: {e}"))?;
     mac.update(data);
     Ok(mac.finalize().into_bytes().to_vec())
 }

@@ -29,10 +29,7 @@ pub enum FrontendMsg<'a> {
         result_formats: &'a [FormatCode],
     },
     /// Execute: execute a bound portal.
-    Execute {
-        portal: &'a [u8],
-        max_rows: i32,
-    },
+    Execute { portal: &'a [u8], max_rows: i32 },
     /// Sync: end of pipeline, triggers response flush.
     Sync,
     /// Query: simple query protocol (text only).
@@ -50,10 +47,7 @@ pub enum FrontendMsg<'a> {
     /// Flush: request server to flush output.
     Flush,
     /// SASL initial response.
-    SASLInitialResponse {
-        mechanism: &'a [u8],
-        data: &'a [u8],
-    },
+    SASLInitialResponse { mechanism: &'a [u8], data: &'a [u8] },
     /// SASL response (continuation).
     SASLResponse(&'a [u8]),
     /// CopyData: a chunk of COPY data sent to server.
@@ -71,32 +65,64 @@ pub enum FrontendMsg<'a> {
 pub enum BackendMsg {
     AuthenticationOk,
     AuthenticationCleartextPassword,
-    AuthenticationMd5Password { salt: [u8; 4] },
-    AuthenticationSASL { mechanisms: Vec<String> },
-    AuthenticationSASLContinue { data: Vec<u8> },
-    AuthenticationSASLFinal { data: Vec<u8> },
-    ParameterStatus { name: String, value: String },
-    BackendKeyData { pid: i32, secret: i32 },
-    ReadyForQuery { status: u8 },
+    AuthenticationMd5Password {
+        salt: [u8; 4],
+    },
+    AuthenticationSASL {
+        mechanisms: Vec<String>,
+    },
+    AuthenticationSASLContinue {
+        data: Vec<u8>,
+    },
+    AuthenticationSASLFinal {
+        data: Vec<u8>,
+    },
+    ParameterStatus {
+        name: String,
+        value: String,
+    },
+    BackendKeyData {
+        pid: i32,
+        secret: i32,
+    },
+    ReadyForQuery {
+        status: u8,
+    },
     ParseComplete,
     BindComplete,
     CloseComplete,
     NoData,
-    CommandComplete { tag: String },
-    DataRow { columns: Vec<Option<Vec<u8>>> },
-    RowDescription { fields: Vec<FieldDescription> },
-    ErrorResponse { fields: PgError },
-    NoticeResponse { fields: PgError },
+    CommandComplete {
+        tag: String,
+    },
+    DataRow {
+        columns: Vec<Option<Vec<u8>>>,
+    },
+    RowDescription {
+        fields: Vec<FieldDescription>,
+    },
+    ErrorResponse {
+        fields: PgError,
+    },
+    NoticeResponse {
+        fields: PgError,
+    },
     EmptyQueryResponse,
     /// ParameterDescription: param type OIDs from a Describe Statement.
-    ParameterDescription { type_oids: Vec<Oid> },
+    ParameterDescription {
+        type_oids: Vec<Oid>,
+    },
     /// NotificationResponse: async notification from LISTEN/NOTIFY.
-    NotificationResponse { pid: i32, channel: String, payload: String },
+    NotificationResponse {
+        pid: i32,
+        channel: String,
+        payload: String,
+    },
     /// PortalSuspended: Execute completed with row limit, portal still open.
     PortalSuspended,
     /// CopyInResponse: server is ready to receive COPY data.
     CopyInResponse {
-        format: u8,           // 0=text, 1=binary
+        format: u8, // 0=text, 1=binary
         column_formats: Vec<i16>,
     },
     /// CopyOutResponse: server is about to send COPY data.
@@ -105,7 +131,9 @@ pub enum BackendMsg {
         column_formats: Vec<i16>,
     },
     /// CopyData: a chunk of COPY data (in either direction).
-    CopyData { data: Vec<u8> },
+    CopyData {
+        data: Vec<u8>,
+    },
     /// CopyDone: COPY stream completed.
     CopyDone,
 }

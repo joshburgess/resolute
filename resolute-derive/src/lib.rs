@@ -1,12 +1,12 @@
 //! Derive macros for resolute: `FromRow`, `PgEnum`, `PgComposite`, `PgDomain`.
 
-mod pg_enum;
 mod pg_composite;
 mod pg_domain;
+mod pg_enum;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Data, Fields, LitStr};
+use syn::{parse_macro_input, Data, DeriveInput, Fields, LitStr};
 
 /// Derive `FromRow` for structs with named fields.
 ///
@@ -206,11 +206,18 @@ impl FromRowFieldAttrs {
                     attrs.flatten = true;
                 }
                 Ok(())
-            }).ok();
+            })
+            .ok();
         }
 
         // Validate incompatible combinations.
-        if attrs.skip && (attrs.rename.is_some() || attrs.default || attrs.json || attrs.try_from.is_some() || attrs.flatten) {
+        if attrs.skip
+            && (attrs.rename.is_some()
+                || attrs.default
+                || attrs.json
+                || attrs.try_from.is_some()
+                || attrs.flatten)
+        {
             panic!("from_row(skip) cannot be combined with other attributes");
         }
         if attrs.flatten && (attrs.rename.is_some() || attrs.json || attrs.try_from.is_some()) {
@@ -287,10 +294,7 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse optional migrations path from attribute.
     let migrations = if attr_str.contains("migrations") {
         // Extract: migrations = "path"
-        let path = attr_str
-            .split('"')
-            .nth(1)
-            .unwrap_or("migrations");
+        let path = attr_str.split('"').nth(1).unwrap_or("migrations");
         Some(path.to_string())
     } else {
         None
@@ -334,4 +338,3 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     TokenStream::from(expanded)
 }
-

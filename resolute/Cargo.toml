@@ -27,6 +27,7 @@ uuid = { version = "1", features = ["v4"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
 trybuild = "1"
+tempfile = "3"
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"] }
 
 [[bench]]

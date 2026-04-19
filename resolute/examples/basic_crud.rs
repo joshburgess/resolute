@@ -13,7 +13,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // CREATE
     client
-        .simple_query("CREATE TABLE IF NOT EXISTS example_users (id serial PRIMARY KEY, name text NOT NULL)")
+        .simple_query(
+            "CREATE TABLE IF NOT EXISTS example_users (id serial PRIMARY KEY, name text NOT NULL)",
+        )
         .await?;
 
     // INSERT
@@ -45,12 +47,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Updated {updated} row(s)");
 
     // DELETE
-    client
-        .execute("DELETE FROM example_users", &[])
-        .await?;
-    client
-        .simple_query("DROP TABLE example_users")
-        .await?;
+    client.execute("DELETE FROM example_users", &[]).await?;
+    client.simple_query("DROP TABLE example_users").await?;
     println!("Cleanup done");
 
     Ok(())

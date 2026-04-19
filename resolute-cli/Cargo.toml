@@ -8,12 +8,17 @@ name = "resolute-cli"
 path = "src/main.rs"
 
 [dependencies]
+# resolute re-exports the migration runner and admin helpers that the CLI
+# delegates to. `default-features = false` keeps chrono/json/uuid off the
+# build path since the CLI doesn't need them.
+resolute = { path = "../resolute", default-features = false }
+# pg-wired is used directly for the low-level `describe_statement` in
+# `prepare` / `check`. Migration logic goes through `resolute::migrate`.
 pg-wired = { path = "../pg-wired" }
 tokio = { version = "1", features = ["rt", "net", "macros"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive", "env"] }
-chrono = { version = "0.4", features = ["clock"] }
 
 [dev-dependencies]
 tempfile = "3"
