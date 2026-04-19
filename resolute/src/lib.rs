@@ -142,8 +142,6 @@ pub mod migrate;
 pub mod named_params;
 pub mod newtypes;
 mod oid;
-#[macro_use]
-mod params_macro;
 pub mod pg_type;
 mod pooled;
 mod query;

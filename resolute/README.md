@@ -69,9 +69,9 @@ For runtime queries (dynamic SQL, no compile-time check), see [Runtime query sty
 
 ## Runtime query styles
 
-Three equivalent ways to run a query at runtime against an `&impl Executor` (`Client`, `Transaction`, or pool handle). Pick whichever reads best for your call site.
+Two ways to run a query at runtime against an `&impl Executor` (`Client`, `Transaction`, or pool handle). Pick whichever reads best for your call site.
 
-### 1. Fluent builder
+### Fluent builder
 
 ```rust
 use resolute::sql;
@@ -95,30 +95,9 @@ let rows = sql("SELECT * FROM users WHERE org = :org AND id = :id")
 
 `bind` and `bind_named` take values by value (`T: SqlParam + Send + 'static`). Values that do not implement `SqlParam` fail to compile. Mixing `bind` and `bind_named` on the same chain panics: pick one style per query.
 
-### 2. `params!` / `params_named!` macros
+### Raw slice
 
-Slice-style with the element coercions written out explicitly by the macro. Useful when inference is ambiguous (generic code, empty slices, values mixed with `Option::None`), or for readers who prefer the intent spelled out.
-
-```rust
-use resolute::{params, params_named};
-
-let rows = client
-    .query("SELECT * FROM users WHERE org = $1 AND id = $2", params![org_id, user_id])
-    .await?;
-
-let rows = client
-    .query_named(
-        "SELECT * FROM users WHERE org = :org AND id = :id",
-        params_named![("org", org_id), ("id", user_id)],
-    )
-    .await?;
-```
-
-Values that do not implement `SqlParam` fail to compile. Values are borrowed, not moved.
-
-### 3. Raw slice
-
-Fully explicit. Useful when you already have the values in a slice or want no macro / builder indirection.
+Fully explicit and the lowest ceremony one-liner. Rust coerces `&T` to `&dyn SqlParam` at the slice-literal site when the target type is known from the function signature, so no explicit `as &dyn SqlParam` cast is needed.
 
 ```rust
 let rows = client
@@ -133,7 +112,7 @@ let rows = client
     .await?;
 ```
 
-Rust coerces `&T` to `&dyn SqlParam` at the slice-literal site when the target type is known from the function signature, so the explicit `as &dyn SqlParam` is not required in either form. You can still write it out for clarity when inference is ambiguous (generic code, empty slices, `Option::None` in the mix).
+If inference ever struggles (generic code, empty slices, `Option::None` in the mix), write the coercion out explicitly: `&x as &dyn SqlParam`.
 
 ## Query type overrides
 
