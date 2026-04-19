@@ -128,8 +128,6 @@ pg-wired has an optional `tls` feature for rustls-based TLS connections.
 
 **Performance.** [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) explains where the speedup comes from: binary encode fast path, statement caching, TCP write coalescing, FIFO response matching, lock-free atomics. Also describes the benchmark methodology.
 
-**Roadmap.** [`docs/ROADMAP.md`](docs/ROADMAP.md).
-
 ## License
 
 Dual licensed under [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT).
