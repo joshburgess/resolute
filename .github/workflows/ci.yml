@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+  # Matches the hard-coded port that pg-wired, pg-pool, resolute, and
+  # resolute-cli integration tests all connect to (127.0.0.1:54322).
+  TEST_DB_HOST: 127.0.0.1
+  TEST_DB_PORT: 54322
+  TEST_DB_USER: postgres
+  TEST_DB_PASS: postgres
+  DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 54322:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Create test database and apply fixtures
+        run: |
+          PGPASSWORD=postgres psql -h 127.0.0.1 -p 54322 -U postgres \
+            -c "CREATE DATABASE postgrest_test;"
+          PGPASSWORD=postgres psql -h 127.0.0.1 -p 54322 -U postgres \
+            -d postgrest_test -f tests/fixtures/schema.sql
+
+      - name: Clippy
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54322/postgrest_test
+        run: cargo clippy --workspace --all-targets -- -Dwarnings
+
+  test:
+    name: test (postgres ${{ matrix.postgres }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["15", "16", "17"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 54322:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Create test database and apply fixtures
+        run: |
+          PGPASSWORD=postgres psql -h 127.0.0.1 -p 54322 -U postgres \
+            -c "CREATE DATABASE postgrest_test;"
+          PGPASSWORD=postgres psql -h 127.0.0.1 -p 54322 -U postgres \
+            -d postgrest_test -f tests/fixtures/schema.sql
+
+      - name: Build
+        env:
+          # Required so resolute-macros can resolve query metadata against the
+          # seeded test database at compile time.
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54322/postgrest_test
+        run: cargo build --workspace --all-targets
+
+      - name: Unit + integration tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54322/postgrest_test
+        run: cargo test --workspace --all-targets -- --nocapture
+
+      - name: Doc tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54322/postgrest_test
+        run: cargo test --workspace --doc
+
+  test-tls-feature:
+    name: test (pg-wired tls feature)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p pg-wired --features tls
+      - run: cargo test -p pg-wired --features tls --lib
+
+  # Note: pg-wired-js has its own Node/Bun/Deno smoke tests. The CI job for it
+  # lands in the TypeScript-conversion PR (it references scripts added there).
