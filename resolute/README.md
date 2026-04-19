@@ -8,8 +8,8 @@ resolute validates SQL against a live database at compile time (or offline via c
 
 - **7 query macros**: `query!`, `query_as!`, `query_scalar!`, `query_file!`, `query_file_as!`, `query_file_scalar!`, `query_unchecked!`
 - **Named parameters**: `:name` syntax in both macros and runtime API (not available in sqlx)
-- **`Executor` trait**: Write generic functions that work with Client, Transaction, or Pool — no sqlx lifetime gymnastics
-- **`atomic()` with savepoint nesting**: Auto-BEGIN on Client, auto-SAVEPOINT on Transaction — same function, correct behavior in any context
+- **`Executor` trait**: Write generic functions that work with Client, Transaction, or Pool. No sqlx lifetime gymnastics.
+- **`atomic()` with savepoint nesting**: Auto-BEGIN on Client, auto-SAVEPOINT on Transaction. Same function, correct behavior in any context.
 - **Custom PG types**: `#[derive(PgEnum)]`, `#[derive(PgComposite)]`, `#[derive(PgDomain)]`
 - **Integer-backed enums**: `#[repr(i32)]` on PgEnum for integer column storage
 - **Domain type arrays**: `PgDomain` newtypes inherit array OIDs from their inner type
@@ -67,7 +67,7 @@ let rows = client.query_named(
     ],
 ).await?;
 
-// Duplicates — :id appears twice, bound once:
+// Duplicates: :id appears twice, bound once:
 let rows = client.query_named(
     "SELECT * FROM t WHERE id = :id OR parent_id = :id",
     &[("id", &42i32 as &dyn SqlParam)],
@@ -92,13 +92,13 @@ let row = query!(r#"SELECT id as "id: UserId" FROM users WHERE id = $1"#, 1)
 let user_id: UserId = row.id;
 ```
 
-Type overrides work with nullable columns too — if the column is nullable, the field becomes `Option<UserId>`.
+Type overrides work with nullable columns too. If the column is nullable, the field becomes `Option<UserId>`.
 
-PostgreSQL casts (`::`) work normally and are not affected — `SELECT created_at::text` is a cast, not a type override. The override syntax uses a single `:` inside a quoted alias.
+PostgreSQL casts (`::`) work normally and are not affected. `SELECT created_at::text` is a cast, not a type override. The override syntax uses a single `:` inside a quoted alias.
 
-## Executor trait — generic over Client, Transaction, and Pool
+## Executor trait: generic over Client, Transaction, and Pool
 
-Write functions once with `&impl Executor`. They work everywhere — no sqlx lifetime gymnastics, no consuming `self`, multiple queries on the same generic executor.
+Write functions once with `&impl Executor`. They work everywhere: no sqlx lifetime gymnastics, no consuming `self`, multiple queries on the same generic executor.
 
 ```rust
 use resolute::Executor;
@@ -138,7 +138,7 @@ client.with_transaction(|db| Box::pin(async move {
 })).await?;  // auto-commit on Ok, auto-rollback on Err
 ```
 
-### `atomic()` — context-aware atomicity
+### `atomic()`: context-aware atomicity
 
 Write functions that always run atomically, regardless of whether the caller already has a transaction:
 
@@ -204,7 +204,7 @@ let decoded = Status::decode_text("2")?;  // from text → Inactive
 
 Supported repr types: `#[repr(i16)]` (int2), `#[repr(i32)]` (int4), `#[repr(i64)]` (int8). All variants must have explicit discriminants. Negative values are supported.
 
-**Design note:** sqlx allows `#[sqlx(transparent)]` on `#[repr(i32)]` enums without explicit discriminants, relying on Rust's auto-incrementing discriminant behavior. Resolute requires explicit discriminants intentionally — implicit discriminants are fragile (reordering variants silently changes database values), and the explicitness makes the database mapping unambiguous and auditable.
+**Design note:** sqlx allows `#[sqlx(transparent)]` on `#[repr(i32)]` enums without explicit discriminants, relying on Rust's auto-incrementing discriminant behavior. Resolute requires explicit discriminants intentionally. Implicit discriminants are fragile (reordering variants silently changes database values), and the explicitness makes the database mapping unambiguous and auditable.
 
 ### Composite types
 
@@ -258,7 +258,7 @@ struct Author {
 
 ### FromRow attributes
 
-#### `skip` — ignore field, use `Default::default()`
+#### `skip`: ignore field, use `Default::default()`
 
 ```rust
 #[derive(FromRow)]
@@ -270,7 +270,7 @@ struct UserView {
 }
 ```
 
-#### `default` — fall back to `Default::default()` if column is missing or NULL
+#### `default`: fall back to `Default::default()` if column is missing or NULL
 
 ```rust
 #[derive(FromRow)]
@@ -283,7 +283,7 @@ struct Config {
 }
 ```
 
-#### `json` — deserialize a JSON/JSONB column via serde
+#### `json`: deserialize a JSON/JSONB column via serde
 
 ```rust
 #[derive(FromRow)]
@@ -296,7 +296,7 @@ struct Event {
 }
 ```
 
-#### `try_from` — decode as one type, convert via `TryFrom`
+#### `try_from`: decode as one type, convert via `TryFrom`
 
 ```rust
 struct NonZeroId(i32);
@@ -317,7 +317,7 @@ struct User {
 }
 ```
 
-#### `flatten` — embed a nested `FromRow` struct
+#### `flatten`: embed a nested `FromRow` struct
 
 ```rust
 #[derive(FromRow)]
@@ -335,7 +335,7 @@ struct UserWithAddress {
 }
 ```
 
-`flatten` shares the same row — the nested struct's column names must not conflict with the outer struct's columns.
+`flatten` shares the same row. The nested struct's column names must not conflict with the outer struct's columns.
 
 ## Array types
 
@@ -563,7 +563,7 @@ resolute::migrate::run("postgres://user:pass@localhost/mydb", "migrations").awai
 
 ## Design decisions
 
-**PostgreSQL only.** Resolute does not have an `Any` database abstraction or multi-database support. It is built from the ground up for PostgreSQL — the wire protocol, type system, OID mappings, and query semantics are all PostgreSQL-specific. This is intentional: a single-database library can leverage PostgreSQL features fully (range types, advisory locks, LISTEN/NOTIFY, custom enums, composite types, binary protocol) without lowest-common-denominator abstractions.
+**PostgreSQL only.** Resolute does not have an `Any` database abstraction or multi-database support. It is built from the ground up for PostgreSQL: the wire protocol, type system, OID mappings, and query semantics are all PostgreSQL-specific. This is intentional: a single-database library can leverage PostgreSQL features fully (range types, advisory locks, LISTEN/NOTIFY, custom enums, composite types, binary protocol) without lowest-common-denominator abstractions.
 
 **Explicit integer enum discriminants.** Integer-backed enums require `= N` on every variant. This prevents silent breakage when variants are reordered or inserted.
 

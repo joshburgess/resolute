@@ -2,18 +2,18 @@
 
 > **res·o·lute** /ˈrezəˌlo͞ot/
 >
-> *adjective* — admirably purposeful, determined, and unwavering.
+> *adjective*: admirably purposeful, determined, and unwavering.
 >
-> *noun* — one who is steadfast and unyielding in purpose, firm in conviction even in the face of opposition or difficulty.
+> *noun*: one who is steadfast and unyielding in purpose, firm in conviction even in the face of opposition or difficulty.
 
-A ground-up PostgreSQL client stack for Rust. Compile-time checked queries, binary wire protocol, async connection pool — no dependencies on tokio-postgres, sqlx, deadpool, bb8, or any other existing PostgreSQL or connection pool library.
+A ground-up PostgreSQL client stack for Rust. Compile-time checked queries, binary wire protocol, async connection pool. No dependencies on tokio-postgres, sqlx, deadpool, bb8, or any other existing PostgreSQL or connection pool library.
 
 ## Crates
 
 | Crate | Description |
 |-------|-------------|
 | **pg-wired** | PostgreSQL wire protocol v3. Async connections, extended query protocol (Parse/Bind/Describe/Execute/Sync), binary format, statement caching, pipelining, LISTEN/NOTIFY, COPY, cancellation, optional TLS (rustls). |
-| **pg-pool** | Generic async connection pool. Checkout/checkin, 6 lifecycle hooks (`before_acquire`/`on_create`/`on_checkout`/`on_checkin`/`after_release`/`on_destroy` — connection-aware where applicable), idle timeout, health monitoring, metrics, min/max connections, drain. Works with any connection type via the `Poolable` trait. |
+| **pg-pool** | Generic async connection pool. Checkout/checkin, 6 lifecycle hooks (`before_acquire`/`on_create`/`on_checkout`/`on_checkin`/`after_release`/`on_destroy`, connection-aware where applicable), idle timeout, health monitoring, metrics, min/max connections, drain. Works with any connection type via the `Poolable` trait. |
 | **resolute** | Compile-time checked queries. 7 query macros with type overrides (`"col: Type"`), `Executor` trait, `atomic()` with savepoint nesting, named params, `FromRow` (with `skip`/`default`/`json`/`try_from`/`flatten`), `PgEnum` (string + integer-backed), `PgComposite`, `PgDomain` (with array OID inheritance), `TypedPool` with lifecycle hooks, `PgListener`, streaming, pipelining, COPY, retry, auto-reconnect, metrics. |
 | **resolute-derive** | Proc-macro crate. `FromRow`, `PgEnum`, `PgComposite`, `PgDomain` derives and `#[resolute::test]` attribute macro. |
 | **resolute-macros** | Proc-macro crate. Compile-time query validation against a live database or offline cache. Named parameter rewriting. |
@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 **Owns the full stack.** Most Rust database libraries build on top of tokio-postgres or a shared protocol layer. Resolute implements the PostgreSQL wire protocol from scratch (`pg-wired`), the connection pool from scratch (`pg-pool`), and the typed query layer on top. This means fewer transitive dependencies, fewer abstraction layers, and full control over performance.
 
-**Non-consuming Executor.** sqlx's `Executor` trait consumes `self`, making it awkward to run multiple queries on the same generic executor. Resolute's `Executor` uses `&self` — write a function once, call it with a `Client`, `Transaction`, or `Pool`.
+**Non-consuming Executor.** sqlx's `Executor` trait consumes `self`, making it awkward to run multiple queries on the same generic executor. Resolute's `Executor` uses `&self`. Write a function once, call it with a `Client`, `Transaction`, or `Pool`.
 
 **Named parameters.** Use `:name` syntax in both compile-time macros and runtime queries. Handles `::` casts, string literals, comments, and dollar-quoting correctly. Not available in sqlx.
 
