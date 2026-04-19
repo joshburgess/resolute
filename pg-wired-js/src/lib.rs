@@ -1124,3 +1124,306 @@ impl CancelToken {
         self.inner.pid
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mkfield(name: &str, type_oid: u32, format: FormatCode) -> FieldDescription {
+        FieldDescription {
+            name: name.into(),
+            table_oid: 0,
+            column_id: 0,
+            type_oid,
+            type_size: -1,
+            type_modifier: -1,
+            format,
+        }
+    }
+
+    #[test]
+    fn parse_sslmode_variants() {
+        assert_eq!(parse_sslmode(None).unwrap(), TlsMode::Prefer);
+        assert_eq!(parse_sslmode(Some("")).unwrap(), TlsMode::Prefer);
+        assert_eq!(parse_sslmode(Some("prefer")).unwrap(), TlsMode::Prefer);
+        assert_eq!(parse_sslmode(Some("disable")).unwrap(), TlsMode::Disable);
+        assert_eq!(parse_sslmode(Some("require")).unwrap(), TlsMode::Require);
+    }
+
+    #[test]
+    fn parse_sslmode_case_insensitive_and_trimmed() {
+        assert_eq!(parse_sslmode(Some("  PREFER ")).unwrap(), TlsMode::Prefer);
+        assert_eq!(parse_sslmode(Some("Disable")).unwrap(), TlsMode::Disable);
+        assert_eq!(parse_sslmode(Some("REQUIRE")).unwrap(), TlsMode::Require);
+    }
+
+    #[test]
+    fn parse_sslmode_unknown_rejected() {
+        let err = parse_sslmode(Some("verify-full")).unwrap_err();
+        assert_eq!(err.status, Status::InvalidArg);
+        assert!(err.reason.contains("verify-full"));
+    }
+
+    #[test]
+    fn bytes_to_string_valid_utf8() {
+        assert_eq!(bytes_to_string(b"hello".to_vec()), "hello");
+        assert_eq!(bytes_to_string("résumé".as_bytes().to_vec()), "résumé");
+        assert_eq!(bytes_to_string(vec![]), "");
+    }
+
+    #[test]
+    fn bytes_to_string_invalid_utf8_falls_back_lossy() {
+        let decoded = bytes_to_string(vec![0x68, 0x69, 0xff, 0xfe]);
+        assert!(decoded.starts_with("hi"));
+        assert!(decoded.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn rows_to_strings_maps_cells_and_preserves_nulls() {
+        let rows = vec![
+            vec![Some(b"a".to_vec()), None],
+            vec![None, Some(b"b".to_vec())],
+        ];
+        let out = rows_to_strings(rows);
+        assert_eq!(out[0][0].as_deref(), Some("a"));
+        assert!(out[0][1].is_none());
+        assert!(out[1][0].is_none());
+        assert_eq!(out[1][1].as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn rows_to_columnar_data_and_offsets() {
+        let rows = vec![
+            vec![Some(b"ab".to_vec()), Some(b"cde".to_vec())],
+            vec![Some(b"".to_vec()), Some(b"f".to_vec())],
+        ];
+        let (data, offsets, nulls) = rows_to_columnar(rows, 2);
+        assert_eq!(data, "abcdef");
+        assert_eq!(offsets, vec![0, 2, 5, 5, 6]);
+        assert_eq!(nulls, vec![0u8]);
+    }
+
+    #[test]
+    fn rows_to_columnar_null_bitmap_positions() {
+        let rows = vec![
+            vec![None, Some(b"x".to_vec())], // cell 0 null, cell 1 set
+            vec![Some(b"y".to_vec()), None], // cell 2 set, cell 3 null
+        ];
+        let (data, offsets, nulls) = rows_to_columnar(rows, 2);
+        assert_eq!(data, "xy");
+        assert_eq!(offsets, vec![0, 0, 1, 2, 2]);
+        assert_eq!(nulls.len(), 1);
+        assert_eq!(nulls[0] & 0b0000_0001, 0b0000_0001, "bit 0 set (null)");
+        assert_eq!(nulls[0] & 0b0000_0010, 0, "bit 1 clear (non-null)");
+        assert_eq!(nulls[0] & 0b0000_0100, 0, "bit 2 clear (non-null)");
+        assert_eq!(nulls[0] & 0b0000_1000, 0b0000_1000, "bit 3 set (null)");
+    }
+
+    #[test]
+    fn rows_to_columnar_bitmap_second_byte() {
+        // 10 cells, some null: make sure the bitmap spans 2 bytes correctly.
+        let mut row: Vec<Option<Vec<u8>>> = (0..10).map(|_| Some(b"x".to_vec())).collect();
+        row[8] = None; // bit 0 of byte 1
+        row[9] = None; // bit 1 of byte 1
+        let (_, offsets, nulls) = rows_to_columnar(vec![row], 10);
+        assert_eq!(offsets.len(), 11);
+        assert_eq!(nulls.len(), 2); // ceil(10/8)
+        assert_eq!(nulls[0], 0);
+        assert_eq!(nulls[1] & 0b11, 0b11);
+    }
+
+    #[test]
+    fn rows_to_columnar_empty_rows() {
+        let (data, offsets, nulls) = rows_to_columnar(vec![], 3);
+        assert_eq!(data, "");
+        assert_eq!(offsets, vec![0]);
+        assert!(nulls.is_empty());
+    }
+
+    #[test]
+    fn rows_to_columnar_handles_invalid_utf8_cells() {
+        let rows = vec![vec![Some(vec![0x68, 0xff])]];
+        let (data, offsets, nulls) = rows_to_columnar(rows, 1);
+        assert!(data.starts_with("h"));
+        assert_eq!(offsets, vec![0, 2]);
+        assert_eq!(nulls, vec![0u8]);
+    }
+
+    #[test]
+    fn to_format_codes_accepts_valid() {
+        let out = to_format_codes(&[0, 1, 0]).unwrap();
+        assert_eq!(out, vec![FormatCode::Text, FormatCode::Binary, FormatCode::Text]);
+        assert!(to_format_codes(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn to_format_codes_rejects_invalid() {
+        let err = to_format_codes(&[0, 2]).unwrap_err();
+        assert_eq!(err.status, Status::InvalidArg);
+        assert!(err.reason.contains("got 2"));
+        let err = to_format_codes(&[-1]).unwrap_err();
+        assert_eq!(err.status, Status::InvalidArg);
+    }
+
+    #[test]
+    fn fields_to_info_preserves_columns() {
+        let fs = vec![
+            mkfield("id", 23, FormatCode::Binary),
+            mkfield("name", 25, FormatCode::Text),
+        ];
+        let infos = fields_to_info(fs);
+        assert_eq!(infos.len(), 2);
+        assert_eq!(infos[0].name, "id");
+        assert_eq!(infos[0].type_oid, 23);
+        assert_eq!(infos[0].format, 1);
+        assert_eq!(infos[1].name, "name");
+        assert_eq!(infos[1].type_oid, 25);
+        assert_eq!(infos[1].format, 0);
+    }
+
+    #[test]
+    fn borrow_params_passes_through_contents_and_nulls() {
+        let params = vec![
+            Some(Buffer::from(vec![1u8, 2, 3])),
+            None,
+            Some(Buffer::from(Vec::<u8>::new())),
+        ];
+        let refs = borrow_params(&params);
+        assert_eq!(refs.len(), 3);
+        assert_eq!(refs[0], Some(&[1u8, 2, 3][..]));
+        assert_eq!(refs[1], None);
+        assert_eq!(refs[2], Some(&[][..]));
+    }
+
+    #[test]
+    fn rows_to_buffers_preserves_cells_and_nulls() {
+        let rows = vec![
+            vec![Some(b"abc".to_vec()), None],
+            vec![None, Some(b"".to_vec())],
+        ];
+        let out = rows_to_buffers(rows);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0][0].as_ref().unwrap().as_ref(), b"abc");
+        assert!(out[0][1].is_none());
+        assert!(out[1][0].is_none());
+        assert_eq!(out[1][1].as_ref().unwrap().as_ref(), b"");
+    }
+
+    #[test]
+    fn pipeline_response_to_query_result_rows() {
+        let resp = PipelineResponse::Rows {
+            fields: vec![mkfield("n", 23, FormatCode::Text)],
+            rows: vec![vec![Some(b"42".to_vec())], vec![None]],
+            command_tag: "SELECT 2".into(),
+        };
+        let qr = pipeline_response_to_query_result(resp);
+        assert_eq!(qr.fields.len(), 1);
+        assert_eq!(qr.fields[0].name, "n");
+        assert_eq!(qr.rows.len(), 2);
+        assert_eq!(qr.rows[0][0].as_deref(), Some("42"));
+        assert!(qr.rows[1][0].is_none());
+        assert_eq!(qr.command_tag, "SELECT 2");
+    }
+
+    #[test]
+    fn pipeline_response_to_query_result_done_is_empty() {
+        let qr = pipeline_response_to_query_result(PipelineResponse::Done);
+        assert!(qr.fields.is_empty());
+        assert!(qr.rows.is_empty());
+        assert!(qr.command_tag.is_empty());
+    }
+
+    #[test]
+    fn response_to_columnar_rows_packs_cells() {
+        let resp = PipelineResponse::Rows {
+            fields: vec![
+                mkfield("a", 23, FormatCode::Text),
+                mkfield("b", 25, FormatCode::Text),
+            ],
+            rows: vec![
+                vec![Some(b"1".to_vec()), Some(b"hi".to_vec())],
+                vec![None, Some(b"bye".to_vec())],
+            ],
+            command_tag: "SELECT 2".into(),
+        };
+        let cr = response_to_columnar(resp);
+        assert_eq!(cr.row_count, 2);
+        assert_eq!(cr.cols, 2);
+        assert_eq!(cr.data, "1hibye");
+        assert_eq!(cr.fields.len(), 2);
+        assert_eq!(cr.command_tag, "SELECT 2");
+        let offsets: &[u32] = cr.offsets.as_ref();
+        assert_eq!(offsets, &[0, 1, 3, 3, 6]);
+        let nulls: &[u8] = cr.nulls.as_ref();
+        assert_eq!(nulls.len(), 1);
+        assert_eq!(nulls[0] & 0b0100, 0b0100, "row1 col0 is null (cell idx 2)");
+    }
+
+    #[test]
+    fn response_to_columnar_done_is_empty() {
+        let cr = response_to_columnar(PipelineResponse::Done);
+        assert_eq!(cr.row_count, 0);
+        assert_eq!(cr.cols, 0);
+        assert!(cr.data.is_empty());
+        assert!(cr.fields.is_empty());
+        assert!(cr.command_tag.is_empty());
+        let offsets: &[u32] = cr.offsets.as_ref();
+        assert_eq!(offsets, &[0]);
+        let nulls: &[u8] = cr.nulls.as_ref();
+        assert!(nulls.is_empty());
+    }
+
+    #[test]
+    fn map_err_pg_encodes_json_payload() {
+        let pg = pg_wired::protocol::types::PgError {
+            severity: "ERROR".into(),
+            code: "42P01".into(),
+            message: "relation does not exist".into(),
+            detail: Some("missing table".into()),
+            hint: None,
+            position: Some("7".into()),
+        };
+        let err = map_err(PgWireError::Pg(pg));
+        let reason = err.reason;
+        let rest = reason
+            .strip_prefix("pg-wired-error:")
+            .expect("prefix present");
+        let v: serde_json::Value = serde_json::from_str(rest).expect("valid JSON payload");
+        assert_eq!(v["kind"], "pg");
+        assert_eq!(v["code"], "42P01");
+        assert_eq!(v["message"], "relation does not exist");
+        assert_eq!(v["detail"], "missing table");
+        assert!(v["hint"].is_null());
+        assert_eq!(v["position"], "7");
+    }
+
+    #[test]
+    fn map_err_protocol_and_closed_kinds() {
+        let err = map_err(PgWireError::Protocol("boom".into()));
+        let v: serde_json::Value = serde_json::from_str(
+            err.reason.strip_prefix("pg-wired-error:").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(v["kind"], "protocol");
+        assert_eq!(v["message"], "boom");
+
+        let err = map_err(PgWireError::ConnectionClosed);
+        let v: serde_json::Value = serde_json::from_str(
+            err.reason.strip_prefix("pg-wired-error:").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(v["kind"], "closed");
+    }
+
+    #[test]
+    fn map_err_io_kind() {
+        let io = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "peer reset");
+        let err = map_err(PgWireError::Io(io));
+        let v: serde_json::Value = serde_json::from_str(
+            err.reason.strip_prefix("pg-wired-error:").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(v["kind"], "io");
+        assert!(v["message"].as_str().unwrap().contains("peer reset"));
+    }
+}
