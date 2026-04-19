@@ -180,7 +180,9 @@ proptest! {
 fn test_incomplete_data_is_stable() {
     // 4 bytes is not enough for a complete message (need 5: tag + 4-byte length)
     let mut buf = BytesMut::from(&[b'Z', 0, 0, 0][..]);
-    assert!(pg_wired::protocol::backend::parse_message(&mut buf).unwrap().is_none());
+    assert!(pg_wired::protocol::backend::parse_message(&mut buf)
+        .unwrap()
+        .is_none());
     // Buffer should not be consumed
     assert_eq!(buf.len(), 4);
 }

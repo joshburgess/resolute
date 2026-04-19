@@ -33,77 +33,99 @@ pub trait Encode {
 // ---------------------------------------------------------------------------
 
 impl Encode for bool {
-    fn type_oid(&self) -> TypeOid { TypeOid::Bool }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Bool
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_u8(if *self { 1 } else { 0 });
     }
 }
 
 impl Encode for i16 {
-    fn type_oid(&self) -> TypeOid { TypeOid::Int2 }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Int2
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_i16(*self);
     }
 }
 
 impl Encode for i32 {
-    fn type_oid(&self) -> TypeOid { TypeOid::Int4 }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Int4
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_i32(*self);
     }
 }
 
 impl Encode for i64 {
-    fn type_oid(&self) -> TypeOid { TypeOid::Int8 }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Int8
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_i64(*self);
     }
 }
 
 impl Encode for f32 {
-    fn type_oid(&self) -> TypeOid { TypeOid::Float4 }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Float4
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_f32(*self);
     }
 }
 
 impl Encode for f64 {
-    fn type_oid(&self) -> TypeOid { TypeOid::Float8 }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Float8
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_f64(*self);
     }
 }
 
 impl Encode for str {
-    fn type_oid(&self) -> TypeOid { TypeOid::Text }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Text
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_slice(self.as_bytes());
     }
 }
 
 impl Encode for String {
-    fn type_oid(&self) -> TypeOid { TypeOid::Text }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Text
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_slice(self.as_bytes());
     }
 }
 
 impl Encode for &str {
-    fn type_oid(&self) -> TypeOid { TypeOid::Text }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Text
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_slice(self.as_bytes());
     }
 }
 
 impl Encode for [u8] {
-    fn type_oid(&self) -> TypeOid { TypeOid::Bytea }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Bytea
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_slice(self);
     }
 }
 
 impl Encode for Vec<u8> {
-    fn type_oid(&self) -> TypeOid { TypeOid::Bytea }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Bytea
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_slice(self);
     }
@@ -114,7 +136,9 @@ impl Encode for Vec<u8> {
 // ---------------------------------------------------------------------------
 
 impl Encode for crate::newtypes::PgNumeric {
-    fn type_oid(&self) -> TypeOid { TypeOid::Numeric }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Numeric
+    }
     fn encode(&self, buf: &mut BytesMut) {
         // Send as text — PG accepts text-format numeric in binary protocol
         // when the OID is set to numeric.
@@ -123,7 +147,9 @@ impl Encode for crate::newtypes::PgNumeric {
 }
 
 impl Encode for crate::newtypes::PgTimestamp {
-    fn type_oid(&self) -> TypeOid { TypeOid::Timestamp }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Timestamp
+    }
     fn encode(&self, buf: &mut BytesMut) {
         match self {
             crate::newtypes::PgTimestamp::Value(us) => buf.put_i64(*us),
@@ -134,7 +160,9 @@ impl Encode for crate::newtypes::PgTimestamp {
 }
 
 impl Encode for crate::newtypes::PgDate {
-    fn type_oid(&self) -> TypeOid { TypeOid::Date }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Date
+    }
     fn encode(&self, buf: &mut BytesMut) {
         match self {
             crate::newtypes::PgDate::Value(d) => buf.put_i32(*d),
@@ -145,7 +173,9 @@ impl Encode for crate::newtypes::PgDate {
 }
 
 impl Encode for crate::newtypes::PgInet {
-    fn type_oid(&self) -> TypeOid { TypeOid::Inet }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Inet
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_slice(self.0.as_bytes());
     }
@@ -167,14 +197,11 @@ pub fn encode_array_header(buf: &mut BytesMut, has_null: bool, element_oid: u32,
 macro_rules! impl_array_encode {
     ($t:ty, $array_oid_variant:ident) => {
         impl Encode for Vec<$t> {
-            fn type_oid(&self) -> TypeOid { TypeOid::$array_oid_variant }
+            fn type_oid(&self) -> TypeOid {
+                TypeOid::$array_oid_variant
+            }
             fn encode(&self, buf: &mut BytesMut) {
-                encode_array_header(
-                    buf,
-                    false,
-                    <$t as crate::pg_type::PgType>::OID,
-                    self.len(),
-                );
+                encode_array_header(buf, false, <$t as crate::pg_type::PgType>::OID, self.len());
                 for v in self {
                     v.encode_param(buf);
                 }
@@ -202,7 +229,9 @@ const PG_EPOCH_OFFSET_US: i64 = 946_684_800_000_000;
 
 #[cfg(feature = "chrono")]
 impl Encode for chrono::NaiveDateTime {
-    fn type_oid(&self) -> TypeOid { TypeOid::Timestamp }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Timestamp
+    }
     fn encode(&self, buf: &mut BytesMut) {
         // PG stores timestamp as microseconds since 2000-01-01.
         let us = self.and_utc().timestamp_micros() - PG_EPOCH_OFFSET_US;
@@ -212,7 +241,9 @@ impl Encode for chrono::NaiveDateTime {
 
 #[cfg(feature = "chrono")]
 impl Encode for chrono::DateTime<chrono::Utc> {
-    fn type_oid(&self) -> TypeOid { TypeOid::Timestamptz }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Timestamptz
+    }
     fn encode(&self, buf: &mut BytesMut) {
         let us = self.timestamp_micros() - PG_EPOCH_OFFSET_US;
         buf.put_i64(us);
@@ -221,7 +252,9 @@ impl Encode for chrono::DateTime<chrono::Utc> {
 
 #[cfg(feature = "chrono")]
 impl Encode for chrono::NaiveDate {
-    fn type_oid(&self) -> TypeOid { TypeOid::Date }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Date
+    }
     fn encode(&self, buf: &mut BytesMut) {
         // PG stores date as days since 2000-01-01.
         let pg_epoch = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
@@ -232,7 +265,9 @@ impl Encode for chrono::NaiveDate {
 
 #[cfg(feature = "chrono")]
 impl Encode for chrono::NaiveTime {
-    fn type_oid(&self) -> TypeOid { TypeOid::Time }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Time
+    }
     fn encode(&self, buf: &mut BytesMut) {
         // PG stores time as microseconds since midnight.
         let us = self
@@ -249,12 +284,15 @@ impl Encode for chrono::NaiveTime {
 
 #[cfg(feature = "json")]
 impl Encode for serde_json::Value {
-    fn type_oid(&self) -> TypeOid { TypeOid::Jsonb }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Jsonb
+    }
     fn encode(&self, buf: &mut BytesMut) {
         // JSONB binary format: version byte (1) + JSON text.
         buf.put_u8(1);
         // serde_json::Value serialization is infallible — the value is already valid JSON.
-        let json_text = serde_json::to_string(self).expect("serde_json::Value serialization cannot fail");
+        let json_text =
+            serde_json::to_string(self).expect("serde_json::Value serialization cannot fail");
         buf.put_slice(json_text.as_bytes());
     }
 }
@@ -265,7 +303,9 @@ impl Encode for serde_json::Value {
 
 #[cfg(feature = "uuid")]
 impl Encode for uuid::Uuid {
-    fn type_oid(&self) -> TypeOid { TypeOid::Uuid }
+    fn type_oid(&self) -> TypeOid {
+        TypeOid::Uuid
+    }
     fn encode(&self, buf: &mut BytesMut) {
         buf.put_slice(self.as_bytes());
     }

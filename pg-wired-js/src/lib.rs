@@ -125,7 +125,9 @@ fn rows_to_strings(rows: Vec<Vec<Option<Vec<u8>>>>) -> Vec<Vec<Option<String>>> 
 }
 
 fn row_to_strings(row: StreamedRow) -> Vec<Option<String>> {
-    row.into_iter().map(|cell| cell.map(bytes_to_string)).collect()
+    row.into_iter()
+        .map(|cell| cell.map(bytes_to_string))
+        .collect()
 }
 
 fn bytes_to_string(bytes: Vec<u8>) -> String {
@@ -138,10 +140,7 @@ fn bytes_to_string(bytes: Vec<u8>) -> String {
 /// Flatten row-oriented text-format cells into a columnar `(data, offsets, nulls)`
 /// triple. Offsets include a trailing terminator so each cell is
 /// `data[offsets[i]..offsets[i+1]]`.
-fn rows_to_columnar(
-    rows: Vec<Vec<Option<Vec<u8>>>>,
-    cols: usize,
-) -> (String, Vec<u32>, Vec<u8>) {
+fn rows_to_columnar(rows: Vec<Vec<Option<Vec<u8>>>>, cols: usize) -> (String, Vec<u32>, Vec<u8>) {
     let row_count = rows.len();
     let cell_count = row_count * cols;
     let total_bytes: usize = rows
@@ -224,40 +223,28 @@ fn map_err(e: PgWireError) -> Error {
                 "hint": pg.hint,
                 "position": pg.position,
             });
-            Error::new(
-                Status::GenericFailure,
-                format!("pg-wired-error:{payload}"),
-            )
+            Error::new(Status::GenericFailure, format!("pg-wired-error:{payload}"))
         }
         PgWireError::Io(io) => {
             let payload = serde_json::json!({
                 "kind": "io",
                 "message": io.to_string(),
             });
-            Error::new(
-                Status::GenericFailure,
-                format!("pg-wired-error:{payload}"),
-            )
+            Error::new(Status::GenericFailure, format!("pg-wired-error:{payload}"))
         }
         PgWireError::Protocol(m) => {
             let payload = serde_json::json!({
                 "kind": "protocol",
                 "message": m,
             });
-            Error::new(
-                Status::GenericFailure,
-                format!("pg-wired-error:{payload}"),
-            )
+            Error::new(Status::GenericFailure, format!("pg-wired-error:{payload}"))
         }
         PgWireError::ConnectionClosed => {
             let payload = serde_json::json!({
                 "kind": "closed",
                 "message": "connection closed",
             });
-            Error::new(
-                Status::GenericFailure,
-                format!("pg-wired-error:{payload}"),
-            )
+            Error::new(Status::GenericFailure, format!("pg-wired-error:{payload}"))
         }
     }
 }
@@ -323,7 +310,10 @@ async fn exec_query_full(
     param_oids: &[u32],
 ) -> Result<QueryResult> {
     let buf = encode_query(conn, sql, params, param_oids);
-    let resp = conn.submit(buf, ResponseCollector::Rows).await.map_err(map_err)?;
+    let resp = conn
+        .submit(buf, ResponseCollector::Rows)
+        .await
+        .map_err(map_err)?;
     Ok(pipeline_response_to_query_result(resp))
 }
 
@@ -420,7 +410,10 @@ async fn exec_query_raw(
 ) -> Result<RawQueryResult> {
     let buf =
         encode_query_with_formats(conn, sql, params, param_oids, param_formats, result_formats);
-    let resp = conn.submit(buf, ResponseCollector::Rows).await.map_err(map_err)?;
+    let resp = conn
+        .submit(buf, ResponseCollector::Rows)
+        .await
+        .map_err(map_err)?;
     Ok(match resp {
         PipelineResponse::Rows {
             fields,
@@ -442,7 +435,10 @@ async fn exec_query_raw(
 async fn exec_simple_full(conn: &AsyncConn, sql: &str) -> Result<QueryResult> {
     let mut buf = BytesMut::with_capacity(sql.len() + 16);
     frontend::encode_message(&FrontendMsg::Query(sql.as_bytes()), &mut buf);
-    let resp = conn.submit(buf, ResponseCollector::Rows).await.map_err(map_err)?;
+    let resp = conn
+        .submit(buf, ResponseCollector::Rows)
+        .await
+        .map_err(map_err)?;
     Ok(pipeline_response_to_query_result(resp))
 }
 
@@ -577,7 +573,11 @@ impl Connection {
     ) -> Result<ColumnarResult> {
         let refs = borrow_params(&params);
         let buf = encode_query(&self.inner, &sql, &refs, &param_oids);
-        let resp = self.inner.submit(buf, ResponseCollector::Rows).await.map_err(map_err)?;
+        let resp = self
+            .inner
+            .submit(buf, ResponseCollector::Rows)
+            .await
+            .map_err(map_err)?;
         self.warm.lock().await.insert(sql);
         Ok(response_to_columnar(resp))
     }
@@ -587,7 +587,11 @@ impl Connection {
     pub async fn simple_query_columnar(&self, sql: String) -> Result<ColumnarResult> {
         let mut buf = BytesMut::with_capacity(sql.len() + 16);
         frontend::encode_message(&FrontendMsg::Query(sql.as_bytes()), &mut buf);
-        let resp = self.inner.submit(buf, ResponseCollector::Rows).await.map_err(map_err)?;
+        let resp = self
+            .inner
+            .submit(buf, ResponseCollector::Rows)
+            .await
+            .map_err(map_err)?;
         Ok(response_to_columnar(resp))
     }
 
@@ -638,7 +642,11 @@ impl Connection {
     /// Returns the row count parsed from the CommandComplete tag.
     #[napi]
     pub async fn copy_in(&self, sql: String, data: Buffer) -> Result<BigInt> {
-        let n = self.inner.copy_in(&sql, data.as_ref()).await.map_err(map_err)?;
+        let n = self
+            .inner
+            .copy_in(&sql, data.as_ref())
+            .await
+            .map_err(map_err)?;
         Ok(BigInt::from(n))
     }
 
@@ -673,9 +681,11 @@ impl Connection {
     /// a low-frequency keepalive (e.g. `SELECT 1` every few seconds).
     #[napi]
     pub fn notifications(&self) -> Option<Notifications> {
-        self.inner.take_notification_receiver().map(|rx| Notifications {
-            rx: Arc::new(Mutex::new(Some(rx))),
-        })
+        self.inner
+            .take_notification_receiver()
+            .map(|rx| Notifications {
+                rx: Arc::new(Mutex::new(Some(rx))),
+            })
     }
 
     /// Send a Terminate to the server and wait for the writer/reader tasks
@@ -856,8 +866,7 @@ impl Pipeline {
         // Partition: cold-first (must serialize) vs warm-or-repeat (may parallelize).
         let (serial, parallel) = {
             let warm = self.warm.lock().await;
-            let mut seen_cold: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
+            let mut seen_cold: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut serial = Vec::new();
             let mut parallel = Vec::new();
             for (i, q) in queued.into_iter().enumerate() {
@@ -915,7 +924,10 @@ impl Pipeline {
             slots[i] = Some(r?);
         }
 
-        Ok(slots.into_iter().map(|s| s.expect("pipeline slot unfilled")).collect())
+        Ok(slots
+            .into_iter()
+            .map(|s| s.expect("pipeline slot unfilled"))
+            .collect())
     }
 
     /// Discard queued queries without executing.
@@ -1055,8 +1067,16 @@ impl Notifications {
         };
         loop {
             match rx.recv().await {
-                Some(BackendMsg::NotificationResponse { pid, channel, payload }) => {
-                    return Ok(Some(Notification { pid, channel, payload }));
+                Some(BackendMsg::NotificationResponse {
+                    pid,
+                    channel,
+                    payload,
+                }) => {
+                    return Ok(Some(Notification {
+                        pid,
+                        channel,
+                        payload,
+                    }));
                 }
                 Some(_) => continue,
                 None => {

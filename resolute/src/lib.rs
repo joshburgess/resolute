@@ -151,44 +151,46 @@ mod row;
 pub mod test_db;
 mod types;
 
+pub use bytes::BytesMut;
 pub use checked::{CheckedQuery, UncheckedQuery};
 pub use decode::{Decode, DecodeText};
-pub use encode::{Encode, SqlParam, encode_array_header};
+pub use encode::{encode_array_header, Encode, SqlParam};
 pub use error::TypedError;
 pub use executor::Executor;
+pub use listener::{Notification, PgListener};
+pub use newtypes::{PgDate, PgInet, PgNumeric, PgTimestamp};
 pub use oid::TypeOid;
 pub use pg_type::PgType;
-pub use query::{Client, IsolationLevel, PipelineResult, RowStream, Transaction, parse_connection_string};
-pub use row::{Row, FromRow};
-pub use bytes::BytesMut;
+pub use pg_wired::CancelToken;
+pub use pooled::{PooledTypedClient, TypedPool};
+pub use query::{
+    parse_connection_string, Client, IsolationLevel, PipelineResult, RowStream, Transaction,
+};
+pub use range::PgRange;
+/// Attribute macro for database-backed tests. Auto-creates a temp DB,
+/// runs migrations, injects a `Client`, and drops the DB on completion.
+pub use resolute_derive::test;
 /// Derive macro for `FromRow`. Use `#[derive(resolute::FromRow)]` on structs.
 pub use resolute_derive::FromRow;
-/// Derive macro for PostgreSQL enum types.
-pub use resolute_derive::PgEnum;
 /// Derive macro for PostgreSQL composite types.
 pub use resolute_derive::PgComposite;
 /// Derive macro for PostgreSQL domain types (newtypes over a base type).
 pub use resolute_derive::PgDomain;
-/// Attribute macro for database-backed tests. Auto-creates a temp DB,
-/// runs migrations, injects a `Client`, and drops the DB on completion.
-pub use resolute_derive::test;
+/// Derive macro for PostgreSQL enum types.
+pub use resolute_derive::PgEnum;
 /// Compile-time checked query macro. Requires `DATABASE_URL` env var.
 pub use resolute_macros::query;
 /// Compile-time checked query mapped to an existing struct via FromRow.
 pub use resolute_macros::query_as;
-/// Compile-time checked single-scalar query.
-pub use resolute_macros::query_scalar;
 /// Like query! but reads SQL from a file.
 pub use resolute_macros::query_file;
 /// Like query_as! but reads SQL from a file.
 pub use resolute_macros::query_file_as;
 /// Like query_scalar! but reads SQL from a file.
 pub use resolute_macros::query_file_scalar;
+/// Compile-time checked single-scalar query.
+pub use resolute_macros::query_scalar;
 /// Skip compile-time checking (no DATABASE_URL or cache needed).
 pub use resolute_macros::query_unchecked;
+pub use row::{FromRow, Row};
 pub use types::TypeInfo;
-pub use newtypes::{PgNumeric, PgInet, PgTimestamp, PgDate};
-pub use range::PgRange;
-pub use listener::{PgListener, Notification};
-pub use pooled::{TypedPool, PooledTypedClient};
-pub use pg_wired::CancelToken;

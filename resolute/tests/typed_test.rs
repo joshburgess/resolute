@@ -182,7 +182,10 @@ fn test_decode_wrong_size() {
 #[tokio::test]
 async fn test_query_select_int() {
     let client = connect().await;
-    let rows = client.query("SELECT $1::int4 AS n", &[&42i32]).await.unwrap();
+    let rows = client
+        .query("SELECT $1::int4 AS n", &[&42i32])
+        .await
+        .unwrap();
     assert_eq!(rows.len(), 1);
     let n: i32 = rows[0].get(0).unwrap();
     assert_eq!(n, 42);
@@ -272,10 +275,7 @@ async fn test_query_multiple_rows() {
 #[tokio::test]
 async fn test_query_null() {
     let client = connect().await;
-    let rows = client
-        .query("SELECT NULL::int4 AS n", &[])
-        .await
-        .unwrap();
+    let rows = client.query("SELECT NULL::int4 AS n", &[]).await.unwrap();
     assert_eq!(rows.len(), 1);
     let n: Option<i32> = rows[0].get_opt(0).unwrap();
     assert!(n.is_none());
@@ -292,9 +292,7 @@ async fn test_query_one() {
 #[tokio::test]
 async fn test_query_one_not_found() {
     let client = connect().await;
-    let result = client
-        .query_one("SELECT 1 WHERE false", &[])
-        .await;
+    let result = client.query_one("SELECT 1 WHERE false", &[]).await;
     assert!(result.is_err());
 }
 
@@ -342,10 +340,7 @@ async fn test_query_real_table() {
 async fn test_query_with_filter() {
     let client = connect().await;
     let rows = client
-        .query(
-            "SELECT name FROM api.authors WHERE id = $1",
-            &[&1i32],
-        )
+        .query("SELECT name FROM api.authors WHERE id = $1", &[&1i32])
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
@@ -357,9 +352,15 @@ async fn test_query_with_filter() {
 async fn test_statement_cache() {
     let client = connect().await;
     // First call: Parse + Bind + Execute + Sync
-    let r1 = client.query("SELECT $1::int4 AS n", &[&1i32]).await.unwrap();
+    let r1 = client
+        .query("SELECT $1::int4 AS n", &[&1i32])
+        .await
+        .unwrap();
     // Second call: cache hit — Bind + Execute + Sync (no Parse)
-    let r2 = client.query("SELECT $1::int4 AS n", &[&2i32]).await.unwrap();
+    let r2 = client
+        .query("SELECT $1::int4 AS n", &[&2i32])
+        .await
+        .unwrap();
     assert_eq!(r1[0].get::<i32>(0).unwrap(), 1);
     assert_eq!(r2[0].get::<i32>(0).unwrap(), 2);
 }
@@ -367,7 +368,9 @@ async fn test_statement_cache() {
 #[tokio::test]
 async fn test_error_recovery() {
     let client = connect().await;
-    let result = client.query("SELECT * FROM nonexistent_xyz_table", &[]).await;
+    let result = client
+        .query("SELECT * FROM nonexistent_xyz_table", &[])
+        .await;
     assert!(result.is_err());
     // Connection should still work.
     let rows = client.query("SELECT 1::int4 AS n", &[]).await.unwrap();
@@ -441,7 +444,10 @@ async fn test_execute_insert_and_delete() {
     let client = connect().await;
 
     // Create a temp table.
-    client.simple_query("CREATE TEMP TABLE test_exec (id int)").await.unwrap();
+    client
+        .simple_query("CREATE TEMP TABLE test_exec (id int)")
+        .await
+        .unwrap();
 
     // Insert rows.
     let count = client
@@ -472,12 +478,24 @@ async fn test_execute_insert_and_delete() {
 #[tokio::test]
 async fn test_execute_update() {
     let client = connect().await;
-    client.simple_query("CREATE TEMP TABLE test_upd (id int, val text)").await.unwrap();
-    client.execute("INSERT INTO test_upd VALUES ($1, $2)", &[&1i32, &"old"]).await.unwrap();
-    client.execute("INSERT INTO test_upd VALUES ($1, $2)", &[&2i32, &"old"]).await.unwrap();
+    client
+        .simple_query("CREATE TEMP TABLE test_upd (id int, val text)")
+        .await
+        .unwrap();
+    client
+        .execute("INSERT INTO test_upd VALUES ($1, $2)", &[&1i32, &"old"])
+        .await
+        .unwrap();
+    client
+        .execute("INSERT INTO test_upd VALUES ($1, $2)", &[&2i32, &"old"])
+        .await
+        .unwrap();
 
     let count = client
-        .execute("UPDATE test_upd SET val = $1 WHERE id = $2", &[&"new", &1i32])
+        .execute(
+            "UPDATE test_upd SET val = $1 WHERE id = $2",
+            &[&"new", &1i32],
+        )
         .await
         .unwrap();
     assert_eq!(count, 1);
@@ -496,14 +514,24 @@ async fn test_execute_update() {
 #[tokio::test]
 async fn test_transaction_commit() {
     let client = connect().await;
-    client.simple_query("CREATE TEMP TABLE test_txn (id int)").await.unwrap();
+    client
+        .simple_query("CREATE TEMP TABLE test_txn (id int)")
+        .await
+        .unwrap();
 
     let txn = client.begin().await.unwrap();
-    txn.execute("INSERT INTO test_txn VALUES ($1)", &[&1i32]).await.unwrap();
-    txn.execute("INSERT INTO test_txn VALUES ($1)", &[&2i32]).await.unwrap();
+    txn.execute("INSERT INTO test_txn VALUES ($1)", &[&1i32])
+        .await
+        .unwrap();
+    txn.execute("INSERT INTO test_txn VALUES ($1)", &[&2i32])
+        .await
+        .unwrap();
     txn.commit().await.unwrap();
 
-    let rows = client.query("SELECT id FROM test_txn ORDER BY id", &[]).await.unwrap();
+    let rows = client
+        .query("SELECT id FROM test_txn ORDER BY id", &[])
+        .await
+        .unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].get::<i32>(0).unwrap(), 1);
     assert_eq!(rows[1].get::<i32>(0).unwrap(), 2);
@@ -512,28 +540,44 @@ async fn test_transaction_commit() {
 #[tokio::test]
 async fn test_transaction_rollback() {
     let client = connect().await;
-    client.simple_query("CREATE TEMP TABLE test_txn_rb (id int)").await.unwrap();
+    client
+        .simple_query("CREATE TEMP TABLE test_txn_rb (id int)")
+        .await
+        .unwrap();
 
     let txn = client.begin().await.unwrap();
-    txn.execute("INSERT INTO test_txn_rb VALUES ($1)", &[&1i32]).await.unwrap();
+    txn.execute("INSERT INTO test_txn_rb VALUES ($1)", &[&1i32])
+        .await
+        .unwrap();
     txn.rollback().await.unwrap();
 
     // Table should be empty — insert was rolled back.
-    let rows = client.query("SELECT id FROM test_txn_rb", &[]).await.unwrap();
+    let rows = client
+        .query("SELECT id FROM test_txn_rb", &[])
+        .await
+        .unwrap();
     assert_eq!(rows.len(), 0);
 }
 
 #[tokio::test]
 async fn test_transaction_query_inside() {
     let client = connect().await;
-    client.simple_query("CREATE TEMP TABLE test_txn_q (id int)").await.unwrap();
+    client
+        .simple_query("CREATE TEMP TABLE test_txn_q (id int)")
+        .await
+        .unwrap();
 
     let txn = client.begin().await.unwrap();
     txn.execute(
         "INSERT INTO test_txn_q VALUES ($1), ($2), ($3)",
         &[&10i32, &20i32, &30i32],
-    ).await.unwrap();
-    let rows = txn.query("SELECT sum(id)::int4 FROM test_txn_q", &[]).await.unwrap();
+    )
+    .await
+    .unwrap();
+    let rows = txn
+        .query("SELECT sum(id)::int4 FROM test_txn_q", &[])
+        .await
+        .unwrap();
     let sum: i32 = rows[0].get(0).unwrap();
     assert_eq!(sum, 60);
     txn.commit().await.unwrap();
@@ -546,7 +590,10 @@ async fn test_transaction_query_inside() {
 #[tokio::test]
 async fn test_simple_query_ddl() {
     let client = connect().await;
-    client.simple_query("CREATE TEMP TABLE test_simple (id int)").await.unwrap();
+    client
+        .simple_query("CREATE TEMP TABLE test_simple (id int)")
+        .await
+        .unwrap();
     client.simple_query("DROP TABLE test_simple").await.unwrap();
 }
 
@@ -626,7 +673,10 @@ struct DerivedAuthorWithBio {
 async fn test_derive_from_row_optional() {
     let client = connect().await;
     let rows = client
-        .query("SELECT id, name, bio FROM api.authors WHERE id = $1", &[&1i32])
+        .query(
+            "SELECT id, name, bio FROM api.authors WHERE id = $1",
+            &[&1i32],
+        )
         .await
         .unwrap();
     let author = DerivedAuthorWithBio::from_row(&rows[0]).unwrap();
@@ -679,7 +729,10 @@ async fn test_derive_from_row_multiple() {
 async fn test_null_param() {
     let client = connect().await;
     let val: Option<i32> = None;
-    let rows = client.query("SELECT $1::int4 IS NULL AS is_null", &[&val]).await.unwrap();
+    let rows = client
+        .query("SELECT $1::int4 IS NULL AS is_null", &[&val])
+        .await
+        .unwrap();
     let is_null: bool = rows[0].get(0).unwrap();
     assert!(is_null);
 }
@@ -697,7 +750,10 @@ async fn test_some_param() {
 async fn test_null_text_param() {
     let client = connect().await;
     let val: Option<String> = None;
-    let rows = client.query("SELECT $1::text IS NULL AS is_null", &[&val]).await.unwrap();
+    let rows = client
+        .query("SELECT $1::text IS NULL AS is_null", &[&val])
+        .await
+        .unwrap();
     let is_null: bool = rows[0].get(0).unwrap();
     assert!(is_null);
 }
@@ -788,10 +844,7 @@ async fn test_jsonb_array() {
 async fn test_uuid() {
     let client = connect().await;
     let id = uuid::Uuid::new_v4();
-    let rows = client
-        .query("SELECT $1::uuid AS id", &[&id])
-        .await
-        .unwrap();
+    let rows = client.query("SELECT $1::uuid AS id", &[&id]).await.unwrap();
     let result: uuid::Uuid = rows[0].get(0).unwrap();
     assert_eq!(result, id);
 }
@@ -921,10 +974,7 @@ async fn test_numeric_roundtrip() {
 #[tokio::test]
 async fn test_numeric_zero() {
     let client = connect().await;
-    let rows = client
-        .query("SELECT 0::numeric AS n", &[])
-        .await
-        .unwrap();
+    let rows = client.query("SELECT 0::numeric AS n", &[]).await.unwrap();
     let n: resolute::PgNumeric = rows[0].get(0).unwrap();
     assert_eq!(n.0, "0");
 }
@@ -1367,7 +1417,12 @@ fn test_int_enum_encode_all_variants() {
     ] {
         let mut buf = bytes::BytesMut::new();
         variant.encode(&mut buf);
-        assert_eq!(i32::decode(&buf).unwrap(), expected, "variant {:?}", variant);
+        assert_eq!(
+            i32::decode(&buf).unwrap(),
+            expected,
+            "variant {:?}",
+            variant
+        );
     }
 }
 
@@ -1392,8 +1447,14 @@ fn test_int_enum_decode_unknown_discriminant() {
     99i32.encode(&mut buf);
     let err = IntStatus::decode(&buf).unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("unknown"), "expected unknown discriminant error, got: {msg}");
-    assert!(msg.contains("99"), "expected discriminant 99 in error, got: {msg}");
+    assert!(
+        msg.contains("unknown"),
+        "expected unknown discriminant error, got: {msg}"
+    );
+    assert!(
+        msg.contains("99"),
+        "expected discriminant 99 in error, got: {msg}"
+    );
 }
 
 #[test]
@@ -1521,7 +1582,10 @@ async fn test_from_row_skip() {
     let row = WithSkip::from_row(&rows[0]).unwrap();
     assert_eq!(row.id, 1);
     assert_eq!(row.name, "Alice");
-    assert_eq!(row.computed, "", "skipped field should be Default::default()");
+    assert_eq!(
+        row.computed, "",
+        "skipped field should be Default::default()"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1538,13 +1602,13 @@ struct WithDefault {
 #[tokio::test]
 async fn test_from_row_default_missing_column() {
     let client = connect().await;
-    let rows = client
-        .query("SELECT 1::int4 AS id", &[])
-        .await
-        .unwrap();
+    let rows = client.query("SELECT 1::int4 AS id", &[]).await.unwrap();
     let row = WithDefault::from_row(&rows[0]).unwrap();
     assert_eq!(row.id, 1);
-    assert_eq!(row.missing_col, 0, "default on missing column → Default::default()");
+    assert_eq!(
+        row.missing_col, 0,
+        "default on missing column → Default::default()"
+    );
 }
 
 #[derive(resolute::FromRow, Debug)]
@@ -1557,10 +1621,7 @@ struct WithDefaultOption {
 #[tokio::test]
 async fn test_from_row_default_missing_option_column() {
     let client = connect().await;
-    let rows = client
-        .query("SELECT 1::int4 AS id", &[])
-        .await
-        .unwrap();
+    let rows = client.query("SELECT 1::int4 AS id", &[]).await.unwrap();
     let row = WithDefaultOption::from_row(&rows[0]).unwrap();
     assert_eq!(row.id, 1);
     assert_eq!(row.opt_col, None, "default on missing Option column → None");
@@ -1603,7 +1664,12 @@ async fn test_from_row_flatten() {
         .unwrap();
     let row = WithFlatten::from_row(&rows[0]).unwrap();
     assert_eq!(row.id, 1);
-    assert_eq!(row.inner, Inner { name: "Alice".into() });
+    assert_eq!(
+        row.inner,
+        Inner {
+            name: "Alice".into()
+        }
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1652,8 +1718,14 @@ async fn test_from_row_try_from_failure() {
         .unwrap();
     let err = WithTryFrom::from_row(&rows[0]).unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("try_from"), "expected try_from error, got: {msg}");
-    assert!(msg.contains("non-zero"), "expected validation message, got: {msg}");
+    assert!(
+        msg.contains("try_from"),
+        "expected try_from error, got: {msg}"
+    );
+    assert!(
+        msg.contains("non-zero"),
+        "expected validation message, got: {msg}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1685,7 +1757,13 @@ async fn test_from_row_json() {
         .unwrap();
     let row = WithJson::from_row(&rows[0]).unwrap();
     assert_eq!(row.id, 1);
-    assert_eq!(row.meta, Metadata { key: "test".into(), value: 42 });
+    assert_eq!(
+        row.meta,
+        Metadata {
+            key: "test".into(),
+            value: 42
+        }
+    );
 }
 
 #[derive(resolute::FromRow, Debug)]
@@ -1706,7 +1784,13 @@ async fn test_from_row_json_option_some() {
         .await
         .unwrap();
     let row = WithJsonOption::from_row(&rows[0]).unwrap();
-    assert_eq!(row.meta, Some(Metadata { key: "x".into(), value: 0 }));
+    assert_eq!(
+        row.meta,
+        Some(Metadata {
+            key: "x".into(),
+            value: 0
+        })
+    );
 }
 
 #[tokio::test]
@@ -1832,7 +1916,11 @@ async fn test_f64_array_roundtrip() {
 #[tokio::test]
 async fn test_uuid_array_roundtrip() {
     let client = connect().await;
-    let arr = vec![uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4()];
+    let arr = vec![
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+    ];
     let rows = client
         .query("SELECT $1::uuid[] AS arr", &[&arr])
         .await
@@ -1992,7 +2080,10 @@ fn test_encode_decode_f64_negative_zero() {
 async fn test_float_special_values_pg() {
     let client = connect().await;
     let rows = client
-        .query("SELECT 'NaN'::float8 AS n, 'Infinity'::float8 AS inf, '-Infinity'::float8 AS neg_inf", &[])
+        .query(
+            "SELECT 'NaN'::float8 AS n, 'Infinity'::float8 AS inf, '-Infinity'::float8 AS neg_inf",
+            &[],
+        )
         .await
         .unwrap();
     let n: f64 = rows[0].get(0).unwrap();
@@ -2056,10 +2147,7 @@ async fn test_integer_boundaries_pg() {
 #[tokio::test]
 async fn test_empty_string() {
     let client = connect().await;
-    let rows = client
-        .query("SELECT $1::text AS s", &[&""])
-        .await
-        .unwrap();
+    let rows = client.query("SELECT $1::text AS s", &[&""]).await.unwrap();
     let s: String = rows[0].get(0).unwrap();
     assert_eq!(s, "");
 }
@@ -2185,10 +2273,7 @@ async fn test_pg_epoch_date() {
 async fn test_pre_epoch_date() {
     let client = connect().await;
     let old = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
-    let rows = client
-        .query("SELECT $1::date AS d", &[&old])
-        .await
-        .unwrap();
+    let rows = client.query("SELECT $1::date AS d", &[&old]).await.unwrap();
     assert_eq!(rows[0].get::<chrono::NaiveDate>(0).unwrap(), old);
 }
 
@@ -2218,10 +2303,7 @@ async fn test_midnight_time() {
 async fn test_end_of_day_time() {
     let client = connect().await;
     let t = chrono::NaiveTime::from_hms_micro_opt(23, 59, 59, 999999).unwrap();
-    let rows = client
-        .query("SELECT $1::time AS t", &[&t])
-        .await
-        .unwrap();
+    let rows = client.query("SELECT $1::time AS t", &[&t]).await.unwrap();
     assert_eq!(rows[0].get::<chrono::NaiveTime>(0).unwrap(), t);
 }
 
@@ -2335,10 +2417,7 @@ async fn test_numeric_many_decimals() {
 #[tokio::test]
 async fn test_numeric_one() {
     let client = connect().await;
-    let rows = client
-        .query("SELECT 1::numeric AS n", &[])
-        .await
-        .unwrap();
+    let rows = client.query("SELECT 1::numeric AS n", &[]).await.unwrap();
     let n: resolute::PgNumeric = rows[0].get(0).unwrap();
     assert_eq!(n.0, "1");
 }
@@ -2366,7 +2445,11 @@ async fn test_inet_ipv6() {
         .await
         .unwrap();
     let addr: resolute::PgInet = rows[0].get(0).unwrap();
-    assert!(addr.0.contains("128"), "expected /128 mask, got: {}", addr.0);
+    assert!(
+        addr.0.contains("128"),
+        "expected /128 mask, got: {}",
+        addr.0
+    );
 }
 
 #[tokio::test]
@@ -2544,7 +2627,7 @@ fn test_decode_array_2d_rejected() {
 fn test_decode_array_truncated_element() {
     // Valid 1D header with 1 element, but element data missing.
     let mut buf = vec![0u8; 24];
-    buf[3] = 1;  // ndim = 1
+    buf[3] = 1; // ndim = 1
     buf[15] = 1; // dim_len = 1
     buf[19] = 1; // lower_bound = 1
     buf[23] = 4; // element length = 4, but no data follows
@@ -2620,15 +2703,11 @@ async fn test_concurrent_queries() {
     let futures: Vec<_> = (0..10)
         .map(|i| {
             tokio::spawn(async move {
-                let client = Client::connect(
-                    "127.0.0.1:54322", "postgres", "postgres", "postgrest_test",
-                )
-                .await
-                .unwrap();
-                let rows = client
-                    .query("SELECT $1::int4 AS n", &[&i])
-                    .await
-                    .unwrap();
+                let client =
+                    Client::connect("127.0.0.1:54322", "postgres", "postgres", "postgrest_test")
+                        .await
+                        .unwrap();
+                let rows = client.query("SELECT $1::int4 AS n", &[&i]).await.unwrap();
                 rows[0].get::<i32>(0).unwrap()
             })
         })
@@ -3098,7 +3177,12 @@ async fn test_with_transaction_generic_functions() {
 // ---------------------------------------------------------------------------
 
 /// A function that always runs atomically, regardless of caller context.
-async fn atomic_insert(db: &impl Executor, table: &str, id: i32, val: &str) -> Result<(), resolute::TypedError> {
+async fn atomic_insert(
+    db: &impl Executor,
+    table: &str,
+    id: i32,
+    val: &str,
+) -> Result<(), resolute::TypedError> {
     db.atomic(|db| {
         let table = table.to_string();
         let val = val.to_string();
@@ -3123,7 +3207,9 @@ async fn test_atomic_on_client_commits() {
         .unwrap();
 
     // atomic() on Client wraps in BEGIN/COMMIT.
-    atomic_insert(&client, "test_atomic_c", 1, "one").await.unwrap();
+    atomic_insert(&client, "test_atomic_c", 1, "one")
+        .await
+        .unwrap();
 
     let rows = client
         .query("SELECT val FROM test_atomic_c WHERE id = $1", &[&1i32])
@@ -3175,7 +3261,9 @@ async fn test_atomic_on_transaction_uses_savepoint() {
     let txn = client.begin().await.unwrap();
 
     // First atomic insert succeeds.
-    atomic_insert(&txn, "test_atomic_sp", 1, "one").await.unwrap();
+    atomic_insert(&txn, "test_atomic_sp", 1, "one")
+        .await
+        .unwrap();
 
     // Second atomic insert fails — should rollback only this savepoint.
     let result: Result<(), _> = txn
@@ -3252,10 +3340,16 @@ async fn test_atomic_with_generic_executor_functions() {
     async fn batch_insert(db: &impl Executor) -> Result<(), resolute::TypedError> {
         db.atomic(|db| {
             Box::pin(async move {
-                db.execute("INSERT INTO test_atomic_gen VALUES ($1, $2)", &[&1i32, &"a".to_string()])
-                    .await?;
-                db.execute("INSERT INTO test_atomic_gen VALUES ($1, $2)", &[&2i32, &"b".to_string()])
-                    .await?;
+                db.execute(
+                    "INSERT INTO test_atomic_gen VALUES ($1, $2)",
+                    &[&1i32, &"a".to_string()],
+                )
+                .await?;
+                db.execute(
+                    "INSERT INTO test_atomic_gen VALUES ($1, $2)",
+                    &[&2i32, &"b".to_string()],
+                )
+                .await?;
                 Ok(())
             })
         })
@@ -3286,12 +3380,9 @@ async fn test_atomic_with_generic_executor_functions() {
 #[tokio::test]
 async fn test_executor_copy_in_generic() {
     async fn bulk_load(db: &impl Executor, table: &str, csv: &[u8]) -> u64 {
-        db.copy_in(
-            &format!("COPY {table} FROM STDIN WITH (FORMAT csv)"),
-            csv,
-        )
-        .await
-        .unwrap()
+        db.copy_in(&format!("COPY {table} FROM STDIN WITH (FORMAT csv)"), csv)
+            .await
+            .unwrap()
     }
 
     let client = connect().await;
@@ -3510,10 +3601,7 @@ async fn test_copy_in_empty() {
         .unwrap();
 
     let count = client
-        .copy_in(
-            "COPY test_copy_empty FROM STDIN WITH (FORMAT csv)",
-            b"",
-        )
+        .copy_in("COPY test_copy_empty FROM STDIN WITH (FORMAT csv)", b"")
         .await
         .unwrap();
     assert_eq!(count, 0);
@@ -3563,7 +3651,10 @@ async fn test_cancel_token() {
 
     // The query should have been cancelled (error), not waited 10 seconds.
     let elapsed = start.elapsed();
-    assert!(elapsed.as_secs() < 5, "query should have been cancelled quickly, took {elapsed:?}");
+    assert!(
+        elapsed.as_secs() < 5,
+        "query should have been cancelled quickly, took {elapsed:?}"
+    );
     assert!(result.is_err(), "cancelled query should return an error");
 
     cancel_handle.await.unwrap();
@@ -3652,7 +3743,11 @@ async fn test_pipeline_empty() {
 async fn test_query_timeout_succeeds() {
     let client = connect().await;
     let rows = client
-        .query_timeout("SELECT 1::int4 AS n", &[], std::time::Duration::from_secs(5))
+        .query_timeout(
+            "SELECT 1::int4 AS n",
+            &[],
+            std::time::Duration::from_secs(5),
+        )
         .await
         .unwrap();
     assert_eq!(rows[0].get::<i32>(0).unwrap(), 1);
@@ -3671,7 +3766,10 @@ async fn test_query_timeout_fires() {
         .await;
     let elapsed = start.elapsed();
     assert!(result.is_err());
-    assert!(elapsed.as_secs() < 3, "timeout should fire quickly, took {elapsed:?}");
+    assert!(
+        elapsed.as_secs() < 3,
+        "timeout should fire quickly, took {elapsed:?}"
+    );
 
     // Connection should recover.
     let rows = client.query("SELECT 1::int4 AS n", &[]).await.unwrap();
@@ -3712,14 +3810,15 @@ async fn test_retry_policy_non_transient_fails_fast() {
     let start = std::time::Instant::now();
     let result = policy
         .execute(&client, |db| {
-            Box::pin(async move {
-                db.query("SELECT * FROM nonexistent_table_xyz", &[]).await
-            })
+            Box::pin(async move { db.query("SELECT * FROM nonexistent_table_xyz", &[]).await })
         })
         .await;
     // Non-transient error (42P01 = undefined_table) should not retry.
     assert!(result.is_err());
-    assert!(start.elapsed().as_millis() < 500, "should fail fast without retries");
+    assert!(
+        start.elapsed().as_millis() < 500,
+        "should fail fast without retries"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3743,10 +3842,7 @@ async fn test_stress_pool_concurrent() {
             for i in 0..10u32 {
                 let conn = pool.get().await.unwrap();
                 let val = (task_id * 10 + i) as i32;
-                let rows = conn
-                    .query("SELECT $1::int4 AS n", &[&val])
-                    .await
-                    .unwrap();
+                let rows = conn.query("SELECT $1::int4 AS n", &[&val]).await.unwrap();
                 assert_eq!(rows[0].get::<i32>(0).unwrap(), val);
                 // conn dropped here — returned to pool
             }
@@ -3806,7 +3902,10 @@ async fn test_stress_pool_mixed_operations() {
             // Named param query (via Executor trait)
             use resolute::Executor;
             let rows = conn
-                .query_named("SELECT :num::int4 AS n", &[("num", &(task_id as i32) as &dyn resolute::SqlParam)])
+                .query_named(
+                    "SELECT :num::int4 AS n",
+                    &[("num", &(task_id as i32) as &dyn resolute::SqlParam)],
+                )
                 .await
                 .unwrap();
             assert_eq!(rows[0].get::<i32>(0).unwrap(), task_id as i32);
@@ -3824,7 +3923,7 @@ async fn test_stress_pool_mixed_operations() {
 
 #[test]
 fn test_pg_timestamp_encode_decode_roundtrip() {
-    use resolute::{PgTimestamp, Encode, Decode};
+    use resolute::{Decode, Encode, PgTimestamp};
 
     // Finite value
     let ts = PgTimestamp::Value(12345);
@@ -3852,7 +3951,7 @@ fn test_pg_timestamp_encode_decode_roundtrip() {
 
 #[test]
 fn test_pg_date_encode_decode_roundtrip() {
-    use resolute::{PgDate, Encode, Decode};
+    use resolute::{Decode, Encode, PgDate};
 
     // Finite value
     let d = PgDate::Value(12345);
@@ -3905,7 +4004,9 @@ async fn test_pool_discard_all_clears_state() {
     // Checkout a connection and set search_path to something non-default.
     {
         let conn = pool.get().await.unwrap();
-        conn.simple_query("SET search_path TO pg_catalog").await.unwrap();
+        conn.simple_query("SET search_path TO pg_catalog")
+            .await
+            .unwrap();
 
         // Verify it took effect within this session.
         let rows = conn
@@ -3973,10 +4074,7 @@ async fn test_test_db_lifecycle() {
         .await
         .unwrap();
     client
-        .execute(
-            "INSERT INTO lifecycle_test (name) VALUES ($1)",
-            &[&"hello"],
-        )
+        .execute("INSERT INTO lifecycle_test (name) VALUES ($1)", &[&"hello"])
         .await
         .unwrap();
     let rows = client
@@ -4015,10 +4113,7 @@ async fn test_execute_timeout_fires() {
             std::time::Duration::from_millis(50),
         )
         .await;
-    assert!(
-        result.is_err(),
-        "expected timeout error for slow statement",
-    );
+    assert!(result.is_err(), "expected timeout error for slow statement",);
     let err = result.unwrap_err();
     let err_msg = format!("{err}");
     assert!(
@@ -4034,7 +4129,10 @@ async fn test_execute_timeout_fires() {
 #[tokio::test]
 async fn test_begin_with_serializable() {
     let client = connect().await;
-    let txn = client.begin_with(resolute::IsolationLevel::Serializable).await.unwrap();
+    let txn = client
+        .begin_with(resolute::IsolationLevel::Serializable)
+        .await
+        .unwrap();
     let rows = txn.query("SELECT 1::int4 AS n", &[]).await.unwrap();
     assert_eq!(rows[0].get::<i32>(0).unwrap(), 1);
     txn.commit().await.unwrap();
@@ -4043,7 +4141,10 @@ async fn test_begin_with_serializable() {
 #[tokio::test]
 async fn test_begin_with_repeatable_read() {
     let client = connect().await;
-    let txn = client.begin_with(resolute::IsolationLevel::RepeatableRead).await.unwrap();
+    let txn = client
+        .begin_with(resolute::IsolationLevel::RepeatableRead)
+        .await
+        .unwrap();
     txn.query("SELECT 1::int4", &[]).await.unwrap();
     txn.commit().await.unwrap();
 }
@@ -4051,7 +4152,10 @@ async fn test_begin_with_repeatable_read() {
 #[tokio::test]
 async fn test_begin_with_read_committed() {
     let client = connect().await;
-    let txn = client.begin_with(resolute::IsolationLevel::ReadCommitted).await.unwrap();
+    let txn = client
+        .begin_with(resolute::IsolationLevel::ReadCommitted)
+        .await
+        .unwrap();
     txn.query("SELECT 1::int4", &[]).await.unwrap();
     txn.commit().await.unwrap();
 }
@@ -4113,10 +4217,15 @@ async fn test_try_advisory_xact_lock() {
 async fn test_atomic_client_uses_begin() {
     use resolute::Executor;
     let client = connect().await;
-    let result = client.atomic(|db| Box::pin(async move {
-        db.query("SELECT 1::int4", &[]).await?;
-        Ok(42)
-    })).await.unwrap();
+    let result = client
+        .atomic(|db| {
+            Box::pin(async move {
+                db.query("SELECT 1::int4", &[]).await?;
+                Ok(42)
+            })
+        })
+        .await
+        .unwrap();
     assert_eq!(result, 42);
 }
 
@@ -4126,10 +4235,15 @@ async fn test_atomic_transaction_uses_savepoint() {
     let client = connect().await;
     let txn = client.begin().await.unwrap();
     // atomic() inside a transaction should use SAVEPOINT.
-    let result = txn.atomic(|db| Box::pin(async move {
-        db.query("SELECT 1::int4", &[]).await?;
-        Ok(99)
-    })).await.unwrap();
+    let result = txn
+        .atomic(|db| {
+            Box::pin(async move {
+                db.query("SELECT 1::int4", &[]).await?;
+                Ok(99)
+            })
+        })
+        .await
+        .unwrap();
     assert_eq!(result, 99);
     txn.commit().await.unwrap();
 }
@@ -4138,10 +4252,14 @@ async fn test_atomic_transaction_uses_savepoint() {
 async fn test_atomic_rollback_on_error() {
     use resolute::Executor;
     let client = connect().await;
-    let result: Result<i32, _> = client.atomic(|db| Box::pin(async move {
-        db.query("SELECT 1::int4", &[]).await?;
-        Err(resolute::TypedError::Config("test error".into()))
-    })).await;
+    let result: Result<i32, _> = client
+        .atomic(|db| {
+            Box::pin(async move {
+                db.query("SELECT 1::int4", &[]).await?;
+                Err(resolute::TypedError::Config("test error".into()))
+            })
+        })
+        .await;
     assert!(result.is_err());
     // Connection should still be usable after rollback.
     let rows = client.query("SELECT 1::int4 AS n", &[]).await.unwrap();
@@ -4160,13 +4278,16 @@ async fn test_pg_listener_listen_notify() {
 
     // Send a notification from a separate connection.
     let sender = connect().await;
-    sender.simple_query("NOTIFY test_channel_1, 'hello'").await.unwrap();
+    sender
+        .simple_query("NOTIFY test_channel_1, 'hello'")
+        .await
+        .unwrap();
 
     // Receive it.
-    let notification = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        listener.recv(),
-    ).await.expect("timed out waiting for notification").unwrap();
+    let notification = tokio::time::timeout(std::time::Duration::from_secs(5), listener.recv())
+        .await
+        .expect("timed out waiting for notification")
+        .unwrap();
 
     assert_eq!(notification.channel, "test_channel_1");
     assert_eq!(notification.payload, "hello");
@@ -4206,7 +4327,13 @@ async fn test_int4range_roundtrip_db() {
         .await
         .unwrap();
     let r: resolute::PgRange<i32> = rows[0].get(0).unwrap();
-    if let resolute::PgRange::Range { lower, upper, lower_inclusive, upper_inclusive } = r {
+    if let resolute::PgRange::Range {
+        lower,
+        upper,
+        lower_inclusive,
+        upper_inclusive,
+    } = r
+    {
         assert_eq!(lower, Some(1));
         assert_eq!(upper, Some(10));
         assert!(lower_inclusive);
@@ -4241,7 +4368,10 @@ async fn test_lookup_type_oid_builtin() {
 #[tokio::test]
 async fn test_lookup_type_oid_nonexistent() {
     let client = connect().await;
-    let oid = client.lookup_type_oid("this_type_does_not_exist_xyz").await.unwrap();
+    let oid = client
+        .lookup_type_oid("this_type_does_not_exist_xyz")
+        .await
+        .unwrap();
     assert_eq!(oid, None);
 }
 

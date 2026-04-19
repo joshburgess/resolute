@@ -8,11 +8,11 @@ pub mod protocol;
 mod scram;
 pub mod tls;
 
+pub use async_conn::{AsyncConn, PipelineResponse, ResponseCollector};
+pub use async_pool::AsyncPool;
 pub use cancel::CancelToken;
 pub use connection::WireConn;
 pub use error::PgWireError;
 pub use pipeline::PgPipeline;
-pub use async_conn::{AsyncConn, PipelineResponse, ResponseCollector};
-pub use async_pool::AsyncPool;
 pub use protocol::types::{FormatCode, Oid, PgError};
 pub use tls::TlsMode;

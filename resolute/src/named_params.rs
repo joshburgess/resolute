@@ -146,10 +146,7 @@ pub fn rewrite(sql: &str) -> (String, Vec<String>) {
         }
 
         // :name — named parameter.
-        if chars[i] == ':'
-            && i + 1 < len
-            && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_')
-        {
+        if chars[i] == ':' && i + 1 < len && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_') {
             i += 1; // skip ':'
             let start = i;
             while i < len && (chars[i].is_alphanumeric() || chars[i] == '_') {
@@ -339,8 +336,12 @@ mod tests {
 
     #[test]
     fn test_dollar_quoted_nested_different_tags() {
-        let (sql, names) = rewrite("SELECT $outer$ inner $inner$ content $inner$ $outer$ WHERE id = :id");
-        assert_eq!(sql, "SELECT $outer$ inner $inner$ content $inner$ $outer$ WHERE id = $1");
+        let (sql, names) =
+            rewrite("SELECT $outer$ inner $inner$ content $inner$ $outer$ WHERE id = :id");
+        assert_eq!(
+            sql,
+            "SELECT $outer$ inner $inner$ content $inner$ $outer$ WHERE id = $1"
+        );
         assert_eq!(names, vec!["id"]);
     }
 

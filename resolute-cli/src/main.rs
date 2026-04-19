@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "resolute-cli", about = "Offline cache management for resolute query!() macro")]
+#[command(
+    name = "resolute-cli",
+    about = "Offline cache management for resolute query!() macro"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -140,7 +143,10 @@ struct CacheEntry {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Prepare { database_url, source_dir } => {
+        Command::Prepare {
+            database_url,
+            source_dir,
+        } => {
             prepare(&database_url, &source_dir).await?;
         }
         Command::Check { database_url } => {
@@ -173,7 +179,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             DatabaseAction::Create { database_url } => {
                 database::create(&database_url).await?;
             }
-            DatabaseAction::Drop { database_url, force } => {
+            DatabaseAction::Drop {
+                database_url,
+                force,
+            } => {
                 database::drop(&database_url, force).await?;
             }
         },
@@ -182,12 +191,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Scan source files for query!() calls, describe each, write cache.
-async fn prepare(
-    database_url: &str,
-    source_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (user, password, host, port, database) = parse_pg_uri(database_url)
-        .ok_or("Invalid DATABASE_URL")?;
+async fn prepare(database_url: &str, source_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let (user, password, host, port, database) =
+        parse_pg_uri(database_url).ok_or("Invalid DATABASE_URL")?;
     let addr = format!("{host}:{port}");
 
     // Find all query!() SQL strings in .rs files.
@@ -249,8 +255,8 @@ async fn prepare(
 
 /// Check all cached queries against the live database.
 async fn check(database_url: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let (user, password, host, port, database) = parse_pg_uri(database_url)
-        .ok_or("Invalid DATABASE_URL")?;
+    let (user, password, host, port, database) =
+        parse_pg_uri(database_url).ok_or("Invalid DATABASE_URL")?;
     let addr = format!("{host}:{port}");
 
     let cache_dir = PathBuf::from(".sqlx");
@@ -349,7 +355,14 @@ fn scan_dir(dir: &Path, queries: &mut Vec<String>) -> Result<(), Box<dyn std::er
 fn scan_file(path: &Path, queries: &mut Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let source = std::fs::read_to_string(path)?;
     // Search for all three macro patterns.
-    for pattern in &["query!(", "query_as!(", "query_scalar!(", "query_file!(", "query_file_as!(", "query_file_scalar!("] {
+    for pattern in &[
+        "query!(",
+        "query_as!(",
+        "query_scalar!(",
+        "query_file!(",
+        "query_file_as!(",
+        "query_file_scalar!(",
+    ] {
         let mut pos = 0;
         while let Some(idx) = source[pos..].find(pattern) {
             let after_paren = pos + idx + pattern.len();
@@ -357,7 +370,9 @@ fn scan_file(path: &Path, queries: &mut Vec<String>) -> Result<(), Box<dyn std::
             let trimmed = rest.trim_start();
 
             // For query_as!/query_file_as!, skip the type argument and comma first.
-            let trimmed = if (*pattern == "query_as!(" || *pattern == "query_file_as!(") && !trimmed.starts_with('"') {
+            let trimmed = if (*pattern == "query_as!(" || *pattern == "query_file_as!(")
+                && !trimmed.starts_with('"')
+            {
                 // Skip to the first comma, then trim again.
                 if let Some(comma_pos) = trimmed.find(',') {
                     trimmed[comma_pos + 1..].trim_start()
@@ -377,7 +392,10 @@ fn scan_file(path: &Path, queries: &mut Vec<String>) -> Result<(), Box<dyn std::
             let quote_start = actual_start + 1; // After the `"`
             if let Some(end) = find_string_end(&source, quote_start) {
                 let raw = &source[quote_start..end];
-                let raw = raw.replace("\\\"", "\"").replace("\\n", "\n").replace("\\\\", "\\");
+                let raw = raw
+                    .replace("\\\"", "\"")
+                    .replace("\\n", "\n")
+                    .replace("\\\\", "\\");
 
                 // For query_file! variants, raw is a file path — read the SQL.
                 let sql = if pattern.starts_with("query_file") {

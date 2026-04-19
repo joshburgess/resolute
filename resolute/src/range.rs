@@ -43,8 +43,18 @@ pub enum PgRange<T> {
 
 impl<T> PgRange<T> {
     /// Create a new range.
-    pub fn new(lower: Option<T>, upper: Option<T>, lower_inclusive: bool, upper_inclusive: bool) -> Self {
-        Self::Range { lower, upper, lower_inclusive, upper_inclusive }
+    pub fn new(
+        lower: Option<T>,
+        upper: Option<T>,
+        lower_inclusive: bool,
+        upper_inclusive: bool,
+    ) -> Self {
+        Self::Range {
+            lower,
+            upper,
+            lower_inclusive,
+            upper_inclusive,
+        }
     }
 
     /// Create an empty range.
@@ -75,12 +85,25 @@ impl<T: Encode + PgType> Encode for PgRange<T> {
             PgRange::Empty => {
                 buf.extend_from_slice(&[RANGE_EMPTY]);
             }
-            PgRange::Range { lower, upper, lower_inclusive, upper_inclusive } => {
+            PgRange::Range {
+                lower,
+                upper,
+                lower_inclusive,
+                upper_inclusive,
+            } => {
                 let mut flags: u8 = 0;
-                if *lower_inclusive { flags |= RANGE_LB_INC; }
-                if *upper_inclusive { flags |= RANGE_UB_INC; }
-                if lower.is_none() { flags |= RANGE_LB_INF; }
-                if upper.is_none() { flags |= RANGE_UB_INF; }
+                if *lower_inclusive {
+                    flags |= RANGE_LB_INC;
+                }
+                if *upper_inclusive {
+                    flags |= RANGE_UB_INC;
+                }
+                if lower.is_none() {
+                    flags |= RANGE_LB_INF;
+                }
+                if upper.is_none() {
+                    flags |= RANGE_UB_INF;
+                }
                 buf.extend_from_slice(&[flags]);
 
                 if let Some(ref lb) = lower {
@@ -119,7 +142,12 @@ impl<T: Decode + PgType> Decode for PgRange<T> {
                     message: "range: truncated lower bound length".into(),
                 });
             }
-            let len = i32::from_be_bytes([buf[offset], buf[offset + 1], buf[offset + 2], buf[offset + 3]]) as usize;
+            let len = i32::from_be_bytes([
+                buf[offset],
+                buf[offset + 1],
+                buf[offset + 2],
+                buf[offset + 3],
+            ]) as usize;
             offset += 4;
             if offset + len > buf.len() {
                 return Err(TypedError::Decode {
@@ -141,7 +169,12 @@ impl<T: Decode + PgType> Decode for PgRange<T> {
                     message: "range: truncated upper bound length".into(),
                 });
             }
-            let len = i32::from_be_bytes([buf[offset], buf[offset + 1], buf[offset + 2], buf[offset + 3]]) as usize;
+            let len = i32::from_be_bytes([
+                buf[offset],
+                buf[offset + 1],
+                buf[offset + 2],
+                buf[offset + 3],
+            ]) as usize;
             offset += 4;
             if offset + len > buf.len() {
                 return Err(TypedError::Decode {
@@ -198,7 +231,12 @@ impl<T: DecodeText + PgType> DecodeText for PgRange<T> {
             Some(T::decode_text(upper_str)?)
         };
 
-        Ok(PgRange::Range { lower, upper, lower_inclusive, upper_inclusive })
+        Ok(PgRange::Range {
+            lower,
+            upper,
+            lower_inclusive,
+            upper_inclusive,
+        })
     }
 }
 

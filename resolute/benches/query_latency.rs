@@ -175,11 +175,10 @@ fn bench_select_100_rows(c: &mut Criterion) {
     group.bench_function("sqlx", |b| {
         b.iter(|| {
             rt.block_on(async {
-                let rows: Vec<(i32,)> =
-                    sqlx::query_as("SELECT generate_series(1, 100)::int4")
-                        .fetch_all(&sqlx_pool)
-                        .await
-                        .unwrap();
+                let rows: Vec<(i32,)> = sqlx::query_as("SELECT generate_series(1, 100)::int4")
+                    .fetch_all(&sqlx_pool)
+                    .await
+                    .unwrap();
                 assert_eq!(rows.len(), 100);
             });
         });
@@ -197,9 +196,10 @@ fn bench_insert_delete(c: &mut Criterion) {
     let rt = rt();
 
     let pt_client = rt.block_on(Client::connect(ADDR, USER, PASS, DB)).unwrap();
-    rt.block_on(pt_client.simple_query(
-        "CREATE TABLE IF NOT EXISTS bench_cycle (id int PRIMARY KEY, val text)",
-    ))
+    rt.block_on(
+        pt_client
+            .simple_query("CREATE TABLE IF NOT EXISTS bench_cycle (id int PRIMARY KEY, val text)"),
+    )
     .unwrap();
 
     group.bench_function("resolute", |b| {

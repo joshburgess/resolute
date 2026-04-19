@@ -155,8 +155,16 @@ fn derive_int_enum(input: &DeriveInput, repr: &str) -> TokenStream {
         _ => unreachable!(),
     };
     let (custom_oid, custom_array_oid) = get_custom_oids(&input.attrs);
-    let oid = if custom_oid != 0 { custom_oid } else { default_oid };
-    let array_oid = if custom_array_oid != 0 { custom_array_oid } else { default_array_oid };
+    let oid = if custom_oid != 0 {
+        custom_oid
+    } else {
+        default_oid
+    };
+    let array_oid = if custom_array_oid != 0 {
+        custom_array_oid
+    } else {
+        default_array_oid
+    };
 
     // Validate all variants have explicit discriminants.
     for v in variants {
@@ -385,9 +393,7 @@ fn to_snake_case(s: &str) -> String {
             if i > 0 {
                 let prev = chars[i - 1];
                 if prev.is_lowercase()
-                    || (prev.is_uppercase()
-                        && i + 1 < chars.len()
-                        && chars[i + 1].is_lowercase())
+                    || (prev.is_uppercase() && i + 1 < chars.len() && chars[i + 1].is_lowercase())
                 {
                     result.push('_');
                 }

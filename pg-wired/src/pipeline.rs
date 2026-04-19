@@ -90,10 +90,7 @@ impl PgPipeline {
     /// Used for SET LOCAL ROLE, set_config, BEGIN, COMMIT etc.
     pub async fn simple_query(&mut self, sql: &str) -> Result<(), PgWireError> {
         self.send_buf.clear();
-        frontend::encode_message(
-            &FrontendMsg::Query(sql.as_bytes()),
-            &mut self.send_buf,
-        );
+        frontend::encode_message(&FrontendMsg::Query(sql.as_bytes()), &mut self.send_buf);
         self.conn.send_raw(&self.send_buf).await?;
 
         // Drain until ReadyForQuery.
@@ -108,10 +105,7 @@ impl PgPipeline {
         sql: &str,
     ) -> Result<(Vec<Vec<Option<Vec<u8>>>>, String), PgWireError> {
         self.send_buf.clear();
-        frontend::encode_message(
-            &FrontendMsg::Query(sql.as_bytes()),
-            &mut self.send_buf,
-        );
+        frontend::encode_message(&FrontendMsg::Query(sql.as_bytes()), &mut self.send_buf);
         self.conn.send_raw(&self.send_buf).await?;
         self.conn.collect_rows().await
     }
@@ -238,17 +232,17 @@ impl PgPipeline {
         );
 
         frontend::encode_message(
-            &FrontendMsg::Execute { portal: b"", max_rows: 0 },
+            &FrontendMsg::Execute {
+                portal: b"",
+                max_rows: 0,
+            },
             &mut self.send_buf,
         );
 
         frontend::encode_message(&FrontendMsg::Sync, &mut self.send_buf);
 
         // 3. Simple query: COMMIT
-        frontend::encode_message(
-            &FrontendMsg::Query(b"COMMIT"),
-            &mut self.send_buf,
-        );
+        frontend::encode_message(&FrontendMsg::Query(b"COMMIT"), &mut self.send_buf);
 
         // ONE write() syscall for the entire transaction.
         self.conn.send_raw(&self.send_buf).await?;

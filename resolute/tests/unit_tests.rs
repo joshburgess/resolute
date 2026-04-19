@@ -86,7 +86,13 @@ fn test_range_decode_text_empty() {
 #[test]
 fn test_range_decode_text_inclusive_exclusive() {
     let r = PgRange::<i32>::decode_text("[1,10)").unwrap();
-    if let PgRange::Range { lower, upper, lower_inclusive, upper_inclusive } = r {
+    if let PgRange::Range {
+        lower,
+        upper,
+        lower_inclusive,
+        upper_inclusive,
+    } = r
+    {
         assert_eq!(lower, Some(1));
         assert_eq!(upper, Some(10));
         assert!(lower_inclusive);
@@ -99,7 +105,12 @@ fn test_range_decode_text_inclusive_exclusive() {
 #[test]
 fn test_range_decode_text_both_inclusive() {
     let r = PgRange::<i32>::decode_text("[1,10]").unwrap();
-    if let PgRange::Range { lower_inclusive, upper_inclusive, .. } = r {
+    if let PgRange::Range {
+        lower_inclusive,
+        upper_inclusive,
+        ..
+    } = r
+    {
         assert!(lower_inclusive);
         assert!(upper_inclusive);
     } else {
@@ -164,12 +175,30 @@ fn test_metrics_record_and_snapshot() {
 #[test]
 fn test_metrics_gather_prometheus_format() {
     let output = resolute::metrics::gather();
-    assert!(output.contains("resolute_queries_total"), "missing queries counter");
-    assert!(output.contains("resolute_query_errors_total"), "missing errors counter");
-    assert!(output.contains("resolute_query_duration_us_avg"), "missing duration gauge");
-    assert!(output.contains("resolute_executes_total"), "missing executes counter");
-    assert!(output.contains("resolute_pool_checkouts_total"), "missing pool checkouts");
-    assert!(output.contains("resolute_pool_timeouts_total"), "missing pool timeouts");
+    assert!(
+        output.contains("resolute_queries_total"),
+        "missing queries counter"
+    );
+    assert!(
+        output.contains("resolute_query_errors_total"),
+        "missing errors counter"
+    );
+    assert!(
+        output.contains("resolute_query_duration_us_avg"),
+        "missing duration gauge"
+    );
+    assert!(
+        output.contains("resolute_executes_total"),
+        "missing executes counter"
+    );
+    assert!(
+        output.contains("resolute_pool_checkouts_total"),
+        "missing pool checkouts"
+    );
+    assert!(
+        output.contains("resolute_pool_timeouts_total"),
+        "missing pool timeouts"
+    );
     assert!(output.contains("# HELP"), "missing HELP lines");
     assert!(output.contains("# TYPE"), "missing TYPE lines");
 }
@@ -209,7 +238,10 @@ struct TestComposite {
 
 #[test]
 fn test_pg_composite_encode_decode() {
-    let val = TestComposite { name: "hello".into(), value: 42 };
+    let val = TestComposite {
+        name: "hello".into(),
+        value: 42,
+    };
     let mut buf = bytes::BytesMut::new();
     val.encode(&mut buf);
     let decoded = TestComposite::decode(&buf).unwrap();
@@ -224,7 +256,10 @@ struct TestCompositeOptional {
 
 #[test]
 fn test_pg_composite_with_option_some() {
-    let val = TestCompositeOptional { name: "test".into(), notes: Some("note".into()) };
+    let val = TestCompositeOptional {
+        name: "test".into(),
+        notes: Some("note".into()),
+    };
     let mut buf = bytes::BytesMut::new();
     val.encode(&mut buf);
     let decoded = TestCompositeOptional::decode(&buf).unwrap();
@@ -233,7 +268,10 @@ fn test_pg_composite_with_option_some() {
 
 #[test]
 fn test_pg_composite_with_option_none() {
-    let val = TestCompositeOptional { name: "test".into(), notes: None };
+    let val = TestCompositeOptional {
+        name: "test".into(),
+        notes: None,
+    };
     let mut buf = bytes::BytesMut::new();
     val.encode(&mut buf);
     let decoded = TestCompositeOptional::decode(&buf).unwrap();
@@ -249,7 +287,11 @@ struct TestCompositeMultipleOptional {
 
 #[test]
 fn test_pg_composite_multiple_optional_fields() {
-    let val = TestCompositeMultipleOptional { a: None, b: "x".into(), c: Some("y".into()) };
+    let val = TestCompositeMultipleOptional {
+        a: None,
+        b: "x".into(),
+        c: Some("y".into()),
+    };
     let mut buf = bytes::BytesMut::new();
     val.encode(&mut buf);
     let decoded = TestCompositeMultipleOptional::decode(&buf).unwrap();
@@ -258,7 +300,11 @@ fn test_pg_composite_multiple_optional_fields() {
 
 #[test]
 fn test_pg_composite_all_none() {
-    let val = TestCompositeMultipleOptional { a: None, b: "".into(), c: None };
+    let val = TestCompositeMultipleOptional {
+        a: None,
+        b: "".into(),
+        c: None,
+    };
     let mut buf = bytes::BytesMut::new();
     val.encode(&mut buf);
     let decoded = TestCompositeMultipleOptional::decode(&buf).unwrap();
@@ -383,7 +429,7 @@ fn test_isolation_level_as_sql() {
 #[test]
 fn test_parse_connection_string_with_query_params() {
     let result = resolute::parse_connection_string(
-        "postgres://user:pass@host:5432/db?sslmode=require&connect_timeout=10"
+        "postgres://user:pass@host:5432/db?sslmode=require&connect_timeout=10",
     );
     let (user, pass, host, port, db) = result.unwrap();
     assert_eq!(user, "user");

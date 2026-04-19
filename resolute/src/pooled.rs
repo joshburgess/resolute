@@ -103,21 +103,13 @@ impl PooledTypedClient {
     }
 
     /// Execute a query via the pooled connection.
-    pub async fn query(
-        &self,
-        sql: &str,
-        params: &[&dyn SqlParam],
-    ) -> Result<Vec<Row>, TypedError> {
+    pub async fn query(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<Vec<Row>, TypedError> {
         // Build a temporary Client-like wrapper that uses the pooled AsyncConn.
         crate::query::Client::query_on_conn(&self.guard.conn().0, sql, params).await
     }
 
     /// Execute a statement via the pooled connection.
-    pub async fn execute(
-        &self,
-        sql: &str,
-        params: &[&dyn SqlParam],
-    ) -> Result<u64, TypedError> {
+    pub async fn execute(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<u64, TypedError> {
         crate::query::Client::execute_on_conn(&self.guard.conn().0, sql, params).await
     }
 

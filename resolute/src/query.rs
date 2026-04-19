@@ -76,7 +76,12 @@ impl Client {
     ) -> Result<Self, TypedError> {
         tracing::debug!(addr = addr, user = user, database = database, "connecting");
         let wire = WireConn::connect(addr, user, password, database).await?;
-        tracing::info!(addr = addr, database = database, pid = wire.pid, "connected");
+        tracing::info!(
+            addr = addr,
+            database = database,
+            pid = wire.pid,
+            "connected"
+        );
         Ok(Self::new(wire))
     }
 
@@ -131,10 +136,12 @@ impl Client {
     /// let mood_array_oid = client.lookup_type_oid("_mood").await?; // array type
     /// ```
     pub async fn lookup_type_oid(&self, type_name: &str) -> Result<Option<u32>, TypedError> {
-        let rows = self.query(
-            "SELECT oid::int4 FROM pg_type WHERE typname = $1",
-            &[&type_name.to_string()],
-        ).await?;
+        let rows = self
+            .query(
+                "SELECT oid::int4 FROM pg_type WHERE typname = $1",
+                &[&type_name.to_string()],
+            )
+            .await?;
         if rows.is_empty() {
             Ok(None)
         } else {
@@ -153,11 +160,13 @@ impl Client {
     /// println!("mood OID: {oid}, mood[] OID: {array_oid}");
     /// ```
     pub async fn lookup_type_oids(&self, type_name: &str) -> Result<(u32, u32), TypedError> {
-        let rows = self.query(
-            "SELECT t.oid::int4, COALESCE(t.typarray, 0)::int4 \
+        let rows = self
+            .query(
+                "SELECT t.oid::int4, COALESCE(t.typarray, 0)::int4 \
              FROM pg_type t WHERE t.typname = $1",
-            &[&type_name.to_string()],
-        ).await?;
+                &[&type_name.to_string()],
+            )
+            .await?;
         if rows.is_empty() {
             Err(TypedError::Config(format!("type not found: {type_name}")))
         } else {
@@ -178,16 +187,10 @@ impl Client {
     ///     let name: String = row.get(1)?;
     /// }
     /// ```
-    pub async fn query(
-        &self,
-        sql: &str,
-        params: &[&dyn SqlParam],
-    ) -> Result<Vec<Row>, TypedError> {
+    pub async fn query(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<Vec<Row>, TypedError> {
         let start = std::time::Instant::now();
         let result = match self.query_inner(sql, params).await {
-            Err(TypedError::Wire(ref e))
-                if is_stale_statement_error(e) =>
-            {
+            Err(TypedError::Wire(ref e)) if is_stale_statement_error(e) => {
                 tracing::debug!("stale statement detected, re-preparing");
                 self.conn.invalidate_statement(sql);
                 self.query_inner(sql, params).await
@@ -315,7 +318,11 @@ impl Client {
 
         let resp = conn.submit(buf, ResponseCollector::Rows).await?;
         match resp {
-            PipelineResponse::Rows { fields, rows: raw_rows, command_tag: _ } => {
+            PipelineResponse::Rows {
+                fields,
+                rows: raw_rows,
+                command_tag: _,
+            } => {
                 // Build column metadata from RowDescription if available.
                 let has_desc = !fields.is_empty();
                 let columns: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
@@ -350,16 +357,15 @@ impl Client {
     }
 
     /// Execute a query and return exactly one row.
-    pub async fn query_one(
-        &self,
-        sql: &str,
-        params: &[&dyn SqlParam],
-    ) -> Result<Row, TypedError> {
+    pub async fn query_one(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<Row, TypedError> {
         let rows = self.query(sql, params).await?;
         if rows.len() != 1 {
             return Err(TypedError::NotExactlyOne(rows.len()));
         }
-        Ok(rows.into_iter().next().expect("already verified rows.len()"))
+        Ok(rows
+            .into_iter()
+            .next()
+            .expect("already verified rows.len()"))
     }
 
     /// Execute a query and return an optional single row.
@@ -371,23 +377,21 @@ impl Client {
         let rows = self.query(sql, params).await?;
         match rows.len() {
             0 => Ok(None),
-            1 => Ok(Some(rows.into_iter().next().expect("already verified rows.len()"))),
+            1 => Ok(Some(
+                rows.into_iter()
+                    .next()
+                    .expect("already verified rows.len()"),
+            )),
             n => Err(TypedError::NotExactlyOne(n)),
         }
     }
 
     /// Execute a statement that doesn't return rows (INSERT, UPDATE, DELETE).
     /// Returns the number of affected rows.
-    pub async fn execute(
-        &self,
-        sql: &str,
-        params: &[&dyn SqlParam],
-    ) -> Result<u64, TypedError> {
+    pub async fn execute(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<u64, TypedError> {
         let start = std::time::Instant::now();
         let result = match self.execute_inner(sql, params).await {
-            Err(TypedError::Wire(ref e))
-                if is_stale_statement_error(e) =>
-            {
+            Err(TypedError::Wire(ref e)) if is_stale_statement_error(e) => {
                 tracing::debug!("stale statement detected, re-preparing");
                 self.conn.invalidate_statement(sql);
                 self.execute_inner(sql, params).await
@@ -408,11 +412,7 @@ impl Client {
         result.map_err(|e| e.with_sql(sql))
     }
 
-    async fn execute_inner(
-        &self,
-        sql: &str,
-        params: &[&dyn SqlParam],
-    ) -> Result<u64, TypedError> {
+    async fn execute_inner(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<u64, TypedError> {
         Self::execute_inner_on(&self.conn, sql, params).await
     }
 
@@ -459,16 +459,17 @@ impl Client {
             &mut buf,
         );
         frontend::encode_message(
-            &FrontendMsg::Execute { portal: b"", max_rows: 0 },
+            &FrontendMsg::Execute {
+                portal: b"",
+                max_rows: 0,
+            },
             &mut buf,
         );
         frontend::encode_message(&FrontendMsg::Sync, &mut buf);
 
         let resp = conn.submit(buf, ResponseCollector::Rows).await?;
         match resp {
-            PipelineResponse::Rows { command_tag, .. } => {
-                Ok(parse_row_count(&command_tag))
-            }
+            PipelineResponse::Rows { command_tag, .. } => Ok(parse_row_count(&command_tag)),
             PipelineResponse::Done => Ok(0),
         }
     }
@@ -544,15 +545,14 @@ impl Client {
         );
         frontend::encode_message(&FrontendMsg::Sync, &mut buf);
 
-        let (header, row_rx) = self.conn.submit_stream(buf, Self::DEFAULT_STREAM_BUFFER).await?;
+        let (header, row_rx) = self
+            .conn
+            .submit_stream(buf, Self::DEFAULT_STREAM_BUFFER)
+            .await?;
 
         let columns: Vec<String> = header.fields.iter().map(|f| f.name.clone()).collect();
         let type_oids: Vec<u32> = header.fields.iter().map(|f| f.type_oid).collect();
-        let formats: Vec<i16> = header
-            .fields
-            .iter()
-            .map(|f| f.format as i16)
-            .collect();
+        let formats: Vec<i16> = header.fields.iter().map(|f| f.format as i16).collect();
 
         Ok(RowStream {
             row_rx,
@@ -598,7 +598,10 @@ impl Client {
     /// commits on `commit()` or rolls back on drop.
     pub async fn begin(&self) -> Result<Transaction<'_>, TypedError> {
         self.simple_query("BEGIN").await?;
-        Ok(Transaction { client: self, done: false })
+        Ok(Transaction {
+            client: self,
+            done: false,
+        })
     }
 
     /// Begin a transaction with a specific isolation level.
@@ -611,7 +614,10 @@ impl Client {
     pub async fn begin_with(&self, level: IsolationLevel) -> Result<Transaction<'_>, TypedError> {
         let sql = format!("BEGIN ISOLATION LEVEL {}", level.as_sql());
         self.simple_query(&sql).await?;
-        Ok(Transaction { client: self, done: false })
+        Ok(Transaction {
+            client: self,
+            done: false,
+        })
     }
 
     /// Acquire a session-level advisory lock (blocks until acquired).
@@ -622,16 +628,16 @@ impl Client {
     /// client.advisory_unlock(12345).await?;
     /// ```
     pub async fn advisory_lock(&self, key: i64) -> Result<(), TypedError> {
-        self.simple_query(&format!("SELECT pg_advisory_lock({key})")).await
+        self.simple_query(&format!("SELECT pg_advisory_lock({key})"))
+            .await
     }
 
     /// Try to acquire a session-level advisory lock (non-blocking).
     /// Returns `true` if the lock was acquired, `false` if it was already held.
     pub async fn try_advisory_lock(&self, key: i64) -> Result<bool, TypedError> {
-        let rows = self.query(
-            "SELECT pg_try_advisory_lock($1::int8) AS acquired",
-            &[&key],
-        ).await?;
+        let rows = self
+            .query("SELECT pg_try_advisory_lock($1::int8) AS acquired", &[&key])
+            .await?;
         let row = rows.into_iter().next().ok_or_else(|| TypedError::Decode {
             column: 0,
             message: "pg_try_advisory_lock returned no rows".into(),
@@ -642,10 +648,9 @@ impl Client {
     /// Release a session-level advisory lock.
     /// Returns `true` if the lock was held and released, `false` if it was not held.
     pub async fn advisory_unlock(&self, key: i64) -> Result<bool, TypedError> {
-        let rows = self.query(
-            "SELECT pg_advisory_unlock($1::int8) AS released",
-            &[&key],
-        ).await?;
+        let rows = self
+            .query("SELECT pg_advisory_unlock($1::int8) AS released", &[&key])
+            .await?;
         let row = rows.into_iter().next().ok_or_else(|| TypedError::Decode {
             column: 0,
             message: "pg_advisory_unlock returned no rows".into(),
@@ -655,19 +660,19 @@ impl Client {
 
     /// Acquire a transaction-level advisory lock (released at end of transaction).
     pub async fn advisory_xact_lock(&self, key: i64) -> Result<(), TypedError> {
-        self.query(
-            "SELECT pg_advisory_xact_lock($1::int8)",
-            &[&key],
-        ).await?;
+        self.query("SELECT pg_advisory_xact_lock($1::int8)", &[&key])
+            .await?;
         Ok(())
     }
 
     /// Try to acquire a transaction-level advisory lock (non-blocking).
     pub async fn try_advisory_xact_lock(&self, key: i64) -> Result<bool, TypedError> {
-        let rows = self.query(
-            "SELECT pg_try_advisory_xact_lock($1::int8) AS acquired",
-            &[&key],
-        ).await?;
+        let rows = self
+            .query(
+                "SELECT pg_try_advisory_xact_lock($1::int8) AS acquired",
+                &[&key],
+            )
+            .await?;
         let row = rows.into_iter().next().ok_or_else(|| TypedError::Decode {
             column: 0,
             message: "pg_try_advisory_xact_lock returned no rows".into(),
@@ -805,20 +810,12 @@ pub struct Transaction<'a> {
 
 impl<'a> Transaction<'a> {
     /// Execute a query within the transaction.
-    pub async fn query(
-        &self,
-        sql: &str,
-        params: &[&dyn SqlParam],
-    ) -> Result<Vec<Row>, TypedError> {
+    pub async fn query(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<Vec<Row>, TypedError> {
         self.client.query(sql, params).await
     }
 
     /// Execute a statement within the transaction. Returns affected row count.
-    pub async fn execute(
-        &self,
-        sql: &str,
-        params: &[&dyn SqlParam],
-    ) -> Result<u64, TypedError> {
+    pub async fn execute(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<u64, TypedError> {
         self.client.execute(sql, params).await
     }
 
@@ -966,11 +963,17 @@ impl<'a> Pipeline<'a> {
             &mut self.buf,
         );
         frontend::encode_message(
-            &FrontendMsg::Describe { kind: b'P', name: b"" },
+            &FrontendMsg::Describe {
+                kind: b'P',
+                name: b"",
+            },
             &mut self.buf,
         );
         frontend::encode_message(
-            &FrontendMsg::Execute { portal: b"", max_rows: 0 },
+            &FrontendMsg::Execute {
+                portal: b"",
+                max_rows: 0,
+            },
             &mut self.buf,
         );
         frontend::encode_message(&FrontendMsg::Sync, &mut self.buf);
@@ -1008,9 +1011,17 @@ impl<'a> Pipeline<'a> {
                 BytesMut::new()
             };
 
-            let resp = self.client.conn.submit(msg_buf, ResponseCollector::Rows).await?;
+            let resp = self
+                .client
+                .conn
+                .submit(msg_buf, ResponseCollector::Rows)
+                .await?;
             match resp {
-                PipelineResponse::Rows { fields, rows, command_tag } => {
+                PipelineResponse::Rows {
+                    fields,
+                    rows,
+                    command_tag,
+                } => {
                     if rows.is_empty() && !command_tag.is_empty() {
                         // Execute result (INSERT/UPDATE/DELETE).
                         results.push(PipelineResult::Execute(parse_row_count(&command_tag)));
@@ -1201,10 +1212,7 @@ fn url_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (
-                hex_digit(bytes[i + 1]),
-                hex_digit(bytes[i + 2]),
-            ) {
+            if let (Some(hi), Some(lo)) = (hex_digit(bytes[i + 1]), hex_digit(bytes[i + 2])) {
                 result.push((hi << 4 | lo) as char);
                 i += 3;
                 continue;
@@ -1270,8 +1278,10 @@ mod tests {
 
     #[test]
     fn test_parse_connection_string_keyvalue() {
-        let (user, pass, host, port, db) =
-            parse_connection_string("host=db.example.com port=5433 dbname=prod user=admin password=secret").unwrap();
+        let (user, pass, host, port, db) = parse_connection_string(
+            "host=db.example.com port=5433 dbname=prod user=admin password=secret",
+        )
+        .unwrap();
         assert_eq!(user, "admin");
         assert_eq!(pass, "secret");
         assert_eq!(host, "db.example.com");

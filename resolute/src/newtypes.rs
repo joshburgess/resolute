@@ -23,13 +23,17 @@ impl std::fmt::Display for PgNumeric {
 }
 
 impl From<String> for PgNumeric {
-    fn from(s: String) -> Self { Self(s) }
+    fn from(s: String) -> Self {
+        Self(s)
+    }
 }
 
 impl PgNumeric {
     /// Create from a string without validation.
     /// Prefer `TryFrom<&str>` for validated construction.
-    pub fn new_unchecked(s: &str) -> Self { Self(s.to_string()) }
+    pub fn new_unchecked(s: &str) -> Self {
+        Self(s.to_string())
+    }
 }
 
 impl TryFrom<&str> for PgNumeric {
@@ -85,7 +89,9 @@ impl TryFrom<&str> for PgNumeric {
             }
         }
         if i != bytes.len() {
-            return Err(format!("invalid numeric: unexpected character at position {i} in {s:?}"));
+            return Err(format!(
+                "invalid numeric: unexpected character at position {i} in {s:?}"
+            ));
         }
         Ok(Self(s.to_string()))
     }
@@ -113,13 +119,17 @@ impl std::fmt::Display for PgInet {
 }
 
 impl From<String> for PgInet {
-    fn from(s: String) -> Self { Self(s) }
+    fn from(s: String) -> Self {
+        Self(s)
+    }
 }
 
 impl PgInet {
     /// Create from a string without validation.
     /// Prefer `TryFrom<&str>` for validated construction.
-    pub fn new_unchecked(s: &str) -> Self { Self(s.to_string()) }
+    pub fn new_unchecked(s: &str) -> Self {
+        Self(s.to_string())
+    }
 }
 
 impl TryFrom<&str> for PgInet {
@@ -133,11 +143,13 @@ impl TryFrom<&str> for PgInet {
         }
         // Split off optional CIDR prefix.
         let (addr_part, prefix_part) = if let Some((addr, prefix)) = s.rsplit_once('/') {
-            let prefix_len: u8 = prefix.parse().map_err(|_| {
-                format!("invalid CIDR prefix length: {prefix:?}")
-            })?;
+            let prefix_len: u8 = prefix
+                .parse()
+                .map_err(|_| format!("invalid CIDR prefix length: {prefix:?}"))?;
             if prefix_len > 128 {
-                return Err(format!("CIDR prefix length {prefix_len} exceeds maximum (128)"));
+                return Err(format!(
+                    "CIDR prefix length {prefix_len} exceeds maximum (128)"
+                ));
             }
             (addr, Some(prefix_len))
         } else {
@@ -150,7 +162,9 @@ impl TryFrom<&str> for PgInet {
         // Validate prefix range for IPv4.
         if let Some(prefix_len) = prefix_part {
             if addr_part.contains('.') && prefix_len > 32 {
-                return Err(format!("IPv4 CIDR prefix length {prefix_len} exceeds maximum (32)"));
+                return Err(format!(
+                    "IPv4 CIDR prefix length {prefix_len} exceeds maximum (32)"
+                ));
             }
         }
         Ok(Self(s.to_string()))

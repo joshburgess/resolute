@@ -93,12 +93,11 @@ async fn test_query_macro_fetch_opt_none() {
 #[tokio::test]
 async fn test_query_macro_multiple_columns() {
     let client = connect().await;
-    let row = resolute::query!(
-        "SELECT 1::int4 AS a, 'hello'::text AS b, true AS c, 3.14::float8 AS d"
-    )
-    .fetch_one(&client)
-    .await
-    .unwrap();
+    let row =
+        resolute::query!("SELECT 1::int4 AS a, 'hello'::text AS b, true AS c, 3.14::float8 AS d")
+            .fetch_one(&client)
+            .await
+            .unwrap();
     assert_eq!(row.a, 1);
     assert_eq!(row.b, "hello");
     assert!(row.c);
@@ -142,10 +141,14 @@ struct MacroAuthor {
 async fn test_query_as_macro() {
     let client = connect().await;
     let id = 1i32;
-    let author = resolute::query_as!(MacroAuthor, "SELECT id, name FROM api.authors WHERE id = $1", id)
-        .fetch_one(&client)
-        .await
-        .unwrap();
+    let author = resolute::query_as!(
+        MacroAuthor,
+        "SELECT id, name FROM api.authors WHERE id = $1",
+        id
+    )
+    .fetch_one(&client)
+    .await
+    .unwrap();
     assert_eq!(author.id, 1);
     assert_eq!(author.name, "Alice");
 }
@@ -307,14 +310,10 @@ async fn test_query_macro_named_params_multiple() {
     let client = connect().await;
     let a_val = 10i32;
     let b_val = "hello".to_string();
-    let row = resolute::query!(
-        "SELECT :a::int4 AS a, :b::text AS b",
-        a = a_val,
-        b = b_val,
-    )
-    .fetch_one(&client)
-    .await
-    .unwrap();
+    let row = resolute::query!("SELECT :a::int4 AS a, :b::text AS b", a = a_val, b = b_val,)
+        .fetch_one(&client)
+        .await
+        .unwrap();
     assert_eq!(row.a, Some(10));
     assert_eq!(row.b, Some("hello".to_string()));
 }

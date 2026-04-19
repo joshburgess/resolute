@@ -1,8 +1,8 @@
 //! Property-based tests: encode → decode roundtrip for all types.
 //! Generates random values and verifies that encode(decode(x)) == x.
 
-use resolute::{Decode, DecodeText, Encode};
 use proptest::prelude::*;
+use resolute::{Decode, DecodeText, Encode};
 
 /// Encode then decode, assert equal.
 fn roundtrip<T: Encode + Decode + PartialEq + std::fmt::Debug>(val: &T) {
@@ -355,13 +355,28 @@ use resolute::PgType;
 #[test]
 fn test_domain_array_oid_inheritance_prop() {
     // i32 has ARRAY_OID 1007
-    assert_eq!(<TestDomainI32 as PgType>::ARRAY_OID, <i32 as PgType>::ARRAY_OID);
+    assert_eq!(
+        <TestDomainI32 as PgType>::ARRAY_OID,
+        <i32 as PgType>::ARRAY_OID
+    );
     // i64 has ARRAY_OID 1016
-    assert_eq!(<TestDomainI64 as PgType>::ARRAY_OID, <i64 as PgType>::ARRAY_OID);
+    assert_eq!(
+        <TestDomainI64 as PgType>::ARRAY_OID,
+        <i64 as PgType>::ARRAY_OID
+    );
     // String has ARRAY_OID 1009
-    assert_eq!(<TestDomainString as PgType>::ARRAY_OID, <String as PgType>::ARRAY_OID);
+    assert_eq!(
+        <TestDomainString as PgType>::ARRAY_OID,
+        <String as PgType>::ARRAY_OID
+    );
     // bool has ARRAY_OID 1000
-    assert_eq!(<TestDomainBool as PgType>::ARRAY_OID, <bool as PgType>::ARRAY_OID);
+    assert_eq!(
+        <TestDomainBool as PgType>::ARRAY_OID,
+        <bool as PgType>::ARRAY_OID
+    );
     // f64 has ARRAY_OID 1022
-    assert_eq!(<TestDomainF64 as PgType>::ARRAY_OID, <f64 as PgType>::ARRAY_OID);
+    assert_eq!(
+        <TestDomainF64 as PgType>::ARRAY_OID,
+        <f64 as PgType>::ARRAY_OID
+    );
 }

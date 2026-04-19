@@ -27,7 +27,10 @@ fn main() {
     // Enum encode/decode
     let mut buf = bytes::BytesMut::new();
     Status::PendingReview.encode(&mut buf);
-    println!("PendingReview encodes as: {:?}", std::str::from_utf8(&buf).unwrap());
+    println!(
+        "PendingReview encodes as: {:?}",
+        std::str::from_utf8(&buf).unwrap()
+    );
     let decoded = Status::decode(&buf).unwrap();
     assert_eq!(decoded, Status::PendingReview);
 

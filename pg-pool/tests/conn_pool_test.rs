@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use pg_pool::{ConnPool, ConnPoolConfig, LifecycleHooks, PoolGuard};
 use pg_pool::wire::WirePoolable;
+use pg_pool::{ConnPool, ConnPoolConfig, LifecycleHooks, PoolGuard};
 use pg_wired::{PgWireError, WireConn};
 
 type Pool = ConnPool<WirePoolable>;
@@ -53,9 +53,7 @@ async fn test_pool_create_with_min_idle() {
 async fn test_pool_create_min_idle_zero() {
     let mut config = test_config();
     config.min_idle = 0;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let m = pool.metrics();
     assert_eq!(m.total, 0, "min_idle=0 means no pre-fill");
@@ -66,9 +64,7 @@ async fn test_pool_create_min_idle_zero() {
 async fn test_pool_create_min_idle_multiple() {
     let mut config = test_config();
     config.min_idle = 3;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let m = pool.metrics();
     assert_eq!(m.total, 3);
@@ -130,9 +126,7 @@ async fn test_checkout_reuses_idle_connection() {
 async fn test_checkout_creates_new_when_no_idle() {
     let mut config = test_config();
     config.min_idle = 0;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     assert_eq!(pool.metrics().total, 0);
 
@@ -148,9 +142,7 @@ async fn test_multiple_checkouts_grow_pool() {
     let mut config = test_config();
     config.min_idle = 0;
     config.max_size = 3;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let g1 = pool.get().await.unwrap();
     let g2 = pool.get().await.unwrap();
@@ -235,9 +227,7 @@ async fn test_max_size_blocks_when_full() {
     config.min_idle = 0;
     config.max_size = 2;
     config.checkout_timeout = Duration::from_millis(200);
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let _g1 = pool.get().await.unwrap();
     let _g2 = pool.get().await.unwrap();
@@ -265,9 +255,7 @@ async fn test_max_size_unblocks_on_checkin() {
     config.min_idle = 0;
     config.max_size = 1;
     config.checkout_timeout = Duration::from_secs(2);
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let g1 = pool.get().await.unwrap();
 
@@ -300,9 +288,7 @@ async fn test_waiter_queue_fifo_order() {
     config.min_idle = 0;
     config.max_size = 1;
     config.checkout_timeout = Duration::from_secs(3);
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let g1 = pool.get().await.unwrap();
 
@@ -347,9 +333,7 @@ async fn test_dead_waiter_skipping() {
     config.min_idle = 0;
     config.max_size = 1;
     config.checkout_timeout = Duration::from_millis(100);
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let g1 = pool.get().await.unwrap();
 
@@ -389,9 +373,7 @@ async fn test_checkout_timeout_fires() {
     config.min_idle = 0;
     config.max_size = 1;
     config.checkout_timeout = Duration::from_millis(100);
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let _g = pool.get().await.unwrap();
 
@@ -401,7 +383,10 @@ async fn test_checkout_timeout_fires() {
 
     assert!(result.is_err());
     assert!(elapsed >= Duration::from_millis(90), "should wait ~100ms");
-    assert!(elapsed < Duration::from_millis(500), "shouldn't wait too long");
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "shouldn't wait too long"
+    );
     assert_eq!(pool.metrics().total_timeouts, 1);
 }
 
@@ -411,9 +396,7 @@ async fn test_checkout_timeout_counter_accumulates() {
     config.min_idle = 0;
     config.max_size = 1;
     config.checkout_timeout = Duration::from_millis(50);
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let _g = pool.get().await.unwrap();
 
@@ -442,7 +425,11 @@ async fn test_lifecycle_hooks_on_create() {
     let mut config = test_config();
     config.min_idle = 2;
     let pool = Pool::new(config, hooks).await.unwrap();
-    assert_eq!(counter.load(Ordering::Relaxed), 2, "on_create fired for min_idle");
+    assert_eq!(
+        counter.load(Ordering::Relaxed),
+        2,
+        "on_create fired for min_idle"
+    );
 
     // Checkout that creates a new conn.
     let _g1 = pool.get().await.unwrap();
@@ -491,7 +478,11 @@ async fn test_lifecycle_hooks_on_checkin() {
     assert_eq!(counter.load(Ordering::Relaxed), 0, "no checkin yet");
     drop(g1);
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(counter.load(Ordering::Relaxed), 1, "checkin fired on return");
+    assert_eq!(
+        counter.load(Ordering::Relaxed),
+        1,
+        "checkin fired on return"
+    );
 }
 
 #[tokio::test]
@@ -510,7 +501,10 @@ async fn test_lifecycle_hooks_on_destroy() {
 
     // Drain destroys idle connections.
     pool.drain().await;
-    assert!(counter.load(Ordering::Relaxed) >= 1, "on_destroy fired during drain");
+    assert!(
+        counter.load(Ordering::Relaxed) >= 1,
+        "on_destroy fired during drain"
+    );
 }
 
 #[tokio::test]
@@ -523,10 +517,18 @@ async fn test_all_hooks_fire_in_sequence() {
     let l4 = Arc::clone(&log);
 
     let hooks = LifecycleHooks {
-        on_create: Some(Box::new(move |_| { l1.lock().unwrap().push("create"); })),
-        on_checkout: Some(Box::new(move |_| { l2.lock().unwrap().push("checkout"); })),
-        on_checkin: Some(Box::new(move |_| { l3.lock().unwrap().push("checkin"); })),
-        on_destroy: Some(Box::new(move || { l4.lock().unwrap().push("destroy"); })),
+        on_create: Some(Box::new(move |_| {
+            l1.lock().unwrap().push("create");
+        })),
+        on_checkout: Some(Box::new(move |_| {
+            l2.lock().unwrap().push("checkout");
+        })),
+        on_checkin: Some(Box::new(move |_| {
+            l3.lock().unwrap().push("checkin");
+        })),
+        on_destroy: Some(Box::new(move || {
+            l4.lock().unwrap().push("destroy");
+        })),
         ..Default::default()
     };
 
@@ -560,13 +562,25 @@ async fn test_lifecycle_hooks_before_acquire() {
 
     let pool = Pool::new(test_config(), hooks).await.unwrap();
 
-    assert_eq!(counter.load(Ordering::Relaxed), 0, "before_acquire not called yet");
+    assert_eq!(
+        counter.load(Ordering::Relaxed),
+        0,
+        "before_acquire not called yet"
+    );
 
     let g1 = pool.get().await.unwrap();
-    assert_eq!(counter.load(Ordering::Relaxed), 1, "before_acquire on first checkout");
+    assert_eq!(
+        counter.load(Ordering::Relaxed),
+        1,
+        "before_acquire on first checkout"
+    );
 
     let g2 = pool.get().await.unwrap();
-    assert_eq!(counter.load(Ordering::Relaxed), 2, "before_acquire on second checkout");
+    assert_eq!(
+        counter.load(Ordering::Relaxed),
+        2,
+        "before_acquire on second checkout"
+    );
 
     drop(g1);
     drop(g2);
@@ -574,7 +588,11 @@ async fn test_lifecycle_hooks_before_acquire() {
 
     // Re-checkout reuses idle connection — before_acquire still fires.
     let _g3 = pool.get().await.unwrap();
-    assert_eq!(counter.load(Ordering::Relaxed), 3, "before_acquire on re-checkout");
+    assert_eq!(
+        counter.load(Ordering::Relaxed),
+        3,
+        "before_acquire on re-checkout"
+    );
 }
 
 #[tokio::test]
@@ -595,12 +613,20 @@ async fn test_lifecycle_hooks_after_release() {
 
     drop(g1);
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(counter.load(Ordering::Relaxed), 1, "after_release on return");
+    assert_eq!(
+        counter.load(Ordering::Relaxed),
+        1,
+        "after_release on return"
+    );
 
     let g2 = pool.get().await.unwrap();
     drop(g2);
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(counter.load(Ordering::Relaxed), 2, "after_release on second return");
+    assert_eq!(
+        counter.load(Ordering::Relaxed),
+        2,
+        "after_release on second return"
+    );
 }
 
 #[tokio::test]
@@ -641,7 +667,11 @@ async fn test_connection_aware_on_checkout_receives_valid_conn() {
 
     let pool = Pool::new(test_config(), hooks).await.unwrap();
     let _g = pool.get().await.unwrap();
-    assert_eq!(saw_conn.load(Ordering::Relaxed), 1, "on_checkout received valid conn");
+    assert_eq!(
+        saw_conn.load(Ordering::Relaxed),
+        1,
+        "on_checkout received valid conn"
+    );
 }
 
 #[tokio::test]
@@ -656,12 +686,24 @@ async fn test_all_hooks_fire_in_sequence_with_new_hooks() {
     let l6 = Arc::clone(&log);
 
     let hooks = LifecycleHooks {
-        on_create: Some(Box::new(move |_| { l1.lock().unwrap().push("create"); })),
-        before_acquire: Some(Box::new(move || { l2.lock().unwrap().push("before_acquire"); })),
-        on_checkout: Some(Box::new(move |_| { l3.lock().unwrap().push("checkout"); })),
-        on_checkin: Some(Box::new(move |_| { l4.lock().unwrap().push("checkin"); })),
-        after_release: Some(Box::new(move || { l5.lock().unwrap().push("after_release"); })),
-        on_destroy: Some(Box::new(move || { l6.lock().unwrap().push("destroy"); })),
+        on_create: Some(Box::new(move |_| {
+            l1.lock().unwrap().push("create");
+        })),
+        before_acquire: Some(Box::new(move || {
+            l2.lock().unwrap().push("before_acquire");
+        })),
+        on_checkout: Some(Box::new(move |_| {
+            l3.lock().unwrap().push("checkout");
+        })),
+        on_checkin: Some(Box::new(move |_| {
+            l4.lock().unwrap().push("checkin");
+        })),
+        after_release: Some(Box::new(move || {
+            l5.lock().unwrap().push("after_release");
+        })),
+        on_destroy: Some(Box::new(move || {
+            l6.lock().unwrap().push("destroy");
+        })),
     };
 
     let mut config = test_config();
@@ -676,11 +718,23 @@ async fn test_all_hooks_fire_in_sequence_with_new_hooks() {
 
     let events = log.lock().unwrap().clone();
     // Expected order: before_acquire, create, checkout, checkin, after_release, destroy
-    assert!(events.contains(&"before_acquire"), "missing before_acquire: {:?}", events);
+    assert!(
+        events.contains(&"before_acquire"),
+        "missing before_acquire: {:?}",
+        events
+    );
     assert!(events.contains(&"create"), "missing create: {:?}", events);
-    assert!(events.contains(&"checkout"), "missing checkout: {:?}", events);
+    assert!(
+        events.contains(&"checkout"),
+        "missing checkout: {:?}",
+        events
+    );
     assert!(events.contains(&"checkin"), "missing checkin: {:?}", events);
-    assert!(events.contains(&"after_release"), "missing after_release: {:?}", events);
+    assert!(
+        events.contains(&"after_release"),
+        "missing after_release: {:?}",
+        events
+    );
     assert!(events.contains(&"destroy"), "missing destroy: {:?}", events);
 
     // Verify ordering of key events.
@@ -702,9 +756,7 @@ async fn test_metrics_accuracy() {
     let mut config = test_config();
     config.min_idle = 2;
     config.max_size = 5;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let m = pool.metrics();
     assert_eq!(m.total, 2);
@@ -738,9 +790,7 @@ async fn test_metrics_total_created_and_destroyed() {
     let mut config = test_config();
     config.min_idle = 0;
     config.max_size = 3;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     // Create 3 connections.
     let g1 = pool.get().await.unwrap();
@@ -781,9 +831,7 @@ async fn test_status_string() {
 async fn test_drain_destroys_idle_connections() {
     let mut config = test_config();
     config.min_idle = 3;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     assert_eq!(pool.metrics().total, 3);
 
@@ -808,7 +856,10 @@ async fn test_drain_rejects_new_checkouts() {
     match result {
         Err(e) => {
             let msg = e.to_string();
-            assert!(msg.contains("draining") || msg.contains("Draining"), "got: {msg}");
+            assert!(
+                msg.contains("draining") || msg.contains("Draining"),
+                "got: {msg}"
+            );
         }
         Ok(_) => panic!("expected draining error"),
     }
@@ -818,9 +869,7 @@ async fn test_drain_rejects_new_checkouts() {
 async fn test_drain_waits_for_in_use_connections() {
     let mut config = test_config();
     config.min_idle = 0;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let g = pool.get().await.unwrap();
 
@@ -850,9 +899,7 @@ async fn test_drain_waits_for_in_use_connections() {
 async fn test_drain_destroys_returned_connections() {
     let mut config = test_config();
     config.min_idle = 0;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let g1 = pool.get().await.unwrap();
     let g2 = pool.get().await.unwrap();
@@ -888,9 +935,7 @@ async fn test_drain_destroys_returned_connections() {
 async fn test_pool_guard_take() {
     let mut config = test_config();
     config.min_idle = 0;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let g = pool.get().await.unwrap();
     assert_eq!(pool.metrics().total, 1);
@@ -924,9 +969,7 @@ async fn test_concurrent_checkout_checkin() {
     config.min_idle = 0;
     config.max_size = 5;
     config.checkout_timeout = Duration::from_secs(5);
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let mut handles = Vec::new();
     for i in 0..20 {
@@ -957,9 +1000,7 @@ async fn test_high_concurrency_no_deadlock() {
     config.min_idle = 2;
     config.max_size = 3;
     config.checkout_timeout = Duration::from_secs(10);
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     // 50 concurrent tasks competing for 3 connections.
     let mut handles = Vec::new();
@@ -992,9 +1033,7 @@ async fn test_expired_connections_evicted_on_checkout() {
     config.max_size = 5;
     config.max_lifetime = Duration::from_millis(100);
     config.max_lifetime_jitter = Duration::ZERO;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     // Create and return a connection.
     let g = pool.get().await.unwrap();
@@ -1025,9 +1064,7 @@ async fn test_connection_invalid_after_pg_terminate() {
     // a fresh connection can be obtained.
     let mut config = test_config();
     config.min_idle = 0;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     // Get connection and find its PG PID.
     let mut g = pool.get().await.unwrap();
@@ -1038,11 +1075,7 @@ async fn test_connection_invalid_after_pg_terminate() {
 
     // Kill the PG backend from a separate connection.
     let mut killer = WireConn::connect(ADDR, USER, PASS, DB).await.unwrap();
-    let _ = send_query_raw(
-        &mut killer,
-        &format!("SELECT pg_terminate_backend({pid})"),
-    )
-    .await;
+    let _ = send_query_raw(&mut killer, &format!("SELECT pg_terminate_backend({pid})")).await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -1059,7 +1092,11 @@ async fn test_connection_invalid_after_pg_terminate() {
     let mut g2 = pool.get().await.unwrap();
     let (rows, _) = send_query(&mut g2, "SELECT 1").await;
     assert_eq!(col_str(&rows[0][0]), "1");
-    assert_eq!(pool.metrics().total_created, 2, "new connection was created");
+    assert_eq!(
+        pool.metrics().total_created,
+        2,
+        "new connection was created"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,9 +1109,7 @@ async fn test_pool_with_invalid_address() {
     config.addr = "127.0.0.1:1".to_string(); // invalid port
     config.min_idle = 0;
     config.checkout_timeout = Duration::from_millis(500);
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     let result = pool.get().await;
     assert!(result.is_err(), "should fail to connect to invalid address");
@@ -1086,9 +1121,7 @@ async fn test_pool_create_with_invalid_address_and_min_idle() {
     config.addr = "127.0.0.1:1".to_string();
     config.min_idle = 3;
     // Should not panic — just warns and creates pool with 0 idle.
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
     assert_eq!(pool.metrics().total, 0, "failed pre-fill is not fatal");
 }
 
@@ -1103,17 +1136,13 @@ async fn test_drain_completes_with_rapid_return() {
     let mut config = test_config();
     config.min_idle = 0;
     config.max_size = 5;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     // Check out several connections.
-    let guards: Vec<_> = futures_collect(
-        (0..5).map(|_| {
-            let pool = Arc::clone(&pool);
-            async move { pool.get().await.unwrap() }
-        }),
-    )
+    let guards: Vec<_> = futures_collect((0..5).map(|_| {
+        let pool = Arc::clone(&pool);
+        async move { pool.get().await.unwrap() }
+    }))
     .await;
 
     assert_eq!(pool.metrics().in_use, 5);
@@ -1142,9 +1171,7 @@ async fn test_drain_with_no_connections() {
     // Drain on empty pool (total_count already 0) should return immediately.
     let mut config = test_config();
     config.min_idle = 0;
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     assert_eq!(pool.metrics().total, 0);
 
@@ -1164,9 +1191,7 @@ async fn test_maintenance_does_not_exceed_max_size() {
     config.min_idle = 3;
     config.max_size = 3;
     config.maintenance_interval = Duration::from_millis(100); // fast maintenance
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     // Check out all connections to trigger maintenance replenishment.
     let g1 = pool.get().await.unwrap();
@@ -1178,7 +1203,11 @@ async fn test_maintenance_does_not_exceed_max_size() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let m = pool.metrics();
-    assert!(m.total <= 3, "maintenance must not exceed max_size, got total={}", m.total);
+    assert!(
+        m.total <= 3,
+        "maintenance must not exceed max_size, got total={}",
+        m.total
+    );
 
     drop(g1);
     drop(g2);
@@ -1191,9 +1220,7 @@ async fn test_concurrent_get_does_not_exceed_max_size() {
     config.min_idle = 0;
     config.max_size = 3;
     config.checkout_timeout = Duration::from_secs(5);
-    let pool = Pool::new(config, LifecycleHooks::default())
-        .await
-        .unwrap();
+    let pool = Pool::new(config, LifecycleHooks::default()).await.unwrap();
 
     // Spawn 10 concurrent gets. Only 3 should succeed at a time.
     let mut handles = Vec::new();
@@ -1209,7 +1236,11 @@ async fn test_concurrent_get_does_not_exceed_max_size() {
     // Check pool doesn't overshoot.
     tokio::time::sleep(Duration::from_millis(20)).await;
     let m = pool.metrics();
-    assert!(m.total <= 3, "concurrent gets must respect max_size, got total={}", m.total);
+    assert!(
+        m.total <= 3,
+        "concurrent gets must respect max_size, got total={}",
+        m.total
+    );
 
     for h in handles {
         h.await.unwrap();
@@ -1226,7 +1257,9 @@ async fn test_async_conn_no_cpu_spin_when_idle() {
     // We can't measure CPU directly, but we can verify it works
     // correctly after being idle for a while.
     let conn = pg_wired::AsyncConn::new(
-        pg_wired::WireConn::connect(ADDR, USER, PASS, DB).await.unwrap()
+        pg_wired::WireConn::connect(ADDR, USER, PASS, DB)
+            .await
+            .unwrap(),
     );
 
     // Let the reader sit idle.
@@ -1270,26 +1303,17 @@ async fn send_query(
 
     let conn: &mut WireConn = &mut guard.conn_mut().0;
     let mut buf = BytesMut::new();
-    pg_wired::protocol::frontend::encode_message(
-        &FrontendMsg::Query(sql.as_bytes()),
-        &mut buf,
-    );
+    pg_wired::protocol::frontend::encode_message(&FrontendMsg::Query(sql.as_bytes()), &mut buf);
     conn.send_raw(&buf).await.unwrap();
     conn.collect_rows().await.unwrap()
 }
 
-async fn send_query_raw(
-    conn: &mut WireConn,
-    sql: &str,
-) -> (Vec<Vec<Option<Vec<u8>>>>, String) {
+async fn send_query_raw(conn: &mut WireConn, sql: &str) -> (Vec<Vec<Option<Vec<u8>>>>, String) {
     use bytes::BytesMut;
     use pg_wired::protocol::types::FrontendMsg;
 
     let mut buf = BytesMut::new();
-    pg_wired::protocol::frontend::encode_message(
-        &FrontendMsg::Query(sql.as_bytes()),
-        &mut buf,
-    );
+    pg_wired::protocol::frontend::encode_message(&FrontendMsg::Query(sql.as_bytes()), &mut buf);
     conn.send_raw(&buf).await.unwrap();
     conn.collect_rows().await.unwrap()
 }
@@ -1303,10 +1327,7 @@ async fn send_query_try(
 
     let conn: &mut WireConn = &mut guard.conn_mut().0;
     let mut buf = BytesMut::new();
-    pg_wired::protocol::frontend::encode_message(
-        &FrontendMsg::Query(sql.as_bytes()),
-        &mut buf,
-    );
+    pg_wired::protocol::frontend::encode_message(&FrontendMsg::Query(sql.as_bytes()), &mut buf);
     conn.send_raw(&buf).await?;
     conn.collect_rows().await
 }

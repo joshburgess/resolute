@@ -86,8 +86,7 @@ pub fn read_cache(hash: u64) -> Option<CacheEntry> {
 /// Write query metadata to the cache.
 pub fn write_cache(entry: &CacheEntry) -> Result<(), String> {
     let dir = cache_dir();
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create .sqlx directory: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create .sqlx directory: {e}"))?;
 
     let path = dir.join(format!("query-{:016x}.json", entry.hash));
     let json = serde_json::to_string_pretty(entry)

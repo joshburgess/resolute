@@ -43,16 +43,16 @@ async fn test_typed_pool_reuse() {
     // Check out, query, return. Repeat — connection should be reused.
     for i in 0..10i32 {
         let client = pool.get().await.unwrap();
-        let rows = client
-            .query("SELECT $1::int4 AS n", &[&i])
-            .await
-            .unwrap();
+        let rows = client.query("SELECT $1::int4 AS n", &[&i]).await.unwrap();
         assert_eq!(rows[0].get::<i32>(0).unwrap(), i);
         // client dropped here — returned to pool
     }
 
     let m = pool.metrics();
-    assert!(m.total <= 3, "pool should reuse connections, not create new ones");
+    assert!(
+        m.total <= 3,
+        "pool should reuse connections, not create new ones"
+    );
 }
 
 #[tokio::test]
@@ -148,5 +148,9 @@ async fn test_typed_pool_connection_survives_return() {
 
     let m = pool.metrics();
     // Should have created at most 2 connections total (1 initial + maybe 1 more).
-    assert!(m.total_created <= 2, "should reuse connections, created: {}", m.total_created);
+    assert!(
+        m.total_created <= 2,
+        "should reuse connections, created: {}",
+        m.total_created
+    );
 }

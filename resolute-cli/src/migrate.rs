@@ -193,9 +193,20 @@ pub async fn status(
     let applied: Vec<(i64, String, String)> = rows
         .iter()
         .filter_map(|r| {
-            let v = r.first()?.as_ref().and_then(|b| String::from_utf8(b.clone()).ok())?.parse().ok()?;
-            let n = r.get(1)?.as_ref().and_then(|b| String::from_utf8(b.clone()).ok())?;
-            let t = r.get(2)?.as_ref().and_then(|b| String::from_utf8(b.clone()).ok())?;
+            let v = r
+                .first()?
+                .as_ref()
+                .and_then(|b| String::from_utf8(b.clone()).ok())?
+                .parse()
+                .ok()?;
+            let n = r
+                .get(1)?
+                .as_ref()
+                .and_then(|b| String::from_utf8(b.clone()).ok())?;
+            let t = r
+                .get(2)?
+                .as_ref()
+                .and_then(|b| String::from_utf8(b.clone()).ok())?;
             Some((v, n, t))
         })
         .collect();
@@ -240,9 +251,7 @@ fn scan_migrations(dir: &Path) -> Result<Vec<Migration>, Box<dyn std::error::Err
 
         // Parse version from filename: {version}_{name}.up.sql
         let stem = name.strip_suffix(".up.sql").unwrap_or("");
-        let (version_str, migration_name) = stem
-            .split_once('_')
-            .unwrap_or((stem, "unnamed"));
+        let (version_str, migration_name) = stem.split_once('_').unwrap_or((stem, "unnamed"));
         let version: i64 = version_str.parse().map_err(|_| {
             format!("Invalid migration filename (expected timestamp prefix): {name}")
         })?;
@@ -327,15 +336,21 @@ pub async fn validate(
     .await?;
 
     let (rows, _) = pg
-        .simple_query_rows(
-            "SELECT version, name FROM _resolute_migrations ORDER BY version",
-        )
+        .simple_query_rows("SELECT version, name FROM _resolute_migrations ORDER BY version")
         .await?;
     let applied: Vec<(i64, String)> = rows
         .iter()
         .filter_map(|r| {
-            let v = r.first()?.as_ref().and_then(|b| String::from_utf8(b.clone()).ok())?.parse().ok()?;
-            let n = r.get(1)?.as_ref().and_then(|b| String::from_utf8(b.clone()).ok())?;
+            let v = r
+                .first()?
+                .as_ref()
+                .and_then(|b| String::from_utf8(b.clone()).ok())?
+                .parse()
+                .ok()?;
+            let n = r
+                .get(1)?
+                .as_ref()
+                .and_then(|b| String::from_utf8(b.clone()).ok())?;
             Some((v, n))
         })
         .collect();
@@ -362,7 +377,10 @@ pub async fn validate(
                 }
             }
             None => {
-                eprintln!("  MISSING FILE: {} ({}) — no migration file found", version, db_name);
+                eprintln!(
+                    "  MISSING FILE: {} ({}) — no migration file found",
+                    version, db_name
+                );
                 missing += 1;
             }
         }
@@ -376,10 +394,7 @@ pub async fn validate(
 }
 
 /// Load seed data from a SQL file.
-pub async fn seed(
-    database_url: &str,
-    file: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn seed(database_url: &str, file: &Path) -> Result<(), Box<dyn std::error::Error>> {
     if !file.exists() {
         return Err(format!("Seed file not found: {}", file.display()).into());
     }

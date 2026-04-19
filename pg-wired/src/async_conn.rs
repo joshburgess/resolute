@@ -133,8 +133,7 @@ impl AsyncConn {
 
         let (notification_tx, notification_rx) = mpsc::channel(4096);
         let (request_tx, request_rx) = mpsc::channel::<PipelineRequest>(256);
-        let pending: Arc<Mutex<VecDeque<PendingResponse>>> =
-            Arc::new(Mutex::new(VecDeque::new()));
+        let pending: Arc<Mutex<VecDeque<PendingResponse>>> = Arc::new(Mutex::new(VecDeque::new()));
         let pending_notify = Arc::new(tokio::sync::Notify::new());
         let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
 
@@ -183,7 +182,10 @@ impl AsyncConn {
     pub fn take_notification_receiver(
         &self,
     ) -> Option<mpsc::Receiver<crate::protocol::types::BackendMsg>> {
-        self.notification_rx.lock().ok().and_then(|mut guard| guard.take())
+        self.notification_rx
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
     }
 
     /// Look up or allocate a statement name.
@@ -226,7 +228,9 @@ impl AsyncConn {
                 });
             }
         }
-        let n = self.stmt_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let n = self
+            .stmt_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let name = format!("s{n}");
         cache.insert(sql.to_string(), (name.clone(), n));
         (name.into_bytes(), true)
@@ -252,11 +256,11 @@ impl AsyncConn {
         // Empty data is valid (0 rows copied).
         frontend::encode_message(&FrontendMsg::CopyDone, &mut buf);
 
-        let resp = self.submit(buf, ResponseCollector::CopyIn { data: Vec::new() }).await?;
+        let resp = self
+            .submit(buf, ResponseCollector::CopyIn { data: Vec::new() })
+            .await?;
         match resp {
-            PipelineResponse::Rows { command_tag, .. } => {
-                Ok(parse_copy_count(&command_tag))
-            }
+            PipelineResponse::Rows { command_tag, .. } => Ok(parse_copy_count(&command_tag)),
             PipelineResponse::Done => Ok(0),
         }
     }
@@ -293,7 +297,9 @@ impl AsyncConn {
         }
         frontend::encode_message(&FrontendMsg::CopyDone, &mut buf);
 
-        let resp = self.submit(buf, ResponseCollector::CopyIn { data: Vec::new() }).await?;
+        let resp = self
+            .submit(buf, ResponseCollector::CopyIn { data: Vec::new() })
+            .await?;
         match resp {
             PipelineResponse::Rows { command_tag, .. } => Ok(parse_copy_count(&command_tag)),
             PipelineResponse::Done => Ok(0),
@@ -351,8 +357,15 @@ impl AsyncConn {
         param_oids: &[u32],
     ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
         let (stmt_name, needs_parse) = self.lookup_or_alloc(query_sql);
-        self.pipeline_transaction(setup_sql, query_sql, params, param_oids, &stmt_name, needs_parse)
-            .await
+        self.pipeline_transaction(
+            setup_sql,
+            query_sql,
+            params,
+            param_oids,
+            &stmt_name,
+            needs_parse,
+        )
+        .await
     }
 
     /// Execute a parameterized query with automatic statement caching.
@@ -365,7 +378,10 @@ impl AsyncConn {
         param_oids: &[u32],
     ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
         let (stmt_name, needs_parse) = self.lookup_or_alloc(sql);
-        match self.query(sql, params, param_oids, &stmt_name, needs_parse).await {
+        match self
+            .query(sql, params, param_oids, &stmt_name, needs_parse)
+            .await
+        {
             Ok(rows) => Ok(rows),
             Err(PgWireError::Pg(ref pg_err))
                 if !needs_parse && is_stale_statement_error(pg_err) =>
@@ -405,7 +421,10 @@ impl AsyncConn {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(PgWireError::ConnectionClosed),
             Err(_elapsed) => {
-                tracing::error!("request timed out after {:?} — reader/writer task may be dead", Self::REQUEST_TIMEOUT);
+                tracing::error!(
+                    "request timed out after {:?} — reader/writer task may be dead",
+                    Self::REQUEST_TIMEOUT
+                );
                 Err(PgWireError::ConnectionClosed)
             }
         }
@@ -566,9 +585,7 @@ impl AsyncConn {
             .await
             .map_err(|_| PgWireError::ConnectionClosed)??;
 
-        let data_resp = data_rx
-            .await
-            .map_err(|_| PgWireError::ConnectionClosed)??;
+        let data_resp = data_rx.await.map_err(|_| PgWireError::ConnectionClosed)??;
 
         commit_rx
             .await
@@ -827,12 +844,12 @@ async fn reader_task(
 
         // Collect the response based on the collector type.
         let result = match pr.collector {
-            ResponseCollector::Rows => collect_rows(&mut stream, &mut recv_buf, &notification_tx).await,
-            ResponseCollector::Drain => {
-                drain_until_ready(&mut stream, &mut recv_buf)
-                    .await
-                    .map(|_| PipelineResponse::Done)
+            ResponseCollector::Rows => {
+                collect_rows(&mut stream, &mut recv_buf, &notification_tx).await
             }
+            ResponseCollector::Drain => drain_until_ready(&mut stream, &mut recv_buf)
+                .await
+                .map(|_| PipelineResponse::Done),
             ResponseCollector::Stream { header_tx, row_tx } => {
                 stream_rows(&mut stream, &mut recv_buf, header_tx, row_tx).await;
                 Ok(PipelineResponse::Done)
@@ -840,9 +857,7 @@ async fn reader_task(
             ResponseCollector::CopyIn { .. } => {
                 collect_copy_in_response(&mut stream, &mut recv_buf).await
             }
-            ResponseCollector::CopyOut => {
-                collect_copy_out(&mut stream, &mut recv_buf).await
-            }
+            ResponseCollector::CopyOut => collect_copy_out(&mut stream, &mut recv_buf).await,
         };
 
         // Send the response back to the caller.
@@ -886,7 +901,11 @@ async fn collect_rows(
             BackendMsg::RowDescription { fields: f } => fields = f,
             BackendMsg::CommandComplete { tag } => command_tag = tag,
             BackendMsg::ReadyForQuery { .. } => {
-                return Ok(PipelineResponse::Rows { fields, rows, command_tag });
+                return Ok(PipelineResponse::Rows {
+                    fields,
+                    rows,
+                    command_tag,
+                });
             }
             BackendMsg::ErrorResponse { fields } => {
                 drain_until_ready(stream, buf).await?;

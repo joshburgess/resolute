@@ -161,9 +161,11 @@ pub async fn negotiate_tls_with_config(
                 for cert_der in &config.root_certs {
                     root_store
                         .add(rustls_pki_types::CertificateDer::from(cert_der.clone()))
-                        .map_err(|e| crate::error::PgWireError::Protocol(
-                            format!("invalid root certificate: {e}"),
-                        ))?;
+                        .map_err(|e| {
+                            crate::error::PgWireError::Protocol(format!(
+                                "invalid root certificate: {e}"
+                            ))
+                        })?;
                 }
             }
 
@@ -173,16 +175,20 @@ pub async fn negotiate_tls_with_config(
                     .iter()
                     .map(|c| rustls_pki_types::CertificateDer::from(c.clone()))
                     .collect();
-                let key = rustls_pki_types::PrivateKeyDer::try_from(key_der.clone())
-                    .map_err(|e| crate::error::PgWireError::Protocol(
-                        format!("invalid client private key: {e}"),
-                    ))?;
+                let key =
+                    rustls_pki_types::PrivateKeyDer::try_from(key_der.clone()).map_err(|e| {
+                        crate::error::PgWireError::Protocol(format!(
+                            "invalid client private key: {e}"
+                        ))
+                    })?;
                 rustls::ClientConfig::builder()
                     .with_root_certificates(root_store)
                     .with_client_auth_cert(certs, key)
-                    .map_err(|e| crate::error::PgWireError::Protocol(
-                        format!("TLS client auth config error: {e}"),
-                    ))?
+                    .map_err(|e| {
+                        crate::error::PgWireError::Protocol(format!(
+                            "TLS client auth config error: {e}"
+                        ))
+                    })?
             } else {
                 rustls::ClientConfig::builder()
                     .with_root_certificates(root_store)
@@ -191,7 +197,9 @@ pub async fn negotiate_tls_with_config(
 
             let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(tls_config));
             let server_name = rustls_pki_types::ServerName::try_from(hostname.to_string())
-                .map_err(|e| crate::error::PgWireError::Protocol(format!("invalid hostname: {e}")))?;
+                .map_err(|e| {
+                    crate::error::PgWireError::Protocol(format!("invalid hostname: {e}"))
+                })?;
 
             let tls_stream = connector.connect(server_name, stream).await?;
             Ok(MaybeTlsStream::Tls(tls_stream))

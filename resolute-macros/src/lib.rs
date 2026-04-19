@@ -97,18 +97,14 @@ fn resolve_named(
     for (n, _) in named {
         if !names.iter().any(|name| name == &n.to_string()) {
             let msg = format!("binding `{}` does not match any `:{}` in SQL", n, n);
-            return Err(syn::Error::new_spanned(n, msg)
-                .to_compile_error()
-                .into());
+            return Err(syn::Error::new_spanned(n, msg).to_compile_error().into());
         }
     }
     Ok((rewritten, ordered))
 }
 
 /// Resolve query metadata: try cache first, then live DB, then update cache.
-fn resolve_metadata(
-    sql: &str,
-) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), String> {
+fn resolve_metadata(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), String> {
     let sql_hash = hash_sql(sql);
     let offline = std::env::var("RESOLUTE_OFFLINE")
         .map(|v| v == "true" || v == "1")
@@ -211,17 +207,20 @@ fn describe_live(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), Stri
             if conn.send_raw(&buf).await.is_ok() {
                 if let Ok((rows, _)) = conn.collect_rows().await {
                     for row in &rows {
-                        let oid: u32 = row.first()
+                        let oid: u32 = row
+                            .first()
                             .and_then(|v| v.as_ref())
                             .and_then(|b| String::from_utf8(b.clone()).ok())
                             .and_then(|s| s.parse().ok())
                             .unwrap_or(0);
-                        let col: i16 = row.get(1)
+                        let col: i16 = row
+                            .get(1)
                             .and_then(|v| v.as_ref())
                             .and_then(|b| String::from_utf8(b.clone()).ok())
                             .and_then(|s| s.parse().ok())
                             .unwrap_or(0);
-                        let notnull: bool = row.get(2)
+                        let notnull: bool = row
+                            .get(2)
                             .and_then(|v| v.as_ref())
                             .map(|b| b == b"t")
                             .unwrap_or(false);
@@ -307,9 +306,7 @@ fn query_impl(input: QueryInput) -> TokenStream {
     let (param_oids, column_infos) = match resolve_metadata(&sql_str) {
         Ok(result) => result,
         Err(e) => {
-            return syn::Error::new_spanned(&sql, e)
-                .to_compile_error()
-                .into();
+            return syn::Error::new_spanned(&sql, e).to_compile_error().into();
         }
     };
 
@@ -319,9 +316,7 @@ fn query_impl(input: QueryInput) -> TokenStream {
             param_oids.len(),
             params.len()
         );
-        return syn::Error::new_spanned(&sql, msg)
-            .to_compile_error()
-            .into();
+        return syn::Error::new_spanned(&sql, msg).to_compile_error().into();
     }
 
     // Generate compile-time param type checks.
@@ -432,7 +427,12 @@ pub fn query_as(input: TokenStream) -> TokenStream {
 }
 
 fn query_as_impl(input: QueryAsInput) -> TokenStream {
-    let QueryAsInput { target_type, sql, params, named } = input;
+    let QueryAsInput {
+        target_type,
+        sql,
+        params,
+        named,
+    } = input;
     let sql_str = sql.value();
 
     let (sql_str, params) = match resolve_named(sql_str, params, &named, &sql) {
@@ -443,9 +443,7 @@ fn query_as_impl(input: QueryAsInput) -> TokenStream {
     let (param_oids, _column_infos) = match resolve_metadata(&sql_str) {
         Ok(result) => result,
         Err(e) => {
-            return syn::Error::new_spanned(&sql, e)
-                .to_compile_error()
-                .into();
+            return syn::Error::new_spanned(&sql, e).to_compile_error().into();
         }
     };
 
@@ -455,9 +453,7 @@ fn query_as_impl(input: QueryAsInput) -> TokenStream {
             param_oids.len(),
             params.len()
         );
-        return syn::Error::new_spanned(&sql, msg)
-            .to_compile_error()
-            .into();
+        return syn::Error::new_spanned(&sql, msg).to_compile_error().into();
     }
 
     let param_refs: Vec<_> = params
@@ -501,9 +497,7 @@ fn query_scalar_impl(input: QueryInput) -> TokenStream {
     let (param_oids, column_infos) = match resolve_metadata(&sql_str) {
         Ok(result) => result,
         Err(e) => {
-            return syn::Error::new_spanned(&sql, e)
-                .to_compile_error()
-                .into();
+            return syn::Error::new_spanned(&sql, e).to_compile_error().into();
         }
     };
 
@@ -513,9 +507,7 @@ fn query_scalar_impl(input: QueryInput) -> TokenStream {
             param_oids.len(),
             params.len()
         );
-        return syn::Error::new_spanned(&sql, msg)
-            .to_compile_error()
-            .into();
+        return syn::Error::new_spanned(&sql, msg).to_compile_error().into();
     }
 
     if column_infos.len() != 1 {
@@ -523,9 +515,7 @@ fn query_scalar_impl(input: QueryInput) -> TokenStream {
             "query_scalar! requires exactly 1 column, got {}",
             column_infos.len()
         );
-        return syn::Error::new_spanned(&sql, msg)
-            .to_compile_error()
-            .into();
+        return syn::Error::new_spanned(&sql, msg).to_compile_error().into();
     }
 
     let scalar_type = {
@@ -594,14 +584,23 @@ impl Parse for QueryAsInput {
                 return Err(input.error("cannot mix positional and named parameters"));
             }
         }
-        Ok(QueryAsInput { target_type, sql, params, named })
+        Ok(QueryAsInput {
+            target_type,
+            sql,
+            params,
+            named,
+        })
     }
 }
 
 /// `query_file!("path/to/query.sql", param1, param2, ...)` — like query! but reads SQL from a file.
 #[proc_macro]
 pub fn query_file(input: TokenStream) -> TokenStream {
-    let QueryInput { sql: path_lit, params, named: _ } = parse_macro_input!(input as QueryInput);
+    let QueryInput {
+        sql: path_lit,
+        params,
+        named: _,
+    } = parse_macro_input!(input as QueryInput);
     let file_path = path_lit.value();
 
     let sql_str = match read_sql_file(&file_path) {
@@ -615,15 +614,23 @@ pub fn query_file(input: TokenStream) -> TokenStream {
 
     // Reuse the query! logic with the file contents.
     let sql_lit = LitStr::new(&sql_str, path_lit.span());
-    let inner = QueryInput { sql: sql_lit, params, named: Vec::new() };
+    let inner = QueryInput {
+        sql: sql_lit,
+        params,
+        named: Vec::new(),
+    };
     query_impl(inner)
 }
 
 /// `query_file_as!(Type, "path/to/query.sql", param1, ...)` — like query_as! but reads SQL from a file.
 #[proc_macro]
 pub fn query_file_as(input: TokenStream) -> TokenStream {
-    let QueryAsInput { target_type, sql: path_lit, params, named: _ } =
-        parse_macro_input!(input as QueryAsInput);
+    let QueryAsInput {
+        target_type,
+        sql: path_lit,
+        params,
+        named: _,
+    } = parse_macro_input!(input as QueryAsInput);
     let file_path = path_lit.value();
 
     let sql_str = match read_sql_file(&file_path) {
@@ -636,14 +643,23 @@ pub fn query_file_as(input: TokenStream) -> TokenStream {
     };
 
     let sql_lit = LitStr::new(&sql_str, path_lit.span());
-    let inner = QueryAsInput { target_type, sql: sql_lit, params, named: Vec::new() };
+    let inner = QueryAsInput {
+        target_type,
+        sql: sql_lit,
+        params,
+        named: Vec::new(),
+    };
     query_as_impl(inner)
 }
 
 /// `query_file_scalar!("path/to/query.sql", param1, ...)` — file-based scalar query.
 #[proc_macro]
 pub fn query_file_scalar(input: TokenStream) -> TokenStream {
-    let QueryInput { sql: path_lit, params, named: _ } = parse_macro_input!(input as QueryInput);
+    let QueryInput {
+        sql: path_lit,
+        params,
+        named: _,
+    } = parse_macro_input!(input as QueryInput);
     let file_path = path_lit.value();
 
     let sql_str = match read_sql_file(&file_path) {
@@ -656,7 +672,11 @@ pub fn query_file_scalar(input: TokenStream) -> TokenStream {
     };
 
     let sql_lit = LitStr::new(&sql_str, path_lit.span());
-    let inner = QueryInput { sql: sql_lit, params, named: Vec::new() };
+    let inner = QueryInput {
+        sql: sql_lit,
+        params,
+        named: Vec::new(),
+    };
     query_scalar_impl(inner)
 }
 
@@ -665,7 +685,11 @@ pub fn query_file_scalar(input: TokenStream) -> TokenStream {
 /// Params are passed as-is; no type or count checking.
 #[proc_macro]
 pub fn query_unchecked(input: TokenStream) -> TokenStream {
-    let QueryInput { sql, params, named: _ } = parse_macro_input!(input as QueryInput);
+    let QueryInput {
+        sql,
+        params,
+        named: _,
+    } = parse_macro_input!(input as QueryInput);
 
     let param_refs: Vec<_> = params
         .iter()
@@ -746,7 +770,13 @@ fn oid_to_type_name(oid: u32) -> &'static str {
 fn sanitize_ident(name: &str) -> String {
     let s: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if s.starts_with(|c: char| c.is_ascii_digit()) {
         format!("_{s}")
@@ -835,10 +865,7 @@ fn rewrite_named_params(sql: &str) -> (String, Vec<String>) {
         }
 
         // :name — named parameter.
-        if chars[i] == ':'
-            && i + 1 < len
-            && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_')
-        {
+        if chars[i] == ':' && i + 1 < len && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_') {
             i += 1;
             let start = i;
             while i < len && (chars[i].is_alphanumeric() || chars[i] == '_') {

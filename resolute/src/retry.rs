@@ -133,6 +133,6 @@ fn is_transient_pg_code(code: &str) -> bool {
         // Class 57 — Operator Intervention
         "57P01" | // admin_shutdown
         "57P02" | // crash_shutdown
-        "57P03"   // cannot_connect_now
+        "57P03" // cannot_connect_now
     )
 }
