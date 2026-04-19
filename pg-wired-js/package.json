@@ -19,7 +19,7 @@
     }
   },
   "files": ["index.js", "index.d.ts", "lib/", "README.md"],
-  "license": "MIT",
+  "license": "(MIT OR Apache-2.0)",
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "engines": {

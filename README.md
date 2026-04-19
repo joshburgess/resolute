@@ -105,4 +105,4 @@ See [`resolute/README.md`](resolute/README.md) for the full API guide with examp
 
 ## License
 
-MIT
+Dual licensed under [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT).

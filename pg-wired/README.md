@@ -43,4 +43,4 @@ Most applications will want the typed query surface in
 
 ## License
 
-MIT. See the [workspace root](../README.md) for the broader project.
+Dual licensed under [Apache 2.0](../LICENSE-APACHE) or [MIT](../LICENSE-MIT). See the [workspace root](../README.md) for the broader project.
