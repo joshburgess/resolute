@@ -39,6 +39,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Who Resolute is For
+
+Resolute is for you if:
+
+- You have used sqlx and like its workflow and general selling points: compile-time checked queries against a live database, offline cache for CI, derive-driven `FromRow`. You do not want to give any of that up.
+- You only target PostgreSQL. You are not looking for a cross-database abstraction and you do not want the lowest-common-denominator API that comes with one. You would rather have first-class support for PostgreSQL features (LISTEN/NOTIFY, advisory locks, COPY, composites, domains, ranges, integer-backed enums) than portability to MySQL or SQLite.
+- You want a more flexible, more convenient API than sqlx offers: named parameters that survive dollar-quoting and casts, an `Executor` trait that takes `&self` so generic helpers compose, an `atomic()` method that dispatches `BEGIN` or `SAVEPOINT` based on the receiver so transactional helpers nest without knowing the caller's context, and richer `FromRow` attributes. See "Why Resolute" below for the full list.
+
+If that sounds like you, keep reading.
+
 ## Why Resolute
 
 **Owns the full stack.** Most Rust database libraries build on top of tokio-postgres or a shared protocol layer. Resolute implements the PostgreSQL wire protocol from scratch (`pg-wired`), the connection pool from scratch (`pg-pool`), and the typed query layer on top. This means fewer transitive dependencies, fewer abstraction layers, and full control over performance.
