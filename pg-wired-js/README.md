@@ -72,7 +72,7 @@ If no OIDs are supplied, each value is inferred (bigint → int8, number → flo
 
 ### Escape hatches
 
-- `conn.queryRaw(sql, params, oids, paramFormats, resultFormats)` returns raw cell buffers. Use for types we don't decode natively.
+- `conn.queryRaw(sql, params, oids, paramFormats, resultFormats)` returns raw cell buffers. Use for types the library does not decode natively.
 - `conn.simpleQuery(sql)` uses the simple-query protocol (always text). Useful for DDL and multi-statement scripts.
 - `conn.queryColumnar(sql, params, oids)` returns a flat `(data, offsets, nulls)` triple for minimum allocation overhead on large result sets.
 

@@ -582,3 +582,7 @@ struct Email(String);  // array_oid still inherited from String if not specified
 You can discover your custom type OIDs at runtime with `client.lookup_type_oids("mood")`.
 
 **Non-consuming Executor.** The `Executor` trait uses `&self` instead of consuming `self`. This is a deliberate departure from sqlx, enabling natural multi-query reuse in generic functions without lifetime gymnastics.
+
+## Architecture
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the internals: the `Executor` trait and its implementors, how `atomic()` dispatches `BEGIN` vs `SAVEPOINT` via monomorphisation, how the `FromRow` derive expands, the string-vs-integer `PgEnum` split, composite wire format, `PgDomain` array OID inheritance, and the `ReconnectingClient` lock-free-read path.

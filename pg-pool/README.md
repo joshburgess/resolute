@@ -47,6 +47,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 |---|---|---|
 | `wire` | yes | `Poolable` impl for `pg_wired::WireConn` plus helper constructors. |
 
+## Architecture
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the internals: the `Poolable` trait, data layout (atomics + mutexed deques), the acquire and release paths, the six lifecycle hooks, the drain protocol, and hook safety rules.
+
 ## License
 
 Dual licensed under [Apache 2.0](../LICENSE-APACHE) or [MIT](../LICENSE-MIT). See the [workspace root](../README.md) for the broader project.

@@ -42,6 +42,10 @@ Computed columns stay nullable, which means `query!` returns
 | `DATABASE_URL` | Required for live describes. `prepare`/`check` via the [`resolute-cli`](../resolute-cli) tool use the same variable. |
 | `RESOLUTE_OFFLINE` | When `true`/`1`, never dial out. Fail the build if a query hash isn't in the cache. |
 
+## Architecture
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the internals: the macro pipeline, the named-param rewriter (how it handles `::` casts, string literals, comments, and dollar quoting), live describe via pg-wired, nullability inference via `pg_attribute`, the `.sqlx/` cache format, and the generated output shape.
+
 ## License
 
 Dual licensed under [Apache 2.0](../LICENSE-APACHE) or [MIT](../LICENSE-MIT). See the [workspace root](../README.md) for the broader project.

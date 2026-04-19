@@ -101,7 +101,18 @@ pg-wired has an optional `tls` feature for rustls-based TLS connections.
 
 ## Documentation
 
-See [`resolute/README.md`](resolute/README.md) for the full API guide with examples covering named params, transactions, custom types, streaming, pipelining, COPY, retry, reconnect, pooling, migrations, and more.
+**API guide.** See [`resolute/README.md`](resolute/README.md) for the full API with examples covering named params, transactions, custom types, streaming, pipelining, COPY, retry, reconnect, pooling, migrations, and more.
+
+**Architecture.** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is the top-level tour of how the layers compose. Each crate also has its own deep-dive:
+
+- [`pg-wired/ARCHITECTURE.md`](pg-wired/ARCHITECTURE.md): wire protocol v3, statement cache, TCP coalescing, FIFO response matching, TLS, SCRAM.
+- [`pg-pool/ARCHITECTURE.md`](pg-pool/ARCHITECTURE.md): the pool engine, lifecycle hooks, drain protocol.
+- [`resolute/ARCHITECTURE.md`](resolute/ARCHITECTURE.md): `Executor` trait, `atomic()` dispatch, derives, typed client.
+- [`resolute-macros/ARCHITECTURE.md`](resolute-macros/ARCHITECTURE.md): the compile-time query validator, named-param rewriter, describe pipeline, offline cache.
+
+**Performance.** [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) explains where the speedup comes from: binary encode fast path, statement caching, TCP write coalescing, FIFO response matching, lock-free atomics. Also describes the benchmark methodology.
+
+**Roadmap.** [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## License
 

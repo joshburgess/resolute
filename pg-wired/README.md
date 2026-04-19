@@ -9,8 +9,11 @@ stack, but usable on its own when you want a bare wire client.
 - Async connection with SCRAM-SHA-256 (and `-PLUS` channel binding when
   TLS is active) and MD5 fallback.
 - Extended query protocol: Parse, Bind, Describe, Execute, Sync, Close.
-  Binary format by default for both params and results.
-- Per-connection statement cache. Parse once, Bind + Execute on reuse.
+  Format-agnostic at the type level: callers supply pre-encoded bytes
+  with a per-column `FormatCode` of Text or Binary. Resolute drives this
+  in binary.
+- Per-connection statement cache (pseudo-LRU, 256 entries). Parse once,
+  Bind + Execute on reuse.
 - Pipelining with writer coalescing and FIFO response matching so
   concurrent tasks share one TCP connection efficiently.
 - LISTEN/NOTIFY, COPY IN/OUT, query cancellation via `CancelToken`,
@@ -40,6 +43,10 @@ Most applications will want the typed query surface in
 | feature | default | enables |
 |---|---|---|
 | `tls` | no | rustls-backed TLS negotiation (`sslmode=prefer` / `require`) with optional mTLS. |
+
+## Architecture
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the internals: the reader/writer task split, message coalescing, FIFO response matching, the statement cache, TLS negotiation, and SCRAM.
 
 ## License
 

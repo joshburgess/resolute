@@ -16,7 +16,7 @@ README says MIT but no LICENSE file exists.
 ## Close remaining gaps with sqlx
 
 ### 4. `#[sqlx(transparent)]`-style in query macros (DONE)
-Documented as intentional design decision. Our integer enum requires explicit discriminants. Implicit discriminants are fragile (reordering variants silently changes database values). Documented in `resolute/README.md` under "Design decisions" and in the integer-backed enums section.
+Documented as intentional design decision. Resolute's integer enum requires explicit discriminants. Implicit discriminants are fragile (reordering variants silently changes database values). Documented in `resolute/README.md` under "Design decisions" and in the integer-backed enums section.
 
 ### 5. Compile-fail tests (DONE, 13 tests)
 - FromRow: skip+rename, skip+default, flatten+json, flatten+try_from, json+try_from, on enum, on tuple struct
@@ -28,7 +28,7 @@ Documented in `resolute/README.md` under "Design decisions": resolute is Postgre
 
 ---
 
-## Deepen what we already have
+## Deepen existing features
 
 ### 7. Transaction isolation levels (DONE)
 `IsolationLevel` enum with `ReadCommitted`, `RepeatableRead`, `Serializable`. Usage: `client.begin_with(IsolationLevel::Serializable)`.
