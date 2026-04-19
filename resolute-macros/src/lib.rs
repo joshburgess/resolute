@@ -825,7 +825,11 @@ pub(crate) fn hash_sql(sql: &str) -> u64 {
 }
 
 /// Rewrite `:name` named params to `$N` positional params.
-/// Returns (rewritten_sql, ordered_param_names).
+///
+/// Honours PostgreSQL token boundaries so `:name` tokens inside comments,
+/// string literals, quoted identifiers, and dollar-quoted bodies are left
+/// alone. Duplicate names reuse the same positional index. Returns
+/// `(rewritten_sql, ordered_param_names)`.
 fn rewrite_named_params(sql: &str) -> (String, Vec<String>) {
     let mut result = String::with_capacity(sql.len());
     let mut names: Vec<String> = Vec::new();
@@ -835,7 +839,34 @@ fn rewrite_named_params(sql: &str) -> (String, Vec<String>) {
     let mut i = 0;
 
     while i < len {
-        // Skip string literals.
+        // -- line comment: passes through verbatim, but any `:name` inside
+        // is treated as text, not a placeholder.
+        if i + 1 < len && chars[i] == '-' && chars[i + 1] == '-' {
+            while i < len && chars[i] != '\n' {
+                result.push(chars[i]);
+                i += 1;
+            }
+            continue;
+        }
+
+        // /* block comment */: same deal, pass through unchanged.
+        if i + 1 < len && chars[i] == '/' && chars[i + 1] == '*' {
+            result.push('/');
+            result.push('*');
+            i += 2;
+            while i + 1 < len && !(chars[i] == '*' && chars[i + 1] == '/') {
+                result.push(chars[i]);
+                i += 1;
+            }
+            if i + 1 < len {
+                result.push('*');
+                result.push('/');
+                i += 2;
+            }
+            continue;
+        }
+
+        // 'string literal' with '' escaping.
         if chars[i] == '\'' {
             result.push('\'');
             i += 1;
@@ -854,6 +885,66 @@ fn rewrite_named_params(sql: &str) -> (String, Vec<String>) {
                 }
             }
             continue;
+        }
+
+        // "quoted identifier": skip contents.
+        if chars[i] == '"' {
+            result.push('"');
+            i += 1;
+            while i < len {
+                result.push(chars[i]);
+                if chars[i] == '"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        // $tag$dollar-quoted body$tag$: skip contents (also handles $$...$$).
+        if chars[i] == '$' {
+            let tag_start = i;
+            i += 1;
+            while i < len && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            if i < len && chars[i] == '$' {
+                let tag: String = chars[tag_start..=i].iter().collect();
+                for c in tag.chars() {
+                    result.push(c);
+                }
+                i += 1;
+                let tag_chars: Vec<char> = tag.chars().collect();
+                let tag_len = tag_chars.len();
+                loop {
+                    if i >= len {
+                        break;
+                    }
+                    if chars[i] == '$' && i + tag_len <= len {
+                        let matches = chars[i..i + tag_len]
+                            .iter()
+                            .zip(tag_chars.iter())
+                            .all(|(a, b)| a == b);
+                        if matches {
+                            for c in &tag_chars {
+                                result.push(*c);
+                            }
+                            i += tag_len;
+                            break;
+                        }
+                    }
+                    result.push(chars[i]);
+                    i += 1;
+                }
+                continue;
+            } else {
+                // Bare `$` followed by non-tag (e.g. `$1` positional param).
+                i = tag_start;
+                result.push(chars[i]);
+                i += 1;
+                continue;
+            }
         }
 
         // :: cast: pass through.
@@ -1052,5 +1143,153 @@ mod tests {
     #[test]
     fn test_parse_uri_invalid() {
         assert!(parse_pg_uri("mysql://user:pass@host/db").is_none());
+    }
+
+    #[test]
+    fn test_parse_uri_postgresql_scheme() {
+        let parsed = parse_pg_uri("postgresql://user:pass@host:5433/mydb").unwrap();
+        assert_eq!(parsed.0, "user");
+        assert_eq!(parsed.3, 5433);
+        assert_eq!(parsed.4, "mydb");
+    }
+
+    #[test]
+    fn test_parse_uri_empty_password() {
+        let parsed = parse_pg_uri("postgres://user@host/db").unwrap();
+        assert_eq!(parsed.0, "user");
+        assert_eq!(parsed.1, "");
+        assert_eq!(parsed.2, "host");
+    }
+
+    #[test]
+    fn test_parse_uri_unset_database_defaults_to_postgres() {
+        let parsed = parse_pg_uri("postgres://user:pass@host").unwrap();
+        assert_eq!(parsed.4, "postgres");
+    }
+
+    // -- rewrite_named_params: comments and dollar quotes --
+
+    #[test]
+    fn test_named_params_line_comment_skipped() {
+        let (sql, names) = rewrite_named_params("SELECT :id -- :bogus\nFROM t");
+        assert_eq!(sql, "SELECT $1 -- :bogus\nFROM t");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_block_comment_skipped() {
+        let (sql, names) = rewrite_named_params("SELECT :id /* :bogus */ FROM t");
+        assert_eq!(sql, "SELECT $1 /* :bogus */ FROM t");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_dollar_quoted_body_skipped() {
+        let (sql, names) = rewrite_named_params("SELECT $$ :ignored $$ WHERE id = :id");
+        assert_eq!(sql, "SELECT $$ :ignored $$ WHERE id = $1");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_tagged_dollar_quote_skipped() {
+        let (sql, names) = rewrite_named_params("SELECT $tag$ :ignored $tag$ WHERE id = :id");
+        assert_eq!(sql, "SELECT $tag$ :ignored $tag$ WHERE id = $1");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_quoted_identifier_skipped() {
+        let (sql, names) = rewrite_named_params(r#"SELECT ":col" FROM t WHERE id = :id"#);
+        assert_eq!(sql, r#"SELECT ":col" FROM t WHERE id = $1"#);
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_positional_dollar_param_passthrough() {
+        let (sql, names) = rewrite_named_params("SELECT $1, :id FROM t");
+        assert_eq!(sql, "SELECT $1, $1 FROM t");
+        assert_eq!(names, vec!["id"]);
+    }
+
+    #[test]
+    fn test_named_params_escaped_single_quote_inside_literal() {
+        let (sql, names) = rewrite_named_params("SELECT 'it''s :nothing' , :real");
+        assert_eq!(sql, "SELECT 'it''s :nothing' , $1");
+        assert_eq!(names, vec!["real"]);
+    }
+
+    // -- hash_sql --
+
+    #[test]
+    fn test_hash_sql_stable() {
+        let sql = "SELECT id FROM t WHERE x = $1";
+        assert_eq!(hash_sql(sql), hash_sql(sql));
+    }
+
+    #[test]
+    fn test_hash_sql_differs_by_content() {
+        assert_ne!(hash_sql("SELECT 1"), hash_sql("SELECT 2"));
+    }
+
+    #[test]
+    fn test_hash_sql_empty() {
+        // FNV-1a offset basis for the empty input.
+        assert_eq!(hash_sql(""), 0xcbf29ce484222325);
+    }
+
+    // -- cache round-trip --
+
+    #[test]
+    fn test_cache_roundtrip() {
+        let tmp = std::env::temp_dir().join(format!(
+            "resolute-macros-cache-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("query.json");
+
+        let entry = cache::CacheEntry {
+            sql: "SELECT 1::int4 AS n".into(),
+            hash: 0xdeadbeef_cafebabe,
+            param_oids: vec![23, 25],
+            columns: vec![cache::CachedColumn {
+                name: "n".into(),
+                type_oid: 23,
+                nullable: true,
+            }],
+        };
+
+        let json = serde_json::to_string_pretty(&entry).unwrap();
+        std::fs::write(&path, &json).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let decoded: cache::CacheEntry = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(decoded.sql, entry.sql);
+        assert_eq!(decoded.hash, entry.hash);
+        assert_eq!(decoded.param_oids, entry.param_oids);
+        assert_eq!(decoded.columns.len(), 1);
+        assert_eq!(decoded.columns[0].name, "n");
+        assert_eq!(decoded.columns[0].type_oid, 23);
+        assert!(decoded.columns[0].nullable);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn test_cache_entry_missing_nullable_defaults_to_false() {
+        // Old cache files written before the `nullable` field existed must
+        // still deserialize — the field is `#[serde(default)]`.
+        let legacy = r#"{
+            "sql": "SELECT 1",
+            "hash": 1,
+            "param_oids": [],
+            "columns": [{"name": "n", "type_oid": 23}]
+        }"#;
+        let entry: cache::CacheEntry = serde_json::from_str(legacy).unwrap();
+        assert_eq!(entry.columns.len(), 1);
+        assert!(!entry.columns[0].nullable);
     }
 }
