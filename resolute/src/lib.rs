@@ -37,7 +37,7 @@
 //! // Runtime:
 //! client.query_named(
 //!     "SELECT :id::int4 AS n",
-//!     &[("id", &42i32 as &dyn SqlParam)],
+//!     &[("id", &42i32)],
 //! ).await?;
 //! ```
 //!
@@ -142,9 +142,12 @@ pub mod migrate;
 pub mod named_params;
 pub mod newtypes;
 mod oid;
+#[macro_use]
+mod params_macro;
 pub mod pg_type;
 mod pooled;
 mod query;
+mod query_builder;
 pub mod range;
 pub mod reconnect;
 pub mod retry;
@@ -167,6 +170,7 @@ pub use pooled::{PooledTypedClient, TypedPool};
 pub use query::{
     parse_connection_string, Client, IsolationLevel, PipelineResult, RowStream, Transaction,
 };
+pub use query_builder::{sql, QueryBuilder};
 pub use range::PgRange;
 /// Attribute macro for database-backed tests. Auto-creates a temp DB,
 /// runs migrations, injects a `Client`, and drops the DB on completion.

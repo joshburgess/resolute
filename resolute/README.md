@@ -51,28 +51,89 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Use `:name` instead of `$1, $2, ...`. Duplicates reuse the same positional slot. `::` casts, string literals, and comments are handled correctly.
 
 ```rust
-// Compile-time macro:
+// Compile-time macro (recommended when the SQL is static):
 let row = query!(
     "SELECT * FROM users WHERE org = :org AND id = :id",
     org = org_id,
     id = user_id,
 ).fetch_one(&client).await?;
 
-// Runtime API:
-let rows = client.query_named(
-    "SELECT * FROM users WHERE org = :org AND id = :id",
-    &[
-        ("org", &org_id as &dyn SqlParam),
-        ("id", &user_id as &dyn SqlParam),
-    ],
-).await?;
-
 // Duplicates: :id appears twice, bound once:
-let rows = client.query_named(
+let row = query!(
     "SELECT * FROM t WHERE id = :id OR parent_id = :id",
-    &[("id", &42i32 as &dyn SqlParam)],
-).await?;
+    id = 42i32,
+).fetch_one(&client).await?;
 ```
+
+For runtime queries (dynamic SQL, no compile-time check), see [Runtime query styles](#runtime-query-styles) below.
+
+## Runtime query styles
+
+Three equivalent ways to run a query at runtime against an `&impl Executor` (`Client`, `Transaction`, or pool handle). Pick whichever reads best for your call site.
+
+### 1. Fluent builder
+
+```rust
+use resolute::sql;
+
+// Positional:
+let rows = sql("SELECT * FROM users WHERE org = $1 AND id = $2")
+    .bind(org_id)
+    .bind(user_id)
+    .fetch_all(&client)
+    .await?;
+
+// Named:
+let rows = sql("SELECT * FROM users WHERE org = :org AND id = :id")
+    .bind_named("org", org_id)
+    .bind_named("id", user_id)
+    .fetch_all(&client)
+    .await?;
+
+// Other terminators: .fetch_one, .fetch_opt, .execute
+```
+
+`bind` and `bind_named` take values by value (`T: SqlParam + Send + 'static`). Values that do not implement `SqlParam` fail to compile. Mixing `bind` and `bind_named` on the same chain panics: pick one style per query.
+
+### 2. `params!` / `params_named!` macros
+
+Slice-style with the element coercions written out explicitly by the macro. Useful when inference is ambiguous (generic code, empty slices, values mixed with `Option::None`), or for readers who prefer the intent spelled out.
+
+```rust
+use resolute::{params, params_named};
+
+let rows = client
+    .query("SELECT * FROM users WHERE org = $1 AND id = $2", params![org_id, user_id])
+    .await?;
+
+let rows = client
+    .query_named(
+        "SELECT * FROM users WHERE org = :org AND id = :id",
+        params_named![("org", org_id), ("id", user_id)],
+    )
+    .await?;
+```
+
+Values that do not implement `SqlParam` fail to compile. Values are borrowed, not moved.
+
+### 3. Raw slice
+
+Fully explicit. Useful when you already have the values in a slice or want no macro / builder indirection.
+
+```rust
+let rows = client
+    .query("SELECT * FROM users WHERE org = $1 AND id = $2", &[&org_id, &user_id])
+    .await?;
+
+let rows = client
+    .query_named(
+        "SELECT * FROM users WHERE org = :org AND id = :id",
+        &[("org", &org_id), ("id", &user_id)],
+    )
+    .await?;
+```
+
+Rust coerces `&T` to `&dyn SqlParam` at the slice-literal site when the target type is known from the function signature, so the explicit `as &dyn SqlParam` is not required in either form. You can still write it out for clarity when inference is ambiguous (generic code, empty slices, `Option::None` in the mix).
 
 ## Query type overrides
 
@@ -357,7 +418,7 @@ let client = pool.get().await?;
 let rows = client.query("SELECT 1::int4 AS n", &[]).await?;
 // Named params work through the pool too:
 let user_id: i32 = 1;
-let rows = client.query_named("SELECT :id::int4", &[("id", &user_id as &dyn SqlParam)]).await?;
+let rows = client.query_named("SELECT :id::int4", &[("id", &user_id)]).await?;
 ```
 
 ## Pool lifecycle hooks
