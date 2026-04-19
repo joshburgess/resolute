@@ -28,7 +28,7 @@ async fn test_query_macro_select_literal() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].answer, 42);
+    assert_eq!(rows[0].answer, Some(42));
 }
 
 #[tokio::test]
@@ -52,7 +52,7 @@ async fn test_query_macro_multiple_params() {
         .fetch_one(&client)
         .await
         .unwrap();
-    assert_eq!(row.sum, 7);
+    assert_eq!(row.sum, Some(7));
 }
 
 #[tokio::test]
@@ -98,10 +98,10 @@ async fn test_query_macro_multiple_columns() {
             .fetch_one(&client)
             .await
             .unwrap();
-    assert_eq!(row.a, 1);
-    assert_eq!(row.b, "hello");
-    assert!(row.c);
-    assert!((row.d - 3.14).abs() < 1e-10);
+    assert_eq!(row.a, Some(1));
+    assert_eq!(row.b.as_deref(), Some("hello"));
+    assert_eq!(row.c, Some(true));
+    assert!((row.d.unwrap() - 3.14).abs() < 1e-10);
 }
 
 #[tokio::test]
@@ -124,7 +124,7 @@ async fn test_query_macro_bigint() {
         .fetch_one(&client)
         .await
         .unwrap();
-    assert_eq!(row.n, 9999999999i64);
+    assert_eq!(row.n, Some(9999999999i64));
 }
 
 // ---------------------------------------------------------------------------

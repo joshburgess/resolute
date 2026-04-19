@@ -620,6 +620,7 @@ impl AsyncConn {
     ///
     /// Same rules apply to `result_formats` for output columns (empty → all
     /// text; single code → applies to all columns; per-column list otherwise).
+    #[allow(clippy::too_many_arguments)]
     pub async fn query_with_formats(
         &self,
         sql: &str,

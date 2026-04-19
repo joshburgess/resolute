@@ -411,7 +411,7 @@ mod tests {
 
     #[test]
     fn test_parse_ready_for_query() {
-        let mut buf = make_message(b'Z', &[b'I']);
+        let mut buf = make_message(b'Z', b"I");
         let msg = parse_message(&mut buf).unwrap().unwrap();
         assert!(matches!(msg, BackendMsg::ReadyForQuery { status: b'I' }));
     }
@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     fn test_parse_command_complete() {
-        let mut body = b"SELECT 42\0".to_vec();
+        let body = b"SELECT 42\0".to_vec();
         let mut buf = make_message(b'C', &body);
         let msg = parse_message(&mut buf).unwrap().unwrap();
         if let BackendMsg::CommandComplete { tag } = msg {

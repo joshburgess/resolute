@@ -150,7 +150,7 @@ fn rows_to_columnar(rows: Vec<Vec<Option<Vec<u8>>>>, cols: usize) -> (String, Ve
         .sum();
     let mut data_bytes = Vec::<u8>::with_capacity(total_bytes);
     let mut offsets = Vec::<u32>::with_capacity(cell_count + 1);
-    let mut nulls = vec![0u8; (cell_count + 7) / 8];
+    let mut nulls = vec![0u8; cell_count.div_ceil(8)];
     offsets.push(0);
     let mut cursor: u32 = 0;
     let mut idx: usize = 0;
@@ -461,7 +461,7 @@ fn pipeline_response_to_query_result(resp: PipelineResponse) -> QueryResult {
     }
 }
 
-fn borrow_params<'a>(params: &'a [Option<Buffer>]) -> Vec<Option<&'a [u8]>> {
+fn borrow_params(params: &[Option<Buffer>]) -> Vec<Option<&[u8]>> {
     params
         .iter()
         .map(|opt| opt.as_ref().map(|b| b.as_ref()))
@@ -836,6 +836,12 @@ impl Pipeline {
     #[napi]
     pub fn len(&self) -> u32 {
         self.queued.lock().map(|q| q.len() as u32).unwrap_or(0)
+    }
+
+    /// True when no queries are queued.
+    #[napi]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Submit all queued queries concurrently on the shared connection.

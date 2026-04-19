@@ -1767,6 +1767,7 @@ async fn test_from_row_json() {
 }
 
 #[derive(resolute::FromRow, Debug)]
+#[allow(dead_code)]
 struct WithJsonOption {
     id: i32,
     #[from_row(json)]
@@ -1833,6 +1834,7 @@ async fn test_from_row_rename_and_default() {
 // ---------------------------------------------------------------------------
 
 #[derive(resolute::FromRow, Debug)]
+#[allow(dead_code)]
 struct WithTryFromOption {
     #[from_row(try_from = "i32")]
     id: Option<NonZeroId>,
@@ -4195,7 +4197,9 @@ async fn test_advisory_xact_lock() {
     let client = connect().await;
     let txn = client.begin().await.unwrap();
     // xact lock acquired within transaction.
-    txn.client.advisory_xact_lock(999_996).await.unwrap();
+    txn.query("SELECT pg_advisory_xact_lock($1::int8)", &[&999_996_i64])
+        .await
+        .unwrap();
     txn.commit().await.unwrap();
     // Lock should be auto-released after commit.
 }
@@ -4204,7 +4208,14 @@ async fn test_advisory_xact_lock() {
 async fn test_try_advisory_xact_lock() {
     let client = connect().await;
     let txn = client.begin().await.unwrap();
-    let acquired = txn.client.try_advisory_xact_lock(999_995).await.unwrap();
+    let rows = txn
+        .query(
+            "SELECT pg_try_advisory_xact_lock($1::int8) AS acquired",
+            &[&999_995_i64],
+        )
+        .await
+        .unwrap();
+    let acquired: bool = rows[0].get(0).unwrap();
     assert!(acquired);
     txn.commit().await.unwrap();
 }
@@ -4272,7 +4283,7 @@ async fn test_atomic_rollback_on_error() {
 
 #[tokio::test]
 async fn test_pg_listener_listen_notify() {
-    use resolute::listener::PgListener;
+    use resolute::PgListener;
     let mut listener = PgListener::connect(ADDR, USER, PASS, DB).await.unwrap();
     listener.listen("test_channel_1").await.unwrap();
 
@@ -4295,7 +4306,7 @@ async fn test_pg_listener_listen_notify() {
 
 #[tokio::test]
 async fn test_pg_listener_unlisten() {
-    use resolute::listener::PgListener;
+    use resolute::PgListener;
     let mut listener = PgListener::connect(ADDR, USER, PASS, DB).await.unwrap();
     listener.listen("test_channel_2").await.unwrap();
     assert_eq!(listener.channels().len(), 1);

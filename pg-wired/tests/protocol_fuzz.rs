@@ -16,29 +16,13 @@ fn make_message(tag: u8, body: &[u8]) -> BytesMut {
 }
 
 /// All known PostgreSQL backend message tags.
-const KNOWN_TAGS: &[u8] = &[
-    b'R', // Auth
-    b'S', // ParameterStatus
-    b'K', // BackendKeyData
-    b'Z', // ReadyForQuery
-    b'1', // ParseComplete
-    b'2', // BindComplete
-    b'3', // CloseComplete
-    b'n', // NoData
-    b'C', // CommandComplete
-    b'D', // DataRow
-    b'T', // RowDescription
-    b'E', // ErrorResponse
-    b'N', // NoticeResponse
-    b'I', // EmptyQueryResponse
-    b'A', // NotificationResponse
-    b't', // ParameterDescription
-    b's', // PortalSuspended
-    b'G', // CopyInResponse
-    b'H', // CopyOutResponse
-    b'd', // CopyData
-    b'c', // CopyDone
-];
+/// Letters: R Auth, S ParameterStatus, K BackendKeyData, Z ReadyForQuery,
+/// 1 ParseComplete, 2 BindComplete, 3 CloseComplete, n NoData,
+/// C CommandComplete, D DataRow, T RowDescription, E ErrorResponse,
+/// N NoticeResponse, I EmptyQueryResponse, A NotificationResponse,
+/// t ParameterDescription, s PortalSuspended, G CopyInResponse,
+/// H CopyOutResponse, d CopyData, c CopyDone.
+const KNOWN_TAGS: &[u8] = b"RSKZ123nCDTENIAtsGHdc";
 
 proptest! {
     /// Arbitrary bytes should never cause a panic in parse_message.

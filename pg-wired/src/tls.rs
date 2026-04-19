@@ -9,6 +9,7 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 
 /// A stream that is either plain TCP or TLS-wrapped TCP.
+#[allow(clippy::large_enum_variant)]
 pub enum MaybeTlsStream {
     Plain(TcpStream),
     #[cfg(feature = "tls")]
@@ -16,21 +17,16 @@ pub enum MaybeTlsStream {
 }
 
 /// How to handle TLS negotiation with the server.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TlsMode {
     /// Do not send SSLRequest. Use plain TCP.
     Disable,
     /// Send SSLRequest. Upgrade if the server agrees (`S`), fall back to
     /// plain TCP if the server refuses (`N`). Default.
+    #[default]
     Prefer,
     /// Send SSLRequest. Error out if the server refuses.
     Require,
-}
-
-impl Default for TlsMode {
-    fn default() -> Self {
-        TlsMode::Prefer
-    }
 }
 
 impl AsyncRead for MaybeTlsStream {
@@ -90,21 +86,12 @@ impl MaybeTlsStream {
 
 /// TLS configuration for PostgreSQL connections.
 #[cfg(feature = "tls")]
+#[derive(Default)]
 pub struct TlsConfig {
     /// Custom root CA certificates. If empty, uses system root CAs.
     pub root_certs: Vec<Vec<u8>>,
     /// Client certificate and private key for mTLS (optional).
     pub client_cert: Option<(Vec<Vec<u8>>, Vec<u8>)>,
-}
-
-#[cfg(feature = "tls")]
-impl Default for TlsConfig {
-    fn default() -> Self {
-        Self {
-            root_certs: Vec::new(),
-            client_cert: None,
-        }
-    }
 }
 
 /// Negotiate TLS with default configuration (system root CAs, no client cert).

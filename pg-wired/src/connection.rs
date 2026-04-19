@@ -25,6 +25,7 @@ const RECV_BUF_SIZE: usize = 32 * 1024; // 32KB recv buffer
 impl WireConn {
     /// Choose the best SCRAM mechanism based on TLS state and server support.
     /// Returns (ChannelBinding, mechanism_name_bytes).
+    #[allow(clippy::result_large_err)]
     fn choose_scram_mechanism(
         &self,
         mechanisms: &[String],
