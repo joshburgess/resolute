@@ -1252,7 +1252,10 @@ mod tests {
     #[test]
     fn to_format_codes_accepts_valid() {
         let out = to_format_codes(&[0, 1, 0]).unwrap();
-        assert_eq!(out, vec![FormatCode::Text, FormatCode::Binary, FormatCode::Text]);
+        assert_eq!(
+            out,
+            vec![FormatCode::Text, FormatCode::Binary, FormatCode::Text]
+        );
         assert!(to_format_codes(&[]).unwrap().is_empty());
     }
 
@@ -1400,18 +1403,14 @@ mod tests {
     #[test]
     fn map_err_protocol_and_closed_kinds() {
         let err = map_err(PgWireError::Protocol("boom".into()));
-        let v: serde_json::Value = serde_json::from_str(
-            err.reason.strip_prefix("pg-wired-error:").unwrap(),
-        )
-        .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(err.reason.strip_prefix("pg-wired-error:").unwrap()).unwrap();
         assert_eq!(v["kind"], "protocol");
         assert_eq!(v["message"], "boom");
 
         let err = map_err(PgWireError::ConnectionClosed);
-        let v: serde_json::Value = serde_json::from_str(
-            err.reason.strip_prefix("pg-wired-error:").unwrap(),
-        )
-        .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(err.reason.strip_prefix("pg-wired-error:").unwrap()).unwrap();
         assert_eq!(v["kind"], "closed");
     }
 
@@ -1419,10 +1418,8 @@ mod tests {
     fn map_err_io_kind() {
         let io = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "peer reset");
         let err = map_err(PgWireError::Io(io));
-        let v: serde_json::Value = serde_json::from_str(
-            err.reason.strip_prefix("pg-wired-error:").unwrap(),
-        )
-        .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(err.reason.strip_prefix("pg-wired-error:").unwrap()).unwrap();
         assert_eq!(v["kind"], "io");
         assert!(v["message"].as_str().unwrap().contains("peer reset"));
     }

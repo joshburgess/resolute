@@ -71,8 +71,8 @@ fn test_migrate_run_status_revert() {
     let migrations_dir = dir.path().join("migrations");
     std::fs::create_dir_all(&migrations_dir).unwrap();
 
-    // Create a migration manually.
-    let ts = chrono::Utc::now().format("%Y%m%d%H%M%S");
+    // Create a migration manually. Any 14-digit numeric prefix works.
+    let ts = "20240101000000";
     std::fs::write(
         migrations_dir.join(format!("{ts}_test_table.up.sql")),
         "CREATE TABLE IF NOT EXISTS __resolute_cli_test (id int PRIMARY KEY);",

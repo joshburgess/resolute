@@ -130,6 +130,7 @@
 //! - Statement caching: Parse once, Bind+Execute on reuse
 //! - Generic array encode/decode for all types via `Vec<T>`
 
+pub mod admin;
 mod checked;
 mod decode;
 mod encode;
