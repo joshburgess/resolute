@@ -39,7 +39,7 @@ Most applications will want the typed query surface in
 
 | feature | default | enables |
 |---|---|---|
-| `tls` | no | rustls-backed TLS negotiation (`sslmode=prefer|require`) with optional mTLS. |
+| `tls` | no | rustls-backed TLS negotiation (`sslmode=prefer` / `require`) with optional mTLS. |
 
 ## License
 
