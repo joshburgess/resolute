@@ -79,7 +79,7 @@ impl Client {
         tracing::info!(
             addr = addr,
             database = database,
-            pid = wire.pid,
+            pid = wire.pid(),
             "connected"
         );
         Ok(Self::new(wire))
@@ -778,11 +778,7 @@ impl Client {
     /// client.query("SELECT pg_sleep(60)", &[]).await; // cancelled after 5s
     /// ```
     pub fn cancel_token(&self) -> pg_wired::CancelToken {
-        pg_wired::CancelToken {
-            addr: self.conn.addr.clone(),
-            pid: self.conn.backend_pid,
-            secret: self.conn.backend_secret,
-        }
+        self.conn.cancel_token()
     }
 
     /// Ping the database to verify the connection is healthy.
@@ -897,12 +893,11 @@ fn resolve_named_params<'a>(
 ///     .run()
 ///     .await?;
 /// ```
+#[must_use = "Pipeline does nothing until .run() is awaited"]
 pub struct Pipeline<'a> {
     client: &'a Client,
-    /// Encoded messages for all queries in sequence.
-    buf: BytesMut,
-    /// Number of queries/executions in the pipeline.
-    count: usize,
+    /// One encoded wire message buffer per queued query.
+    buffers: Vec<BytesMut>,
 }
 
 /// Result from a single pipeline step.
@@ -942,6 +937,7 @@ impl<'a> Pipeline<'a> {
             .map(|v| v.as_ref().map(|b| b.as_ref()))
             .collect();
 
+        let mut buf = BytesMut::with_capacity(256);
         if needs_parse {
             frontend::encode_message(
                 &FrontendMsg::Parse {
@@ -949,7 +945,7 @@ impl<'a> Pipeline<'a> {
                     sql: sql.as_bytes(),
                     param_oids: &param_oids,
                 },
-                &mut self.buf,
+                &mut buf,
             );
         }
         frontend::encode_message(
@@ -960,70 +956,54 @@ impl<'a> Pipeline<'a> {
                 params: &param_refs,
                 result_formats: &result_formats,
             },
-            &mut self.buf,
+            &mut buf,
         );
         frontend::encode_message(
             &FrontendMsg::Describe {
                 kind: b'P',
                 name: b"",
             },
-            &mut self.buf,
+            &mut buf,
         );
         frontend::encode_message(
             &FrontendMsg::Execute {
                 portal: b"",
                 max_rows: 0,
             },
-            &mut self.buf,
+            &mut buf,
         );
-        frontend::encode_message(&FrontendMsg::Sync, &mut self.buf);
-        self.count += 1;
+        frontend::encode_message(&FrontendMsg::Sync, &mut buf);
+        self.buffers.push(buf);
     }
 
     /// Execute all queries in one round-trip and return results.
+    ///
+    /// Each queued query was encoded into its own message buffer. All
+    /// buffers are submitted to the writer back-to-back before any response
+    /// is awaited, so the writer's batch coalescer writes them in a single
+    /// syscall. The server pipelines N `ReadyForQuery` responses; the reader
+    /// dispatches them to the N pending oneshots in order.
     pub async fn run(self) -> Result<Vec<PipelineResult>, TypedError> {
-        if self.count == 0 {
+        if self.buffers.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Submit all messages at once. Each Sync triggers a ReadyForQuery,
-        // so we get N responses. We use Rows collector for the first one
-        // and then submit the rest.
-        // Actually, with the current AsyncConn, each submit() waits for one
-        // ReadyForQuery. So we need to submit N separate requests.
-        // But we want ONE write. The trick: put all messages in one buffer
-        // and submit N PipelineRequests, the writer coalesces them.
+        let items: Vec<(BytesMut, ResponseCollector)> = self
+            .buffers
+            .into_iter()
+            .map(|b| (b, ResponseCollector::Rows))
+            .collect();
 
-        let mut results = Vec::with_capacity(self.count);
-        let mut remaining = self.buf;
-
-        // Split the buffer isn't practical since messages are variable-length.
-        // Instead: submit the entire buffer as one write, with N pending responses.
-        // We need direct access to the request channel for this.
-
-        // Simpler approach: submit the whole buffer with the first request,
-        // and submit empty buffers for the rest. The reader will process
-        // N ReadyForQuery responses in order.
-        for i in 0..self.count {
-            let msg_buf = if i == 0 {
-                std::mem::take(&mut remaining)
-            } else {
-                BytesMut::new()
-            };
-
-            let resp = self
-                .client
-                .conn
-                .submit(msg_buf, ResponseCollector::Rows)
-                .await?;
-            match resp {
+        let responses = self.client.conn.submit_batch(items).await?;
+        let mut results = Vec::with_capacity(responses.len());
+        for resp in responses {
+            match resp? {
                 PipelineResponse::Rows {
                     fields,
                     rows,
                     command_tag,
                 } => {
                     if rows.is_empty() && !command_tag.is_empty() {
-                        // Execute result (INSERT/UPDATE/DELETE).
                         results.push(PipelineResult::Execute(parse_row_count(&command_tag)));
                     } else {
                         let columns: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
@@ -1063,8 +1043,7 @@ impl Client {
     pub fn pipeline(&self) -> Pipeline<'_> {
         Pipeline {
             client: self,
-            buf: BytesMut::with_capacity(1024),
-            count: 0,
+            buffers: Vec::new(),
         }
     }
 }
