@@ -11,6 +11,8 @@ homepage.workspace = true
 readme = "README.md"
 keywords = ["postgres", "postgresql", "sql", "database", "async"]
 categories = ["database", "asynchronous"]
+# IMPROVEMENTS.md is an internal dev log; not useful to crates.io consumers.
+exclude = ["IMPROVEMENTS.md"]
 
 [package.metadata.docs.rs]
 all-features = true
