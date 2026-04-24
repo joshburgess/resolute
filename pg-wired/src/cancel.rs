@@ -11,15 +11,36 @@ use tokio::net::TcpStream;
 use crate::error::PgWireError;
 
 /// A token that can cancel a running query on a specific backend.
-/// Cloneable and Send — can be passed to another task or stored for timeout handling.
+/// Cloneable and Send, can be passed to another task or stored for timeout handling.
+///
+/// The backend secret is held internally and is not exposed through any
+/// accessor; obtain a token from an `AsyncConn` / `WireConn` rather than
+/// constructing one with raw fields.
 #[derive(Debug, Clone)]
 pub struct CancelToken {
-    pub addr: String,
-    pub pid: i32,
-    pub secret: i32,
+    addr: String,
+    pid: i32,
+    secret: i32,
 }
 
 impl CancelToken {
+    /// Construct a cancel token from raw parts. Intended for callers that
+    /// persisted the three values across processes; most users should get a
+    /// token from `AsyncConn::cancel_token()` instead.
+    pub fn new(addr: String, pid: i32, secret: i32) -> Self {
+        Self { addr, pid, secret }
+    }
+
+    /// Server address this token targets.
+    pub fn addr(&self) -> &str {
+        &self.addr
+    }
+
+    /// Backend process ID this token cancels.
+    pub fn pid(&self) -> i32 {
+        self.pid
+    }
+
     /// Send a cancel request to PostgreSQL.
     ///
     /// Opens a new TCP connection, sends the 16-byte CancelRequest, and closes.

@@ -1,6 +1,7 @@
 use crate::protocol::types::PgError;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum PgWireError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

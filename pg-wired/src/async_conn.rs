@@ -94,13 +94,11 @@ pub struct AsyncConn {
     stmt_cache: std::sync::Mutex<std::collections::HashMap<String, (String, u64)>>,
     stmt_counter: std::sync::atomic::AtomicU64,
     alive: Arc<std::sync::atomic::AtomicBool>,
-    /// Backend PID and secret key for cancel requests.
-    pub backend_pid: i32,
-    pub backend_secret: i32,
-    /// Server address for cancel connections.
-    pub addr: String,
+    backend_pid: i32,
+    backend_secret: i32,
+    addr: String,
     /// Channel for async notifications received during query execution.
-    /// Notifications are NOT silently dropped — they're forwarded here.
+    /// Notifications are NOT silently dropped, they're forwarded here.
     #[allow(dead_code)]
     notification_tx: mpsc::Sender<crate::protocol::types::BackendMsg>,
     notification_rx: std::sync::Mutex<Option<mpsc::Receiver<crate::protocol::types::BackendMsg>>>,
@@ -110,6 +108,21 @@ impl AsyncConn {
     /// Check if the connection is still alive (writer/reader tasks running).
     pub fn is_alive(&self) -> bool {
         self.alive.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Backend process ID assigned by the server.
+    pub fn backend_pid(&self) -> i32 {
+        self.backend_pid
+    }
+
+    /// Server address this connection is talking to.
+    pub fn addr(&self) -> &str {
+        &self.addr
+    }
+
+    /// Produce a cancel token for the running session on this connection.
+    pub fn cancel_token(&self) -> crate::cancel::CancelToken {
+        crate::cancel::CancelToken::new(self.addr.clone(), self.backend_pid, self.backend_secret)
     }
 }
 
@@ -428,6 +441,49 @@ impl AsyncConn {
                 Err(PgWireError::ConnectionClosed)
             }
         }
+    }
+
+    /// Submit a batch of requests in FIFO order. All requests are queued
+    /// before any response is awaited, so the writer task sees them together
+    /// and coalesces them into a single write() syscall. The server then
+    /// pipelines the N responses back-to-back, giving one network round-trip
+    /// for all N queries.
+    ///
+    /// Returns one `Result<PipelineResponse, PgWireError>` per input item,
+    /// in the same order. The outer `Result` fails only if queueing fails
+    /// (channel closed). Each inner `Result` reflects the per-query outcome.
+    pub async fn submit_batch(
+        &self,
+        items: Vec<(BytesMut, ResponseCollector)>,
+    ) -> Result<Vec<Result<PipelineResponse, PgWireError>>, PgWireError> {
+        let mut receivers = Vec::with_capacity(items.len());
+        for (messages, collector) in items {
+            let (response_tx, response_rx) = oneshot::channel();
+            self.request_tx
+                .send(PipelineRequest {
+                    messages,
+                    collector,
+                    response_tx,
+                })
+                .await
+                .map_err(|_| PgWireError::ConnectionClosed)?;
+            receivers.push(response_rx);
+        }
+        let mut results = Vec::with_capacity(receivers.len());
+        for rx in receivers {
+            match tokio::time::timeout(Self::REQUEST_TIMEOUT, rx).await {
+                Ok(Ok(r)) => results.push(r),
+                Ok(Err(_)) => results.push(Err(PgWireError::ConnectionClosed)),
+                Err(_) => {
+                    tracing::error!(
+                        "submit_batch request timed out after {:?}",
+                        Self::REQUEST_TIMEOUT
+                    );
+                    results.push(Err(PgWireError::ConnectionClosed));
+                }
+            }
+        }
+        Ok(results)
     }
 
     /// Send a Terminate message to the server and wait for the writer/reader
@@ -1090,7 +1146,7 @@ fn parse_copy_count(tag: &str) -> u64 {
 
 // Extension to WireConn to extract the underlying stream.
 impl WireConn {
-    pub fn into_stream(self) -> crate::tls::MaybeTlsStream {
+    pub(crate) fn into_stream(self) -> crate::tls::MaybeTlsStream {
         self.stream
     }
 }

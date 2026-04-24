@@ -246,6 +246,13 @@ fn map_err(e: PgWireError) -> Error {
             });
             Error::new(Status::GenericFailure, format!("pg-wired-error:{payload}"))
         }
+        other => {
+            let payload = serde_json::json!({
+                "kind": "other",
+                "message": other.to_string(),
+            });
+            Error::new(Status::GenericFailure, format!("pg-wired-error:{payload}"))
+        }
     }
 }
 
@@ -630,11 +637,7 @@ impl Connection {
     #[napi]
     pub fn cancel_token(&self) -> CancelToken {
         CancelToken {
-            inner: pg_wired::CancelToken {
-                addr: self.inner.addr.clone(),
-                pid: self.inner.backend_pid,
-                secret: self.inner.backend_secret,
-            },
+            inner: self.inner.cancel_token(),
         }
     }
 
@@ -666,7 +669,7 @@ impl Connection {
     /// Backend PID reported at startup.
     #[napi]
     pub fn backend_pid(&self) -> i32 {
-        self.inner.backend_pid
+        self.inner.backend_pid()
     }
 
     /// Take the notification receiver for this connection.
@@ -1121,7 +1124,7 @@ impl CancelToken {
 
     #[napi(getter)]
     pub fn pid(&self) -> i32 {
-        self.inner.pid
+        self.inner.pid()
     }
 }
 

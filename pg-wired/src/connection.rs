@@ -14,10 +14,20 @@ use crate::tls::{MaybeTlsStream, TlsMode};
 pub struct WireConn {
     pub(crate) stream: MaybeTlsStream,
     recv_buf: BytesMut,
-    pub pid: i32,
-    pub secret: i32,
+    pub(crate) pid: i32,
+    pub(crate) secret: i32,
     /// Server parameters received during startup (server_version, server_encoding, etc.).
     pub params: std::collections::HashMap<String, String>,
+}
+
+impl WireConn {
+    /// Backend process ID assigned by the server. Useful for logging and for
+    /// building a cancel token. The secret key that pairs with this PID is
+    /// intentionally not exposed; use `cancel_token()` to obtain a token that
+    /// can send a cancel request.
+    pub fn pid(&self) -> i32 {
+        self.pid
+    }
 }
 
 const RECV_BUF_SIZE: usize = 32 * 1024; // 32KB recv buffer

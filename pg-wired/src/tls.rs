@@ -10,7 +10,7 @@ use tokio::net::TcpStream;
 
 /// A stream that is either plain TCP or TLS-wrapped TCP.
 #[allow(clippy::large_enum_variant)]
-pub enum MaybeTlsStream {
+pub(crate) enum MaybeTlsStream {
     Plain(TcpStream),
     #[cfg(feature = "tls")]
     Tls(tokio_rustls::client::TlsStream<TcpStream>),
@@ -75,7 +75,8 @@ impl AsyncWrite for MaybeTlsStream {
 
 impl MaybeTlsStream {
     /// Get the peer address of the underlying TCP stream.
-    pub fn peer_addr(&self) -> std::io::Result<std::net::SocketAddr> {
+    #[allow(dead_code)]
+    pub(crate) fn peer_addr(&self) -> std::io::Result<std::net::SocketAddr> {
         match self {
             MaybeTlsStream::Plain(s) => s.peer_addr(),
             #[cfg(feature = "tls")]
@@ -87,7 +88,7 @@ impl MaybeTlsStream {
 /// TLS configuration for PostgreSQL connections.
 #[cfg(feature = "tls")]
 #[derive(Default)]
-pub struct TlsConfig {
+pub(crate) struct TlsConfig {
     /// Custom root CA certificates. If empty, uses system root CAs.
     pub root_certs: Vec<Vec<u8>>,
     /// Client certificate and private key for mTLS (optional).
@@ -99,7 +100,8 @@ pub struct TlsConfig {
 /// Uses `TlsMode::Prefer`: sends SSLRequest, upgrades on `S`, falls back to
 /// plain TCP on `N`.
 #[cfg(feature = "tls")]
-pub async fn negotiate_tls(
+#[allow(dead_code)]
+pub(crate) async fn negotiate_tls(
     stream: TcpStream,
     hostname: &str,
 ) -> Result<MaybeTlsStream, crate::error::PgWireError> {
@@ -113,7 +115,7 @@ pub async fn negotiate_tls(
 /// - `Prefer`: send SSLRequest, upgrade on `S`, fall back on `N`.
 /// - `Require`: send SSLRequest, error if server responds `N`.
 #[cfg(feature = "tls")]
-pub async fn negotiate_tls_with_config(
+pub(crate) async fn negotiate_tls_with_config(
     mut stream: TcpStream,
     hostname: &str,
     config: &TlsConfig,
