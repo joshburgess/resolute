@@ -12,6 +12,10 @@ readme = "README.md"
 keywords = ["postgres", "postgresql", "database", "async", "driver"]
 categories = ["database", "asynchronous", "network-programming"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 tokio = { version = "1", features = ["net", "io-util", "sync", "rt", "macros", "time"] }
 bytes = "1"

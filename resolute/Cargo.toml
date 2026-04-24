@@ -12,6 +12,10 @@ readme = "README.md"
 keywords = ["postgres", "postgresql", "sql", "database", "async"]
 categories = ["database", "asynchronous"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 pg-wired = { workspace = true }
 resolute-derive = { workspace = true }

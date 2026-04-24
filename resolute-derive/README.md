@@ -37,4 +37,4 @@ struct Author {
 
 ## License
 
-Dual licensed under [Apache 2.0](../LICENSE-APACHE) or [MIT](../LICENSE-MIT). See the [workspace root](../README.md) for the broader project.
+Dual licensed under [Apache 2.0](https://github.com/joshburgess/resolute/blob/main/LICENSE-APACHE) or [MIT](https://github.com/joshburgess/resolute/blob/main/LICENSE-MIT). See the [workspace root](https://github.com/joshburgess/resolute#readme) for the broader project.

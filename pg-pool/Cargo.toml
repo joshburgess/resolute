@@ -12,6 +12,10 @@ readme = "README.md"
 keywords = ["postgres", "postgresql", "pool", "connection-pool", "async"]
 categories = ["database", "asynchronous"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 tracing = "0.1"

@@ -626,4 +626,4 @@ You can discover your custom type OIDs at runtime with `client.lookup_type_oids(
 
 ## Architecture
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the internals: the `Executor` trait and its implementors, how `atomic()` dispatches `BEGIN` vs `SAVEPOINT` via monomorphisation, how the `FromRow` derive expands, the string-vs-integer `PgEnum` split, composite wire format, `PgDomain` array OID inheritance, and the `ReconnectingClient` lock-free-read path.
+See [`ARCHITECTURE.md`](https://github.com/joshburgess/resolute/blob/main/resolute/ARCHITECTURE.md) for the internals: the `Executor` trait and its implementors, how `atomic()` dispatches `BEGIN` vs `SAVEPOINT` via monomorphisation, how the `FromRow` derive expands, the string-vs-integer `PgEnum` split, composite wire format, `PgDomain` array OID inheritance, and the `ReconnectingClient` lock-free-read path.

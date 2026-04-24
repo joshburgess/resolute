@@ -802,7 +802,31 @@ impl Client {
 // Transaction
 // ---------------------------------------------------------------------------
 
-/// A transaction guard. Commits on `commit()`, rolls back on drop.
+/// A transaction guard.
+///
+/// Call `commit()` or `rollback()` to finish the transaction explicitly. Both
+/// consume the guard and send the corresponding SQL command.
+///
+/// # Drop behavior
+///
+/// If the `Transaction` is dropped without calling `commit()` or `rollback()`
+/// (for example, because a `?` propagated an error out of the block), the
+/// destructor cannot `await`, so it does **not** send a `ROLLBACK` itself.
+/// Instead it logs a `tracing::warn!` and relies on PostgreSQL's behavior:
+/// the next statement sent on the same connection while still in a failed
+/// or open transaction will either error out or hit the server's automatic
+/// rollback on the first command executed outside the block.
+///
+/// In practice this means:
+///
+/// - For correctness, dropping is safe. No partial work is committed, and
+///   the connection will recover on its next use.
+/// - For clarity, prefer calling `rollback()` explicitly on the error path.
+///   It surfaces errors from the rollback itself and keeps the transaction
+///   state deterministic.
+/// - If you need the rollback to complete before the connection is returned
+///   to a pool, call `rollback()` explicitly. The drop path does not guarantee
+///   the server has observed a rollback by the time the guard is dropped.
 #[derive(Debug)]
 pub struct Transaction<'a> {
     pub(crate) client: &'a Client,

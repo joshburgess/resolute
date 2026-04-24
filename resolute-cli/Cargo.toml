@@ -12,6 +12,10 @@ readme = "README.md"
 keywords = ["postgres", "postgresql", "migrations", "cli", "resolute"]
 categories = ["database", "command-line-utilities"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [[bin]]
 name = "resolute-cli"
 path = "src/main.rs"

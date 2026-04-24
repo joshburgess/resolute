@@ -16,7 +16,19 @@ pub struct WireConn {
     recv_buf: BytesMut,
     pub(crate) pid: i32,
     pub(crate) secret: i32,
-    /// Server parameters received during startup (server_version, server_encoding, etc.).
+    /// Server parameters reported via `ParameterStatus` during startup.
+    ///
+    /// PostgreSQL reports a small set of GUCs it considers useful to clients:
+    /// typically `server_version`, `server_encoding`, `client_encoding`,
+    /// `application_name`, `is_superuser`, `session_authorization`,
+    /// `DateStyle`, `IntervalStyle`, `TimeZone`, `integer_datetimes`, and
+    /// `standard_conforming_strings`. The exact set depends on the server
+    /// version and its `GUC_REPORT` configuration.
+    ///
+    /// This map is populated once on connect and is not kept in sync when
+    /// the server emits later `ParameterStatus` messages (for example after
+    /// `SET TimeZone = ...`). Treat these values as startup defaults, not a
+    /// live view of the session state.
     pub params: std::collections::HashMap<String, String>,
 }
 

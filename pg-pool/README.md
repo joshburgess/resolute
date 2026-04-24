@@ -49,8 +49,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Architecture
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the internals: the `Poolable` trait, data layout (atomics + mutexed deques), the acquire and release paths, the six lifecycle hooks, the drain protocol, and hook safety rules.
+See [`ARCHITECTURE.md`](https://github.com/joshburgess/resolute/blob/main/pg-pool/ARCHITECTURE.md) for the internals: the `Poolable` trait, data layout (atomics + mutexed deques), the acquire and release paths, the six lifecycle hooks, the drain protocol, and hook safety rules.
 
 ## License
 
-Dual licensed under [Apache 2.0](../LICENSE-APACHE) or [MIT](../LICENSE-MIT). See the [workspace root](../README.md) for the broader project.
+Dual licensed under [Apache 2.0](https://github.com/joshburgess/resolute/blob/main/LICENSE-APACHE) or [MIT](https://github.com/joshburgess/resolute/blob/main/LICENSE-MIT). See the [workspace root](https://github.com/joshburgess/resolute#readme) for the broader project.

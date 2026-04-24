@@ -44,8 +44,8 @@ Computed columns stay nullable, which means `query!` returns
 
 ## Architecture
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the internals: the macro pipeline, the named-param rewriter (how it handles `::` casts, string literals, comments, and dollar quoting), live describe via pg-wired, nullability inference via `pg_attribute`, the `.resolute/` cache format, and the generated output shape.
+See [`ARCHITECTURE.md`](https://github.com/joshburgess/resolute/blob/main/resolute-macros/ARCHITECTURE.md) for the internals: the macro pipeline, the named-param rewriter (how it handles `::` casts, string literals, comments, and dollar quoting), live describe via pg-wired, nullability inference via `pg_attribute`, the `.resolute/` cache format, and the generated output shape.
 
 ## License
 
-Dual licensed under [Apache 2.0](../LICENSE-APACHE) or [MIT](../LICENSE-MIT). See the [workspace root](../README.md) for the broader project.
+Dual licensed under [Apache 2.0](https://github.com/joshburgess/resolute/blob/main/LICENSE-APACHE) or [MIT](https://github.com/joshburgess/resolute/blob/main/LICENSE-MIT). See the [workspace root](https://github.com/joshburgess/resolute#readme) for the broader project.

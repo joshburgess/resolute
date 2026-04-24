@@ -46,8 +46,8 @@ Most applications will want the typed query surface in
 
 ## Architecture
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the internals: the reader/writer task split, message coalescing, FIFO response matching, the statement cache, TLS negotiation, and SCRAM.
+See [`ARCHITECTURE.md`](https://github.com/joshburgess/resolute/blob/main/pg-wired/ARCHITECTURE.md) for the internals: the reader/writer task split, message coalescing, FIFO response matching, the statement cache, TLS negotiation, and SCRAM.
 
 ## License
 
-Dual licensed under [Apache 2.0](../LICENSE-APACHE) or [MIT](../LICENSE-MIT). See the [workspace root](../README.md) for the broader project.
+Dual licensed under [Apache 2.0](https://github.com/joshburgess/resolute/blob/main/LICENSE-APACHE) or [MIT](https://github.com/joshburgess/resolute/blob/main/LICENSE-MIT). See the [workspace root](https://github.com/joshburgess/resolute#readme) for the broader project.
