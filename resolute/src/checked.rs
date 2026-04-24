@@ -37,18 +37,34 @@ impl<'a, T> std::fmt::Debug for CheckedQuery<'a, T> {
 
 impl<'a, T> CheckedQuery<'a, T> {
     /// Execute and return all rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the executor's `query` returns (wire error, broken
+    /// connection, param encoding failure). Additionally, if any row's
+    /// mapper fails to decode a column, that error is propagated.
     pub async fn fetch_all(self, db: &impl Executor) -> Result<Vec<T>, TypedError> {
         let rows = db.query(self.sql, &self.params).await?;
         rows.iter().map(self.mapper).collect()
     }
 
     /// Execute and return exactly one row.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`fetch_all`](Self::fetch_all), plus `TypedError::NotExactlyOne`
+    /// when the result set has zero or more than one row.
     pub async fn fetch_one(self, db: &impl Executor) -> Result<T, TypedError> {
         let row = db.query_one(self.sql, &self.params).await?;
         (self.mapper)(&row)
     }
 
     /// Execute and return an optional row.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`fetch_all`](Self::fetch_all), plus `TypedError::NotExactlyOne`
+    /// when the result set has more than one row. Zero rows returns `Ok(None)`.
     pub async fn fetch_opt(self, db: &impl Executor) -> Result<Option<T>, TypedError> {
         let row = db.query_opt(self.sql, &self.params).await?;
         match row {
@@ -59,6 +75,11 @@ impl<'a, T> CheckedQuery<'a, T> {
 
     /// Execute a DML statement (INSERT/UPDATE/DELETE without RETURNING) and
     /// return the affected row count. The mapper is ignored.
+    ///
+    /// # Errors
+    ///
+    /// Same as the executor's `execute`: wire error, broken connection, or
+    /// param encoding failure.
     pub async fn execute(self, db: &impl Executor) -> Result<u64, TypedError> {
         db.execute(self.sql, &self.params).await
     }
@@ -85,21 +106,40 @@ impl<'a> std::fmt::Debug for UncheckedQuery<'a> {
 
 impl<'a> UncheckedQuery<'a> {
     /// Execute and return raw rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the executor's `query` returns: wire error, broken
+    /// connection, or param encoding failure.
     pub async fn fetch_all(self, db: &impl Executor) -> Result<Vec<Row>, TypedError> {
         db.query(self.sql, &self.params).await
     }
 
     /// Execute and return exactly one row.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`fetch_all`](Self::fetch_all), plus `TypedError::NotExactlyOne`
+    /// for zero or multi-row result sets.
     pub async fn fetch_one(self, db: &impl Executor) -> Result<Row, TypedError> {
         db.query_one(self.sql, &self.params).await
     }
 
     /// Execute and return an optional row.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`fetch_all`](Self::fetch_all), plus `TypedError::NotExactlyOne`
+    /// when the result set has more than one row. Zero rows returns `Ok(None)`.
     pub async fn fetch_opt(self, db: &impl Executor) -> Result<Option<Row>, TypedError> {
         db.query_opt(self.sql, &self.params).await
     }
 
     /// Execute a statement (INSERT/UPDATE/DELETE), return affected row count.
+    ///
+    /// # Errors
+    ///
+    /// Same as the executor's `execute`.
     pub async fn execute(self, db: &impl Executor) -> Result<u64, TypedError> {
         db.execute(self.sql, &self.params).await
     }

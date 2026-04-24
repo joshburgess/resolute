@@ -70,6 +70,12 @@ impl Client {
     }
 
     /// Connect to PostgreSQL and create a typed client.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Wire` if the TCP connect, TLS negotiation, or
+    /// authentication handshake (SCRAM-SHA-256 / SCRAM-SHA-256-PLUS / MD5)
+    /// fails, or if the server rejects the startup message.
     pub async fn connect(
         addr: &str,
         user: &str,
@@ -98,6 +104,12 @@ impl Client {
     /// let client = Client::connect_from_str("postgres://user:pass@localhost/mydb").await?;
     /// let client = Client::connect_from_str("host=localhost dbname=mydb user=postgres").await?;
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Config` if the connection string can't be parsed
+    /// as either supported format. Otherwise returns whatever [`Client::connect`]
+    /// returns.
     pub async fn connect_from_str(connstr: &str) -> Result<Self, TypedError> {
         let (user, password, host, port, database) = parse_connection_string(connstr)
             .ok_or_else(|| TypedError::Config("invalid connection string".to_string()))?;
@@ -113,6 +125,12 @@ impl Client {
     ///     &["SET search_path TO myschema, public", "SET statement_timeout = '30s'"],
     /// ).await?;
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever [`Client::connect`] returns. Additionally, any
+    /// `init_sql` statement that fails will be surfaced as the underlying
+    /// wire error, leaving no client.
     pub async fn connect_with_init(
         addr: &str,
         user: &str,
@@ -189,6 +207,13 @@ impl Client {
     ///     let name: String = row.get(1)?;
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Wire` if the server reports an error (parse,
+    /// bind, or execute), the connection is broken, or a parameter fails
+    /// to encode in binary format. Returns `TypedError::Config` if a
+    /// parameter type OID is unresolvable for a custom type.
     pub async fn query(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<Vec<Row>, TypedError> {
         let start = std::time::Instant::now();
         let result = match self.query_inner(sql, params).await {
@@ -391,6 +416,11 @@ impl Client {
 
     /// Execute a statement that doesn't return rows (INSERT, UPDATE, DELETE).
     /// Returns the number of affected rows.
+    ///
+    /// # Errors
+    ///
+    /// Same error cases as [`Client::query`]: server-reported errors, broken
+    /// connection, or parameter encoding failures.
     pub async fn execute(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<u64, TypedError> {
         let start = std::time::Instant::now();
         let result = match self.execute_inner(sql, params).await {
@@ -600,6 +630,11 @@ impl Client {
 
     /// Begin a transaction. Returns a `Transaction` guard that
     /// commits on `commit()` or rolls back on drop.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Wire` if the `BEGIN` statement fails. Common
+    /// cases: already in a transaction, or the connection is broken.
     pub async fn begin(&self) -> Result<Transaction<'_>, TypedError> {
         self.simple_query("BEGIN").await?;
         Ok(Transaction {
@@ -615,6 +650,10 @@ impl Client {
     /// // or with read-only:
     /// let txn = client.begin_with(IsolationLevel::RepeatableRead).await?;
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Same cases as [`Client::begin`].
     pub async fn begin_with(&self, level: IsolationLevel) -> Result<Transaction<'_>, TypedError> {
         let sql = format!("BEGIN ISOLATION LEVEL {}", level.as_sql());
         self.simple_query(&sql).await?;
@@ -705,6 +744,12 @@ impl Client {
     ///     &[("id", &42i32), ("org", &"acme")],
     /// ).await?;
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::MissingParam` if the SQL references a `:name`
+    /// that isn't in `params`. Otherwise returns whatever [`Client::query`]
+    /// returns.
     pub async fn query_named(
         &self,
         sql: &str,
@@ -716,6 +761,10 @@ impl Client {
     }
 
     /// Execute a named-param statement (INSERT/UPDATE/DELETE). Returns affected row count.
+    ///
+    /// # Errors
+    ///
+    /// Same cases as [`Client::query_named`].
     pub async fn execute_named(
         &self,
         sql: &str,
@@ -845,12 +894,24 @@ impl<'a> Transaction<'a> {
     }
 
     /// Commit the transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Wire` if the server rejects `COMMIT` (for example,
+    /// a deferred constraint fires) or the connection is broken. On error,
+    /// the server has already attempted to finalize the transaction, so
+    /// calling rollback afterward is not meaningful.
     pub async fn commit(mut self) -> Result<(), TypedError> {
         self.done = true;
         self.client.simple_query("COMMIT").await
     }
 
     /// Explicitly roll back the transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Wire` if the connection is broken. On success,
+    /// the server has discarded all in-transaction work.
     pub async fn rollback(mut self) -> Result<(), TypedError> {
         self.done = true;
         self.client.simple_query("ROLLBACK").await

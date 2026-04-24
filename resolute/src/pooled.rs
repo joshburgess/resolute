@@ -24,6 +24,12 @@ pub struct TypedPool {
 
 impl TypedPool {
     /// Create a new typed pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns `PoolError` if the initial minimum-size connections cannot be
+    /// established. The underlying connection failure (`PgWireError`) is
+    /// wrapped in `PoolError::Inner`.
     pub async fn new(
         config: ConnPoolConfig,
         hooks: LifecycleHooks<AsyncPoolable>,
@@ -33,6 +39,10 @@ impl TypedPool {
     }
 
     /// Connect with sensible defaults.
+    ///
+    /// # Errors
+    ///
+    /// Same cases as [`TypedPool::new`].
     pub async fn connect(
         addr: &str,
         user: &str,
@@ -56,6 +66,13 @@ impl TypedPool {
     /// The returned `PooledTypedClient` implements `Deref<Target = AsyncConn>`
     /// and can be used with all `Executor` trait methods. The connection is
     /// automatically returned to the pool when the client is dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Pool` wrapping `PoolError::AcquireTimeout` if the
+    /// pool is at `max_size` and no connection becomes available before the
+    /// configured `connect_timeout`, or `PoolError::Inner(PgWireError)` if a
+    /// new connection was needed and couldn't be established.
     pub async fn get(&self) -> Result<PooledTypedClient, TypedError> {
         tracing::debug!("pool checkout");
         crate::metrics::record_pool_checkout();
@@ -155,6 +172,11 @@ impl PooledTypedClient {
     /// The returned `PooledTransaction` borrows from this client, so the
     /// connection is pinned to this checkout for the transaction's lifetime
     /// and released back to the pool when this `PooledTypedClient` is dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Wire` if the `BEGIN` statement fails or the
+    /// connection is broken.
     pub async fn begin(&self) -> Result<PooledTransaction<'_>, TypedError> {
         self.simple_query("BEGIN").await?;
         Ok(PooledTransaction {
@@ -165,6 +187,10 @@ impl PooledTypedClient {
 
     /// Begin a transaction with a specific isolation level on the pooled
     /// connection. See [`crate::IsolationLevel`] for the available levels.
+    ///
+    /// # Errors
+    ///
+    /// Same cases as [`PooledTypedClient::begin`].
     pub async fn begin_with(
         &self,
         level: crate::IsolationLevel,
