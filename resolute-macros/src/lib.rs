@@ -149,8 +149,8 @@ fn describe_live(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), Stri
             .to_string()
     })?;
 
-    let (user, password, host, port, database) =
-        parse_pg_uri(&db_url).ok_or_else(|| format!("Invalid DATABASE_URL: {db_url}"))?;
+    let (user, password, host, port, database) = parse_pg_uri(&db_url)
+        .ok_or_else(|| "Invalid DATABASE_URL (could not parse as postgres:// URI)".to_string())?;
     let addr = format!("{host}:{port}");
 
     let rt = tokio::runtime::Builder::new_current_thread()

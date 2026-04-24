@@ -100,7 +100,7 @@ impl Client {
     /// ```
     pub async fn connect_from_str(connstr: &str) -> Result<Self, TypedError> {
         let (user, password, host, port, database) = parse_connection_string(connstr)
-            .ok_or_else(|| TypedError::Config(format!("invalid connection string: {connstr}")))?;
+            .ok_or_else(|| TypedError::Config("invalid connection string".to_string()))?;
         let addr = format!("{host}:{port}");
         Self::connect(&addr, &user, &password, &database).await
     }

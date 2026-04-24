@@ -88,7 +88,7 @@ impl<E: std::error::Error + 'static> std::error::Error for PoolError<E> {
 // ---------------------------------------------------------------------------
 
 /// Connection pool configuration.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ConnPoolConfig {
     /// Address (host:port).
     pub addr: String,
@@ -112,6 +112,24 @@ pub struct ConnPoolConfig {
     pub maintenance_interval: Duration,
     /// Whether to verify connections on checkout.
     pub test_on_checkout: bool,
+}
+
+impl std::fmt::Debug for ConnPoolConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnPoolConfig")
+            .field("addr", &self.addr)
+            .field("user", &self.user)
+            .field("password", &"<redacted>")
+            .field("database", &self.database)
+            .field("min_idle", &self.min_idle)
+            .field("max_size", &self.max_size)
+            .field("max_lifetime", &self.max_lifetime)
+            .field("max_lifetime_jitter", &self.max_lifetime_jitter)
+            .field("checkout_timeout", &self.checkout_timeout)
+            .field("maintenance_interval", &self.maintenance_interval)
+            .field("test_on_checkout", &self.test_on_checkout)
+            .finish()
+    }
 }
 
 impl Default for ConnPoolConfig {
