@@ -61,7 +61,7 @@ impl TypedPool {
         let guard = self.pool.get().await.map_err(|e| {
             tracing::warn!(error = %e, "pool checkout failed");
             crate::metrics::record_pool_timeout();
-            TypedError::Pool(format!("{e}"))
+            TypedError::from(e)
         })?;
         Ok(PooledTypedClient { guard })
     }

@@ -1,6 +1,7 @@
 //! Error types for the typed query layer.
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum TypedError {
     #[error("wire error: {0}")]
     Wire(#[from] Box<pg_wired::PgWireError>),
@@ -21,7 +22,7 @@ pub enum TypedError {
     TypeMismatch { expected: u32, actual: u32 },
 
     #[error("pool error: {0}")]
-    Pool(String),
+    Pool(#[from] Box<pg_pool::PoolError<pg_wired::PgWireError>>),
 
     #[error("query timed out after {0:?}")]
     Timeout(std::time::Duration),
@@ -45,6 +46,12 @@ pub enum TypedError {
 impl From<pg_wired::PgWireError> for TypedError {
     fn from(e: pg_wired::PgWireError) -> Self {
         Self::Wire(Box::new(e))
+    }
+}
+
+impl From<pg_pool::PoolError<pg_wired::PgWireError>> for TypedError {
+    fn from(e: pg_pool::PoolError<pg_wired::PgWireError>) -> Self {
+        Self::Pool(Box::new(e))
     }
 }
 
