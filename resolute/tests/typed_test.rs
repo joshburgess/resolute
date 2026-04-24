@@ -4451,3 +4451,88 @@ async fn test_lookup_type_oids_builtin() {
     assert_eq!(oid, 23);
     assert_eq!(array_oid, 1007);
 }
+
+// ---------------------------------------------------------------------------
+// Migration advisory lock
+// ---------------------------------------------------------------------------
+
+/// Two concurrent `migrate::run` calls against the same database must
+/// serialize via the advisory lock. If they ran in parallel, their sleeps
+/// would overlap and total wall time would be ~1s; serialized it is ~2s.
+#[tokio::test]
+async fn test_migrate_run_serializes_via_advisory_lock() {
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    let database_url = format!("postgres://{USER}:{PASS}@{ADDR}/{DB}");
+
+    // Unique version numbers per test run so we don't collide with any
+    // prior applied migrations in the shared test DB.
+    let base = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as u64;
+    let version_a = base;
+    let version_b = base + 1;
+    let suffix = base;
+
+    let dir_a = tempfile::tempdir().unwrap();
+    let dir_b = tempfile::tempdir().unwrap();
+
+    for (dir, version, label) in [(&dir_a, version_a, "a"), (&dir_b, version_b, "b")] {
+        let up = format!("CREATE TABLE adv_lock_{suffix}_{label} (x int); SELECT pg_sleep(1);");
+        let down = format!("DROP TABLE adv_lock_{suffix}_{label};");
+        std::fs::write(
+            dir.path().join(format!("{version}_advlock_{label}.up.sql")),
+            up,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path()
+                .join(format!("{version}_advlock_{label}.down.sql")),
+            down,
+        )
+        .unwrap();
+    }
+
+    let url_a = database_url.clone();
+    let url_b = database_url.clone();
+    let path_a = dir_a.path().to_path_buf();
+    let path_b = dir_b.path().to_path_buf();
+
+    let start = Instant::now();
+    let (res_a, res_b) = tokio::join!(
+        tokio::spawn(async move { resolute::migrate::run(&url_a, &path_a).await }),
+        tokio::spawn(async move { resolute::migrate::run(&url_b, &path_b).await }),
+    );
+    let elapsed = start.elapsed();
+
+    let applied_a = res_a.unwrap().unwrap();
+    let applied_b = res_b.unwrap().unwrap();
+
+    // Clean up before asserting so a failed assertion doesn't leak tables.
+    let cleanup = connect().await;
+    for version in [version_a, version_b] {
+        let _ = cleanup
+            .execute(
+                "DELETE FROM _resolute_migrations WHERE version = $1",
+                &[&(version as i64)],
+            )
+            .await;
+    }
+    for label in ["a", "b"] {
+        let _ = cleanup
+            .simple_query(&format!("DROP TABLE IF EXISTS adv_lock_{suffix}_{label}"))
+            .await;
+    }
+
+    assert_eq!(applied_a.len(), 1, "runner A should apply one migration");
+    assert_eq!(applied_b.len(), 1, "runner B should apply one migration");
+
+    // Serialized: ~2s (1s each, one after the other). Parallel: ~1s.
+    // Leave generous headroom for scheduling, but well below 2s worth of
+    // parallel execution.
+    assert!(
+        elapsed >= Duration::from_millis(1800),
+        "expected serialized execution (>= 1.8s), got {elapsed:?} (advisory lock likely not held)",
+    );
+}

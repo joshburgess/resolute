@@ -13,7 +13,8 @@ use crate::error::TypedError;
 /// database was created, `false` if it was already present.
 pub async fn create_database(database_url: &str) -> Result<bool, TypedError> {
     let (user, password, host, port, database) =
-        parse_uri(database_url).ok_or_else(|| TypedError::Config("invalid database URL".into()))?;
+        crate::query::parse_connection_string(database_url)
+            .ok_or_else(|| TypedError::Config("invalid database URL".into()))?;
     let addr = format!("{host}:{port}");
 
     let conn = WireConn::connect(&addr, &user, &password, "postgres").await?;
@@ -41,7 +42,8 @@ pub async fn create_database(database_url: &str) -> Result<bool, TypedError> {
 /// does not exist.
 pub async fn drop_database(database_url: &str, force: bool) -> Result<(), TypedError> {
     let (user, password, host, port, database) =
-        parse_uri(database_url).ok_or_else(|| TypedError::Config("invalid database URL".into()))?;
+        crate::query::parse_connection_string(database_url)
+            .ok_or_else(|| TypedError::Config("invalid database URL".into()))?;
     let addr = format!("{host}:{port}");
 
     let conn = WireConn::connect(&addr, &user, &password, "postgres").await?;
@@ -61,22 +63,4 @@ pub async fn drop_database(database_url: &str, force: bool) -> Result<(), TypedE
     ))
     .await?;
     Ok(())
-}
-
-fn parse_uri(uri: &str) -> Option<(String, String, String, u16, String)> {
-    let rest = uri
-        .strip_prefix("postgres://")
-        .or_else(|| uri.strip_prefix("postgresql://"))?;
-    let (auth, hostdb) = rest.split_once('@').unwrap_or(("postgres:postgres", rest));
-    let (user, password) = auth.split_once(':').unwrap_or((auth, ""));
-    let (hostport, database) = hostdb.split_once('/').unwrap_or((hostdb, "postgres"));
-    let (host, port_str) = hostport.split_once(':').unwrap_or((hostport, "5432"));
-    let port: u16 = port_str.parse().unwrap_or(5432);
-    Some((
-        user.to_string(),
-        password.to_string(),
-        host.to_string(),
-        port,
-        database.to_string(),
-    ))
 }

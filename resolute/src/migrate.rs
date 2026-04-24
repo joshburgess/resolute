@@ -116,8 +116,17 @@ fn format_yyyymmddhhmmss(secs: u64) -> String {
     format!("{year:04}{m:02}{d:02}{hour:02}{minute:02}{second:02}")
 }
 
+/// Fixed advisory-lock key used to serialize migration runners. The numeric
+/// value is the bytes of the ASCII string "resolute" interpreted as a big-endian
+/// i64; the precise value is arbitrary but stable across processes.
+const MIGRATION_LOCK_KEY: i64 = 0x7265_736F_6C75_7465;
+
 /// Run all pending migrations. Returns the list of migrations newly applied,
 /// in the order they ran. Each migration runs in its own transaction.
+///
+/// Holds a session-level advisory lock for the duration of the call so that
+/// concurrent runners (e.g. multiple pods starting at once) serialize rather
+/// than racing on the same pending migration.
 pub async fn run(
     database_url: &str,
     migrations_dir: impl AsRef<Path>,
@@ -125,15 +134,27 @@ pub async fn run(
     let mut pg = connect(database_url).await?;
     ensure_tracking_table(&mut pg).await?;
 
-    let applied = read_applied_versions(&mut pg).await?;
-    let migrations = scan_migrations(migrations_dir.as_ref())?;
+    acquire_advisory_lock(&mut pg).await?;
+    let result = run_inner(&mut pg, migrations_dir.as_ref()).await;
+    release_advisory_lock(&mut pg).await;
+    result
+}
+
+async fn run_inner(
+    pg: &mut pg_wired::PgPipeline,
+    migrations_dir: &Path,
+) -> Result<Vec<Migration>, TypedError> {
+    let applied = read_applied_versions(pg).await?;
+    let migrations = scan_migrations(migrations_dir)?;
 
     let mut newly_applied = Vec::new();
     for m in &migrations {
         if applied.contains(&m.version) {
             continue;
         }
-        let sql = std::fs::read_to_string(&m.up_path).map_err(TypedError::Io)?;
+        let sql = tokio::fs::read_to_string(&m.up_path)
+            .await
+            .map_err(TypedError::Io)?;
 
         tracing::info!(version = m.version, name = %m.name, "applying migration");
 
@@ -160,6 +181,21 @@ pub async fn run(
     Ok(newly_applied)
 }
 
+async fn acquire_advisory_lock(pg: &mut pg_wired::PgPipeline) -> Result<(), TypedError> {
+    pg.simple_query(&format!("SELECT pg_advisory_lock({MIGRATION_LOCK_KEY})"))
+        .await?;
+    Ok(())
+}
+
+async fn release_advisory_lock(pg: &mut pg_wired::PgPipeline) {
+    if let Err(e) = pg
+        .simple_query(&format!("SELECT pg_advisory_unlock({MIGRATION_LOCK_KEY})"))
+        .await
+    {
+        tracing::warn!(error = %e, "failed to release migration advisory lock");
+    }
+}
+
 /// Revert the most recently applied migration. Returns the reverted migration,
 /// or `None` when nothing has been applied.
 pub async fn revert(
@@ -169,6 +205,16 @@ pub async fn revert(
     let mut pg = connect(database_url).await?;
     ensure_tracking_table(&mut pg).await?;
 
+    acquire_advisory_lock(&mut pg).await?;
+    let result = revert_inner(&mut pg, migrations_dir.as_ref()).await;
+    release_advisory_lock(&mut pg).await;
+    result
+}
+
+async fn revert_inner(
+    pg: &mut pg_wired::PgPipeline,
+    migrations_dir: &Path,
+) -> Result<Option<Migration>, TypedError> {
     let (rows, _) = pg
         .simple_query_rows(
             "SELECT version, name FROM _resolute_migrations ORDER BY version DESC LIMIT 1",
@@ -190,7 +236,7 @@ pub async fn revert(
         .and_then(|b| String::from_utf8(b.clone()).ok())
         .unwrap_or_default();
 
-    let migrations = scan_migrations(migrations_dir.as_ref())?;
+    let migrations = scan_migrations(migrations_dir)?;
     let migration = migrations
         .iter()
         .find(|m| m.version == version)
@@ -206,7 +252,9 @@ pub async fn revert(
         )));
     }
 
-    let sql = std::fs::read_to_string(&migration.down_path).map_err(TypedError::Io)?;
+    let sql = tokio::fs::read_to_string(&migration.down_path)
+        .await
+        .map_err(TypedError::Io)?;
     tracing::info!(version, name = %recorded_name, "reverting migration");
 
     pg.simple_query("BEGIN").await?;
@@ -287,7 +335,9 @@ pub async fn seed(database_url: &str, file: &Path) -> Result<(), TypedError> {
             file.display()
         )));
     }
-    let sql = std::fs::read_to_string(file).map_err(TypedError::Io)?;
+    let sql = tokio::fs::read_to_string(file)
+        .await
+        .map_err(TypedError::Io)?;
     let mut pg = connect(database_url).await?;
     pg.simple_query(&sql).await?;
     Ok(())
@@ -328,7 +378,8 @@ pub fn scan_migrations(dir: &Path) -> Result<Vec<Migration>, TypedError> {
 
 async fn connect(database_url: &str) -> Result<PgPipeline, TypedError> {
     let (user, password, host, port, database) =
-        parse_uri(database_url).ok_or_else(|| TypedError::Config("invalid database URL".into()))?;
+        crate::query::parse_connection_string(database_url)
+            .ok_or_else(|| TypedError::Config("invalid database URL".into()))?;
     let addr = format!("{host}:{port}");
     let conn = WireConn::connect(&addr, &user, &password, &database).await?;
     Ok(PgPipeline::new(conn))
@@ -392,24 +443,6 @@ async fn read_applied(pg: &mut PgPipeline) -> Result<Vec<AppliedMigration>, Type
         .collect())
 }
 
-fn parse_uri(uri: &str) -> Option<(String, String, String, u16, String)> {
-    let rest = uri
-        .strip_prefix("postgres://")
-        .or_else(|| uri.strip_prefix("postgresql://"))?;
-    let (auth, hostdb) = rest.split_once('@').unwrap_or(("postgres:postgres", rest));
-    let (user, password) = auth.split_once(':').unwrap_or((auth, ""));
-    let (hostport, database) = hostdb.split_once('/').unwrap_or((hostdb, "postgres"));
-    let (host, port_str) = hostport.split_once(':').unwrap_or((hostport, "5432"));
-    let port: u16 = port_str.parse().unwrap_or(5432);
-    Some((
-        user.to_string(),
-        password.to_string(),
-        host.to_string(),
-        port,
-        database.to_string(),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,26 +499,6 @@ mod tests {
         assert!(std::fs::read_to_string(&down)
             .unwrap()
             .contains("Revert: add_widgets"));
-    }
-
-    #[test]
-    fn parse_uri_handles_common_shapes() {
-        let (u, p, h, port, db) =
-            parse_uri("postgres://alice:secret@example.com:5433/mydb").unwrap();
-        assert_eq!(u, "alice");
-        assert_eq!(p, "secret");
-        assert_eq!(h, "example.com");
-        assert_eq!(port, 5433);
-        assert_eq!(db, "mydb");
-
-        // No password.
-        let (u, p, _, _, _) = parse_uri("postgres://alice@example.com/mydb").unwrap();
-        assert_eq!(u, "alice");
-        assert_eq!(p, "");
-
-        // Defaults for database.
-        let (_, _, _, _, db) = parse_uri("postgres://alice:pw@example.com").unwrap();
-        assert_eq!(db, "postgres");
     }
 
     #[test]
