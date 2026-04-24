@@ -9,4 +9,13 @@ rust-version = "1.75"
 authors = ["Josh Burgess <joshualoganburgess@gmail.com>"]
 repository = "https://github.com/joshburgess/resolute"
 homepage = "https://github.com/joshburgess/resolute"
-readme = "README.md"
+
+# Internal path dependencies carry both `path` (for local workspace builds)
+# and `version` (required for crates.io publish: cargo strips `path` on upload
+# and falls back to the registry version). Bump versions here on release.
+[workspace.dependencies]
+pg-wired = { path = "pg-wired", version = "0.1.0" }
+pg-pool = { path = "pg-pool", version = "0.1.0" }
+resolute = { path = "resolute", version = "0.1.0", default-features = false }
+resolute-derive = { path = "resolute-derive", version = "0.1.0" }
+resolute-macros = { path = "resolute-macros", version = "0.1.0" }

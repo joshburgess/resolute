@@ -8,7 +8,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 keywords = ["postgres", "postgresql", "pool", "connection-pool", "async"]
 categories = ["database", "asynchronous"]
 
@@ -18,12 +18,12 @@ tracing = "0.1"
 bytes = "1"
 
 # Optional pg-wired integration
-pg-wired = { path = "../pg-wired", optional = true }
+pg-wired = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 bytes = "1"
-pg-wired = { path = "../pg-wired" }
+pg-wired = { workspace = true }
 
 [features]
 default = ["wire"]

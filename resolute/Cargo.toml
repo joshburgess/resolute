@@ -8,15 +8,15 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 keywords = ["postgres", "postgresql", "sql", "database", "async"]
 categories = ["database", "asynchronous"]
 
 [dependencies]
-pg-wired = { path = "../pg-wired" }
-resolute-derive = { path = "../resolute-derive" }
-resolute-macros = { path = "../resolute-macros" }
-pg-pool = { path = "../pg-pool" }
+pg-wired = { workspace = true }
+resolute-derive = { workspace = true }
+resolute-macros = { workspace = true }
+pg-pool = { workspace = true }
 bytes = "1"
 thiserror = "2"
 tracing = "0.1"
@@ -29,6 +29,9 @@ serde_json = { version = "1", optional = true }
 uuid = { version = "1", optional = true }
 
 [dev-dependencies]
+# Self-dep with test-utils enabled so the crate's own tests (and the
+# `resolute::test` attribute macro expansion) can access `test_db`.
+resolute = { path = ".", features = ["test-utils"] }
 tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", features = ["clock"] }
 serde = { version = "1", features = ["derive"] }
@@ -53,3 +56,7 @@ default = ["chrono", "json", "uuid"]
 chrono = ["dep:chrono", "resolute-macros/chrono"]
 json = ["dep:serde_json", "resolute-macros/json"]
 uuid = ["dep:uuid", "resolute-macros/uuid"]
+# Exposes the `test_db` module for downstream crates that want to use
+# resolute's ephemeral-database helpers in their own test suites. Also enabled
+# automatically by the `resolute::test` attribute macro expansion.
+test-utils = []
