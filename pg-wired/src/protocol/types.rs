@@ -4,6 +4,7 @@ pub type Oid = u32;
 /// Wire format codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i16)]
+#[non_exhaustive]
 pub enum FormatCode {
     Text = 0,
     Binary = 1,
@@ -11,6 +12,7 @@ pub enum FormatCode {
 
 /// Frontend (client → server) messages.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum FrontendMsg<'a> {
     /// Parse: prepare a statement.
     /// name (empty = unnamed), sql, param OIDs
@@ -62,6 +64,7 @@ pub enum FrontendMsg<'a> {
 
 /// Backend (server → client) messages.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum BackendMsg {
     AuthenticationOk,
     AuthenticationCleartextPassword,

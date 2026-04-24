@@ -205,6 +205,15 @@ fn response_to_columnar(resp: PipelineResponse) -> ColumnarResult {
             nulls: Buffer::from(Vec::<u8>::new()),
             command_tag: String::new(),
         },
+        _ => ColumnarResult {
+            fields: Vec::new(),
+            row_count: 0,
+            cols: 0,
+            data: String::new(),
+            offsets: Uint32Array::new(vec![0]),
+            nulls: Buffer::from(Vec::<u8>::new()),
+            command_tag: String::new(),
+        },
     }
 }
 
@@ -436,6 +445,11 @@ async fn exec_query_raw(
             rows: Vec::new(),
             command_tag: String::new(),
         },
+        _ => RawQueryResult {
+            fields: Vec::new(),
+            rows: Vec::new(),
+            command_tag: String::new(),
+        },
     })
 }
 
@@ -461,6 +475,11 @@ fn pipeline_response_to_query_result(resp: PipelineResponse) -> QueryResult {
             command_tag,
         },
         PipelineResponse::Done => QueryResult {
+            fields: Vec::new(),
+            rows: Vec::new(),
+            command_tag: String::new(),
+        },
+        _ => QueryResult {
             fields: Vec::new(),
             rows: Vec::new(),
             command_tag: String::new(),

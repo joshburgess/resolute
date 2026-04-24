@@ -18,6 +18,7 @@ pub(crate) enum MaybeTlsStream {
 
 /// How to handle TLS negotiation with the server.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TlsMode {
     /// Do not send SSLRequest. Use plain TCP.
     Disable,

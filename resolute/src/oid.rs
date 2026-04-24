@@ -6,6 +6,7 @@
 /// Known PostgreSQL type OIDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
+#[non_exhaustive]
 pub enum TypeOid {
     /// OID 0: let the server infer the type from context.
     Unspecified = 0,

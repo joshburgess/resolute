@@ -25,6 +25,7 @@ use bytes::BytesMut;
 
 /// A PostgreSQL range value.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum PgRange<T> {
     /// An empty range (contains no values).
     Empty,
