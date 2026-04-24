@@ -1,0 +1,14 @@
+{
+  "sql": "SELECT $1::int4 AS n",
+  "hash": 17413640807683665135,
+  "param_oids": [
+    23
+  ],
+  "columns": [
+    {
+      "name": "n",
+      "type_oid": 23,
+      "nullable": true
+    }
+  ]
+}

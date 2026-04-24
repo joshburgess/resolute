@@ -1,0 +1,12 @@
+{
+  "sql": "SELECT count(*)::int4 FROM api.authors",
+  "hash": 16123323314349630786,
+  "param_oids": [],
+  "columns": [
+    {
+      "name": "count",
+      "type_oid": 23,
+      "nullable": true
+    }
+  ]
+}

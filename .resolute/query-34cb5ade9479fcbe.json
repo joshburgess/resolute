@@ -1,0 +1,27 @@
+{
+  "sql": "SELECT 1::int4 AS a, 'hello'::text AS b, true AS c, 3.14::float8 AS d",
+  "hash": 3804234222264777918,
+  "param_oids": [],
+  "columns": [
+    {
+      "name": "a",
+      "type_oid": 23,
+      "nullable": true
+    },
+    {
+      "name": "b",
+      "type_oid": 25,
+      "nullable": true
+    },
+    {
+      "name": "c",
+      "type_oid": 16,
+      "nullable": true
+    },
+    {
+      "name": "d",
+      "type_oid": 701,
+      "nullable": true
+    }
+  ]
+}

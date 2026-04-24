@@ -1,0 +1,12 @@
+{
+  "sql": "SELECT 42::int4 AS answer",
+  "hash": 3772354640138722896,
+  "param_oids": [],
+  "columns": [
+    {
+      "name": "answer",
+      "type_oid": 23,
+      "nullable": true
+    }
+  ]
+}

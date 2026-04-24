@@ -1,0 +1,12 @@
+{
+  "sql": "SELECT count(*)::int4 AS total FROM api.authors",
+  "hash": 3687836704520073124,
+  "param_oids": [],
+  "columns": [
+    {
+      "name": "total",
+      "type_oid": 23,
+      "nullable": true
+    }
+  ]
+}

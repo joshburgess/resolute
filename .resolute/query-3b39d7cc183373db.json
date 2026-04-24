@@ -1,0 +1,20 @@
+{
+  "sql": "SELECT $1::int4 AS a, $2::text AS b",
+  "hash": 4267679393489581019,
+  "param_oids": [
+    23,
+    25
+  ],
+  "columns": [
+    {
+      "name": "a",
+      "type_oid": 23,
+      "nullable": true
+    },
+    {
+      "name": "b",
+      "type_oid": 25,
+      "nullable": true
+    }
+  ]
+}

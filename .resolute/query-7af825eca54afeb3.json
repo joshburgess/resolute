@@ -1,0 +1,19 @@
+{
+  "sql": "SELECT id, name FROM api.authors WHERE id = $1",
+  "hash": 8860873965167115955,
+  "param_oids": [
+    23
+  ],
+  "columns": [
+    {
+      "name": "id",
+      "type_oid": 23,
+      "nullable": false
+    },
+    {
+      "name": "name",
+      "type_oid": 25,
+      "nullable": false
+    }
+  ]
+}

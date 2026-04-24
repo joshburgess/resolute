@@ -1,0 +1,14 @@
+{
+  "sql": "SELECT $1::int8 AS n",
+  "hash": 13717237299665761811,
+  "param_oids": [
+    20
+  ],
+  "columns": [
+    {
+      "name": "n",
+      "type_oid": 20,
+      "nullable": true
+    }
+  ]
+}

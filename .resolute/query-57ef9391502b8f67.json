@@ -1,0 +1,12 @@
+{
+  "sql": "SELECT exists(SELECT 1 FROM api.authors WHERE id = 1)",
+  "hash": 6336445453058150247,
+  "param_oids": [],
+  "columns": [
+    {
+      "name": "exists",
+      "type_oid": 16,
+      "nullable": true
+    }
+  ]
+}

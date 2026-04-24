@@ -1,0 +1,15 @@
+{
+  "sql": "SELECT ($1::int4 + $2::int4) AS sum",
+  "hash": 4911487855369531679,
+  "param_oids": [
+    23,
+    23
+  ],
+  "columns": [
+    {
+      "name": "sum",
+      "type_oid": 23,
+      "nullable": true
+    }
+  ]
+}
