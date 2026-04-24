@@ -4314,6 +4314,64 @@ async fn test_pg_listener_unlisten() {
     assert_eq!(listener.channels().len(), 0);
 }
 
+#[tokio::test]
+async fn test_pg_listener_reconnects_and_re_listens() {
+    use resolute::{ListenerEvent, PgListener};
+    use std::time::Duration;
+
+    // Unique channel so this test can't race with other listener tests.
+    let channel = format!("test_reconnect_{}", std::process::id());
+
+    let mut listener = PgListener::connect(ADDR, USER, PASS, DB).await.unwrap();
+    listener.listen(&channel).await.unwrap();
+    let original_pid = listener.backend_pid();
+
+    // Kill the listener's backend from a separate session. The server
+    // terminates the connection; the listener's next recv should observe
+    // the disconnect and transparently reconnect.
+    let killer = connect().await;
+    killer
+        .execute("SELECT pg_terminate_backend($1::int4)", &[&original_pid])
+        .await
+        .unwrap();
+
+    // First event must be Reconnected (the LISTEN has been re-issued by now).
+    let event = tokio::time::timeout(Duration::from_secs(10), listener.recv_event())
+        .await
+        .expect("timed out waiting for Reconnected")
+        .unwrap();
+    assert!(
+        matches!(event, ListenerEvent::Reconnected),
+        "expected Reconnected, got {event:?}",
+    );
+
+    // New backend PID proves we actually reconnected.
+    let new_pid = listener.backend_pid();
+    assert_ne!(
+        new_pid, original_pid,
+        "backend_pid should change on reconnect"
+    );
+
+    // NOTIFY must now be delivered on the re-established subscription.
+    let sender = connect().await;
+    sender
+        .simple_query(&format!("NOTIFY {channel}, 'after_reconnect'"))
+        .await
+        .unwrap();
+
+    let event = tokio::time::timeout(Duration::from_secs(5), listener.recv_event())
+        .await
+        .expect("timed out waiting for post-reconnect notification")
+        .unwrap();
+    match event {
+        ListenerEvent::Notification(n) => {
+            assert_eq!(n.channel, channel);
+            assert_eq!(n.payload, "after_reconnect");
+        }
+        other => panic!("expected Notification, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // connect_from_str
 // ---------------------------------------------------------------------------

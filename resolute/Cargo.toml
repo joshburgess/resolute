@@ -22,7 +22,8 @@ thiserror = "2"
 tracing = "0.1"
 arc-swap = "1"
 tokio-stream = "0.1"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "fs", "time"] }
+rand = "0.9"
 chrono = { version = "0.4", optional = true, default-features = false, features = ["std"] }
 serde_json = { version = "1", optional = true }
 uuid = { version = "1", optional = true }

@@ -160,7 +160,7 @@ pub use decode::{Decode, DecodeText};
 pub use encode::{encode_array_header, Encode, SqlParam};
 pub use error::TypedError;
 pub use executor::Executor;
-pub use listener::{Notification, PgListener};
+pub use listener::{ListenerEvent, Notification, PgListener};
 pub use newtypes::{PgDate, PgInet, PgNumeric, PgTimestamp};
 pub use oid::TypeOid;
 pub use pg_type::PgType;
