@@ -659,3 +659,190 @@ fn find_workspace_root(start: &Path) -> Option<PathBuf> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn write_crate(dir: &Path, src: &str) -> PathBuf {
+        fs::write(dir.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.0.0\"\n").unwrap();
+        let src_dir = dir.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let path = src_dir.join("lib.rs");
+        fs::write(&path, src).unwrap();
+        path
+    }
+
+    fn scan(src: &str) -> Vec<String> {
+        let dir = tempdir().unwrap();
+        let path = write_crate(dir.path(), src);
+        let mut queries = Vec::new();
+        scan_file(&path, &mut queries);
+        queries
+    }
+
+    #[test]
+    fn scans_basic_query() {
+        let queries = scan(r#"fn main() { let _ = query!("SELECT 1"); }"#);
+        assert_eq!(queries, vec!["SELECT 1"]);
+    }
+
+    #[test]
+    fn scans_query_with_args() {
+        let queries = scan(r#"fn main() { let _ = query!("SELECT $1::int", 42); }"#);
+        assert_eq!(queries, vec!["SELECT $1::int"]);
+    }
+
+    #[test]
+    fn scans_query_scalar() {
+        let queries = scan(r#"fn main() { let _ = query_scalar!("SELECT count(*) FROM t"); }"#);
+        assert_eq!(queries, vec!["SELECT count(*) FROM t"]);
+    }
+
+    #[test]
+    fn query_as_skips_type() {
+        let queries =
+            scan(r#"fn main() { let _ = query_as!(User, "SELECT id, name FROM users"); }"#);
+        assert_eq!(queries, vec!["SELECT id, name FROM users"]);
+    }
+
+    #[test]
+    fn query_as_with_path_type() {
+        let queries = scan(
+            r#"fn main() { let _ = query_as!(crate::models::User, "SELECT id FROM users"); }"#,
+        );
+        assert_eq!(queries, vec!["SELECT id FROM users"]);
+    }
+
+    #[test]
+    fn path_prefixed_invocation() {
+        let queries = scan(r#"fn main() { let _ = resolute::query!("SELECT 2"); }"#);
+        assert_eq!(queries, vec!["SELECT 2"]);
+    }
+
+    #[test]
+    fn cfg_gated_code_is_scanned() {
+        let queries = scan(
+            r#"#[cfg(feature = "x")]
+               fn gated() { let _ = query!("SELECT 3"); }"#,
+        );
+        assert_eq!(queries, vec!["SELECT 3"]);
+    }
+
+    #[test]
+    fn nested_macro_arguments() {
+        let queries = scan(
+            r#"fn main() {
+                   println!("{:?}", query!("SELECT nested"));
+               }"#,
+        );
+        assert_eq!(queries, vec!["SELECT nested"]);
+    }
+
+    #[test]
+    fn multiple_queries_in_one_file() {
+        let queries = scan(
+            r#"fn a() { let _ = query!("SELECT 1"); }
+               fn b() { let _ = query_scalar!("SELECT 2"); }
+               fn c() { let _ = query_as!(T, "SELECT 3"); }"#,
+        );
+        assert_eq!(queries, vec!["SELECT 1", "SELECT 2", "SELECT 3"]);
+    }
+
+    #[test]
+    fn query_unchecked_is_not_scanned() {
+        let queries = scan(r#"fn main() { let _ = query_unchecked!("SELECT skip"); }"#);
+        assert!(queries.is_empty(), "got: {:?}", queries);
+    }
+
+    #[test]
+    fn non_query_macros_are_ignored() {
+        let queries = scan(r#"fn main() { println!("not a query"); vec!["x", "y"]; }"#);
+        assert!(queries.is_empty(), "got: {:?}", queries);
+    }
+
+    #[test]
+    fn unparseable_file_is_warned_not_panicked() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.0.0\"\n")
+            .unwrap();
+        let src_dir = dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let path = src_dir.join("lib.rs");
+        fs::write(&path, "fn broken( {").unwrap();
+        let mut queries = Vec::new();
+        scan_file(&path, &mut queries);
+        assert!(queries.is_empty());
+    }
+
+    #[test]
+    fn query_file_reads_sql_from_disk() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.0.0\"\n")
+            .unwrap();
+        let src_dir = dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let queries_dir = dir.path().join("queries");
+        fs::create_dir_all(&queries_dir).unwrap();
+        fs::write(queries_dir.join("get_user.sql"), "SELECT id FROM users WHERE id = $1\n")
+            .unwrap();
+        let rs_path = src_dir.join("lib.rs");
+        fs::write(
+            &rs_path,
+            r#"fn main() { let _ = query_file!("queries/get_user.sql", 1); }"#,
+        )
+        .unwrap();
+        let mut queries = Vec::new();
+        scan_file(&rs_path, &mut queries);
+        assert_eq!(queries, vec!["SELECT id FROM users WHERE id = $1"]);
+    }
+
+    #[test]
+    fn query_file_as_skips_type_and_reads_disk() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.0.0\"\n")
+            .unwrap();
+        let src_dir = dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let queries_dir = dir.path().join("queries");
+        fs::create_dir_all(&queries_dir).unwrap();
+        fs::write(queries_dir.join("list.sql"), "SELECT * FROM t").unwrap();
+        let rs_path = src_dir.join("lib.rs");
+        fs::write(
+            &rs_path,
+            r#"fn main() { let _ = query_file_as!(Row, "queries/list.sql"); }"#,
+        )
+        .unwrap();
+        let mut queries = Vec::new();
+        scan_file(&rs_path, &mut queries);
+        assert_eq!(queries, vec!["SELECT * FROM t"]);
+    }
+
+    #[test]
+    fn query_file_missing_file_is_skipped() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.0.0\"\n")
+            .unwrap();
+        let src_dir = dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let rs_path = src_dir.join("lib.rs");
+        fs::write(
+            &rs_path,
+            r#"fn main() { let _ = query_file!("queries/does_not_exist.sql"); }"#,
+        )
+        .unwrap();
+        let mut queries = Vec::new();
+        scan_file(&rs_path, &mut queries);
+        assert!(queries.is_empty());
+    }
+
+    #[test]
+    fn raw_string_literal_query() {
+        let queries = scan(
+            r##"fn main() { let _ = query!(r#"SELECT "quoted" FROM t"#); }"##,
+        );
+        assert_eq!(queries, vec![r#"SELECT "quoted" FROM t"#]);
+    }
+}
