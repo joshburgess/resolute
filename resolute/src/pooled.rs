@@ -149,4 +149,108 @@ impl PooledTypedClient {
     pub fn is_alive(&self) -> bool {
         self.guard.conn().0.is_alive()
     }
+
+    /// Begin a transaction on the pooled connection.
+    ///
+    /// The returned `PooledTransaction` borrows from this client, so the
+    /// connection is pinned to this checkout for the transaction's lifetime
+    /// and released back to the pool when this `PooledTypedClient` is dropped.
+    pub async fn begin(&self) -> Result<PooledTransaction<'_>, TypedError> {
+        self.simple_query("BEGIN").await?;
+        Ok(PooledTransaction {
+            client: self,
+            done: false,
+        })
+    }
+
+    /// Begin a transaction with a specific isolation level on the pooled
+    /// connection. See [`crate::IsolationLevel`] for the available levels.
+    pub async fn begin_with(
+        &self,
+        level: crate::IsolationLevel,
+    ) -> Result<PooledTransaction<'_>, TypedError> {
+        let sql = format!("BEGIN ISOLATION LEVEL {}", level.as_sql());
+        self.simple_query(&sql).await?;
+        Ok(PooledTransaction {
+            client: self,
+            done: false,
+        })
+    }
+}
+
+/// A transaction scoped to a pooled connection checkout.
+///
+/// Mirrors [`crate::Transaction`] but borrows from a [`PooledTypedClient`],
+/// so the pool guard is held for the transaction's lifetime. See the
+/// `Transaction` docs for the drop-behavior contract: dropping without
+/// calling `commit()` or `rollback()` logs a warning and relies on
+/// PostgreSQL's next-statement auto-rollback rather than sending `ROLLBACK`
+/// from the destructor.
+pub struct PooledTransaction<'a> {
+    client: &'a PooledTypedClient,
+    done: bool,
+}
+
+impl<'a> std::fmt::Debug for PooledTransaction<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PooledTransaction")
+            .field("done", &self.done)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a> PooledTransaction<'a> {
+    /// Execute a query within the transaction.
+    pub async fn query(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<Vec<Row>, TypedError> {
+        self.client.query(sql, params).await
+    }
+
+    /// Execute a statement within the transaction. Returns affected row count.
+    pub async fn execute(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<u64, TypedError> {
+        self.client.execute(sql, params).await
+    }
+
+    /// Execute a query with named parameters within the transaction.
+    pub async fn query_named(
+        &self,
+        sql: &str,
+        params: &[(&str, &dyn SqlParam)],
+    ) -> Result<Vec<Row>, TypedError> {
+        let (rewritten, names) = crate::named_params::rewrite(sql);
+        let ordered = crate::query::resolve_named_params(&names, params)?;
+        self.client.query(&rewritten, &ordered).await
+    }
+
+    /// Execute a named-param statement within the transaction. Returns affected row count.
+    pub async fn execute_named(
+        &self,
+        sql: &str,
+        params: &[(&str, &dyn SqlParam)],
+    ) -> Result<u64, TypedError> {
+        let (rewritten, names) = crate::named_params::rewrite(sql);
+        let ordered = crate::query::resolve_named_params(&names, params)?;
+        self.client.execute(&rewritten, &ordered).await
+    }
+
+    /// Commit the transaction.
+    pub async fn commit(mut self) -> Result<(), TypedError> {
+        self.done = true;
+        self.client.simple_query("COMMIT").await
+    }
+
+    /// Explicitly roll back the transaction.
+    pub async fn rollback(mut self) -> Result<(), TypedError> {
+        self.done = true;
+        self.client.simple_query("ROLLBACK").await
+    }
+}
+
+impl<'a> Drop for PooledTransaction<'a> {
+    fn drop(&mut self) {
+        if !self.done && self.client.is_alive() {
+            tracing::warn!(
+                "PooledTransaction dropped without commit — will auto-rollback on next use"
+            );
+        }
+    }
 }

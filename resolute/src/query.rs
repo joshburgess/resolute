@@ -892,7 +892,7 @@ impl<'a> Drop for Transaction<'a> {
 }
 
 /// Resolve named params: map `names` (from SQL rewriting) to the user-provided params slice.
-fn resolve_named_params<'a>(
+pub(crate) fn resolve_named_params<'a>(
     names: &[String],
     params: &[(&str, &'a dyn SqlParam)],
 ) -> Result<Vec<&'a dyn SqlParam>, TypedError> {

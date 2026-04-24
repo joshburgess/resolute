@@ -166,7 +166,7 @@ pub use newtypes::{PgDate, PgInet, PgNumeric, PgTimestamp};
 pub use oid::TypeOid;
 pub use pg_type::PgType;
 pub use pg_wired::CancelToken;
-pub use pooled::{PooledTypedClient, TypedPool};
+pub use pooled::{PooledTransaction, PooledTypedClient, TypedPool};
 pub use query::{
     parse_connection_string, Client, IsolationLevel, PipelineResult, RowStream, Transaction,
 };
