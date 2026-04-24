@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: resolute-test-pg
+    ports:
+      - "54322:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgrest_test
+    # Apply the shared fixture schema on first init. Files in this directory
+    # run once, in alphabetical order, against POSTGRES_DB after it's created.
+    volumes:
+      - ./tests/fixtures/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    # Ephemeral data volume: every `docker compose up` starts from a clean
+    # database. Fine for tests, fast, and avoids stale state from an old
+    # schema.sql lingering in a named volume.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "postgrest_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 3s
