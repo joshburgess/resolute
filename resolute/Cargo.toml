@@ -1,8 +1,16 @@
 [package]
 name = "resolute"
 version = "0.1.0"
-edition = "2021"
+description = "Compile-time-checked PostgreSQL queries with a pure-Rust wire protocol driver."
+edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords = ["postgres", "postgresql", "sql", "database", "async"]
+categories = ["database", "asynchronous"]
 
 [dependencies]
 pg-wired = { path = "../pg-wired" }

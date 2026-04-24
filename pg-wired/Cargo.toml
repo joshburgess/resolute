@@ -1,8 +1,16 @@
 [package]
 name = "pg-wired"
 version = "0.1.0"
-edition = "2021"
+description = "Minimal async PostgreSQL wire protocol v3 client: connection, extended query, pipelining, COPY, LISTEN/NOTIFY, TLS, SCRAM."
+edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords = ["postgres", "postgresql", "database", "async", "driver"]
+categories = ["database", "asynchronous", "network-programming"]
 
 [dependencies]
 tokio = { version = "1", features = ["net", "io-util", "sync", "rt", "macros", "time"] }

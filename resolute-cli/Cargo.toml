@@ -1,8 +1,16 @@
 [package]
 name = "resolute-cli"
 version = "0.1.0"
-edition = "2021"
+description = "CLI for resolute: offline query cache and database migrations."
+edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords = ["postgres", "postgresql", "migrations", "cli", "resolute"]
+categories = ["database", "command-line-utilities"]
 
 [[bin]]
 name = "resolute-cli"

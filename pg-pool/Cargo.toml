@@ -1,8 +1,16 @@
 [package]
 name = "pg-pool"
 version = "0.1.0"
-edition = "2021"
+description = "Async PostgreSQL connection pool built on pg-wired."
+edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords = ["postgres", "postgresql", "pool", "connection-pool", "async"]
+categories = ["database", "asynchronous"]
 
 [dependencies]
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }

@@ -1,8 +1,16 @@
 [package]
 name = "resolute-macros"
 version = "0.1.0"
-edition = "2021"
+description = "Compile-time-checked query! macro for resolute."
+edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords = ["postgres", "postgresql", "sql", "macro", "resolute"]
+categories = ["database", "development-tools::procedural-macro-helpers"]
 
 [lib]
 proc-macro = true
