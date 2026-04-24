@@ -22,18 +22,17 @@ use crate::protocol::types::{BackendMsg, FormatCode, FrontendMsg};
 // Request types
 // ---------------------------------------------------------------------------
 
-/// A request to execute on the connection.
-pub struct PipelineRequest {
-    /// Pre-encoded wire messages (Parse+Bind+Execute+Sync or Query).
-    pub messages: BytesMut,
-    /// How to collect the response.
-    pub collector: ResponseCollector,
-    /// Channel to send the response back to the caller.
-    pub response_tx: oneshot::Sender<Result<PipelineResponse, PgWireError>>,
+/// A request to execute on the connection. Internal plumbing between the
+/// public `submit` / `submit_batch` API and the writer task.
+pub(crate) struct PipelineRequest {
+    pub(crate) messages: BytesMut,
+    pub(crate) collector: ResponseCollector,
+    pub(crate) response_tx: oneshot::Sender<Result<PipelineResponse, PgWireError>>,
 }
 
 /// How to collect response messages for a request.
 #[allow(dead_code)]
+#[non_exhaustive]
 pub enum ResponseCollector {
     /// Collect DataRows until ReadyForQuery (for SELECT queries).
     Rows,
@@ -54,6 +53,7 @@ pub enum ResponseCollector {
 }
 
 /// Response from a pipeline request.
+#[non_exhaustive]
 pub enum PipelineResponse {
     Rows {
         /// Column metadata from RowDescription (empty if no RowDescription received).
@@ -67,22 +67,13 @@ pub enum PipelineResponse {
 }
 
 /// Metadata sent at the start of a streaming response.
+#[derive(Debug, Clone)]
 pub struct StreamHeader {
     pub fields: Vec<crate::protocol::types::FieldDescription>,
 }
 
 /// A single streamed row.
 pub type StreamedRow = Vec<Option<Vec<u8>>>;
-
-/// How a streaming request communicates with the reader task.
-pub struct StreamRequest {
-    /// Pre-encoded wire messages.
-    pub messages: BytesMut,
-    /// Channel to send the column metadata header.
-    pub header_tx: oneshot::Sender<Result<StreamHeader, PgWireError>>,
-    /// Channel to send individual rows. Closed when done or on error.
-    pub row_tx: mpsc::Sender<Result<StreamedRow, PgWireError>>,
-}
 
 // ---------------------------------------------------------------------------
 // Async connection
@@ -102,6 +93,16 @@ pub struct AsyncConn {
     #[allow(dead_code)]
     notification_tx: mpsc::Sender<crate::protocol::types::BackendMsg>,
     notification_rx: std::sync::Mutex<Option<mpsc::Receiver<crate::protocol::types::BackendMsg>>>,
+}
+
+impl std::fmt::Debug for AsyncConn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AsyncConn")
+            .field("addr", &self.addr)
+            .field("backend_pid", &self.backend_pid)
+            .field("alive", &self.is_alive())
+            .finish()
+    }
 }
 
 impl AsyncConn {

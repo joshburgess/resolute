@@ -30,6 +30,15 @@ impl WireConn {
     }
 }
 
+impl std::fmt::Debug for WireConn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WireConn")
+            .field("pid", &self.pid)
+            .field("params", &self.params)
+            .finish_non_exhaustive()
+    }
+}
+
 const RECV_BUF_SIZE: usize = 32 * 1024; // 32KB recv buffer
 
 impl WireConn {

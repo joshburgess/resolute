@@ -151,13 +151,14 @@ pub mod range;
 pub mod reconnect;
 pub mod retry;
 mod row;
+#[cfg(feature = "test-utils")]
 pub mod test_db;
 mod types;
 
 pub use bytes::BytesMut;
 pub use checked::{CheckedQuery, UncheckedQuery};
 pub use decode::{Decode, DecodeText};
-pub use encode::{encode_array_header, Encode, SqlParam};
+pub use encode::{Encode, SqlParam};
 pub use error::TypedError;
 pub use executor::Executor;
 pub use listener::{ListenerEvent, Notification, PgListener};

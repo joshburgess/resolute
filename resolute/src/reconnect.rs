@@ -52,6 +52,17 @@ pub struct ReconnectingClient {
     init_sql: Vec<String>,
 }
 
+impl std::fmt::Debug for ReconnectingClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReconnectingClient")
+            .field("addr", &self.addr)
+            .field("user", &self.user)
+            .field("database", &self.database)
+            .field("alive", &self.client.load().is_alive())
+            .finish()
+    }
+}
+
 impl ReconnectingClient {
     /// Create a new auto-reconnecting client.
     pub async fn new(

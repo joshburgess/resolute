@@ -17,6 +17,7 @@ use crate::row::Row;
 /// Connections are `AsyncConn` instances that persist across checkouts.
 /// Each checkout returns a `PooledTypedClient` that auto-returns the
 /// connection to the pool on drop.
+#[derive(Debug)]
 pub struct TypedPool {
     pool: Arc<ConnPool<AsyncPoolable>>,
 }
@@ -94,6 +95,12 @@ impl TypedPool {
 /// the connection is returned to the pool for reuse.
 pub struct PooledTypedClient {
     guard: PoolGuard<AsyncPoolable>,
+}
+
+impl std::fmt::Debug for PooledTypedClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PooledTypedClient").finish_non_exhaustive()
+    }
 }
 
 impl PooledTypedClient {

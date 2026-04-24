@@ -53,6 +53,17 @@ pub struct PgListener {
     database: String,
 }
 
+impl std::fmt::Debug for PgListener {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PgListener")
+            .field("addr", &self.addr)
+            .field("user", &self.user)
+            .field("database", &self.database)
+            .field("channels", &self.channels)
+            .finish()
+    }
+}
+
 impl PgListener {
     /// Connect and create a listener.
     pub async fn connect(

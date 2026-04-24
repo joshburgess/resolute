@@ -22,6 +22,15 @@ pub struct CheckedQuery<'a, T> {
     pub mapper: fn(&Row) -> Result<T, TypedError>,
 }
 
+impl<'a, T> std::fmt::Debug for CheckedQuery<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CheckedQuery")
+            .field("sql", &self.sql)
+            .field("param_count", &self.params.len())
+            .finish()
+    }
+}
+
 impl<'a, T> CheckedQuery<'a, T> {
     /// Execute and return all rows.
     pub async fn fetch_all(self, db: &impl Executor) -> Result<Vec<T>, TypedError> {
@@ -51,6 +60,15 @@ impl<'a, T> CheckedQuery<'a, T> {
 pub struct UncheckedQuery<'a> {
     pub sql: &'a str,
     pub params: Vec<&'a dyn SqlParam>,
+}
+
+impl<'a> std::fmt::Debug for UncheckedQuery<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UncheckedQuery")
+            .field("sql", &self.sql)
+            .field("param_count", &self.params.len())
+            .finish()
+    }
 }
 
 impl<'a> UncheckedQuery<'a> {

@@ -4,6 +4,7 @@ use crate::decode::{Decode, DecodeText};
 use crate::error::TypedError;
 
 /// A row from a query result with typed column access.
+#[derive(Debug, Clone)]
 pub struct Row {
     /// Column names (from RowDescription).
     pub(crate) columns: Vec<String>,

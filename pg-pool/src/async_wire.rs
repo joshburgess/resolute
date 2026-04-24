@@ -11,6 +11,7 @@ use crate::Poolable;
 /// The `AsyncConn` spawns reader/writer tasks on creation and keeps them
 /// running until the connection dies. Pooling `AsyncConn` directly means
 /// connections are reused without re-establishing TCP or re-authenticating.
+#[derive(Debug)]
 pub struct AsyncPoolable(pub pg_wired::AsyncConn);
 
 impl Poolable for AsyncPoolable {

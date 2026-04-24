@@ -24,12 +24,33 @@ pub struct ConnConfig {
     pub tls_mode: TlsMode,
 }
 
+impl std::fmt::Debug for ConnConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnConfig")
+            .field("addr", &self.addr)
+            .field("user", &self.user)
+            .field("password", &"<redacted>")
+            .field("database", &self.database)
+            .field("tls_mode", &self.tls_mode)
+            .finish()
+    }
+}
+
 /// A pool of N AsyncConns for parallel PostgreSQL backend utilization.
 /// Detects dead connections and replaces them automatically.
 pub struct AsyncPool {
     conns: Vec<RwLock<Arc<AsyncConn>>>,
     config: ConnConfig,
     counter: AtomicUsize,
+}
+
+impl std::fmt::Debug for AsyncPool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AsyncPool")
+            .field("size", &self.conns.len())
+            .field("config", &self.config)
+            .finish()
+    }
 }
 
 impl AsyncPool {

@@ -18,6 +18,16 @@ pub struct PgPipeline {
     send_buf: BytesMut,
 }
 
+impl std::fmt::Debug for PgPipeline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PgPipeline")
+            .field("conn", &self.conn)
+            .field("cached_statements", &self.stmt_cache.len())
+            .field("max_cache_size", &self.max_cache_size)
+            .finish()
+    }
+}
+
 impl PgPipeline {
     pub fn new(conn: WireConn) -> Self {
         Self {

@@ -48,6 +48,7 @@ pub trait Poolable: Send + 'static {
 
 /// Errors returned by pool operations.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PoolError<E: std::error::Error> {
     /// Connection creation failed.
     Connect(E),
@@ -161,6 +162,19 @@ pub struct LifecycleHooks<C> {
     pub on_destroy: Hook,
 }
 
+impl<C> std::fmt::Debug for LifecycleHooks<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LifecycleHooks")
+            .field("on_create", &self.on_create.is_some())
+            .field("before_acquire", &self.before_acquire.is_some())
+            .field("on_checkout", &self.on_checkout.is_some())
+            .field("on_checkin", &self.on_checkin.is_some())
+            .field("after_release", &self.after_release.is_some())
+            .field("on_destroy", &self.on_destroy.is_some())
+            .finish()
+    }
+}
+
 impl<C> Default for LifecycleHooks<C> {
     fn default() -> Self {
         Self {
@@ -228,6 +242,16 @@ pub struct ConnPool<C: Poolable> {
     draining: AtomicBool,
     drain_complete: Notify,
     shutdown_tx: mpsc::Sender<()>,
+}
+
+impl<C: Poolable> std::fmt::Debug for ConnPool<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnPool")
+            .field("config", &self.config)
+            .field("metrics", &self.metrics())
+            .field("draining", &self.draining.load(Ordering::Relaxed))
+            .finish()
+    }
 }
 
 impl<C: Poolable> ConnPool<C> {
@@ -617,6 +641,14 @@ impl<C: Poolable> ConnPool<C> {
 pub struct PoolGuard<C: Poolable> {
     conn: Option<C>,
     pool: Arc<ConnPool<C>>,
+}
+
+impl<C: Poolable + std::fmt::Debug> std::fmt::Debug for PoolGuard<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PoolGuard")
+            .field("conn", &self.conn)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<C: Poolable> PoolGuard<C> {

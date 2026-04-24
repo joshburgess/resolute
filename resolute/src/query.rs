@@ -19,6 +19,7 @@ use crate::row::Row;
 
 /// Transaction isolation level for `begin_with()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum IsolationLevel {
     /// `READ COMMITTED` — default PostgreSQL isolation level.
     /// Each statement sees only rows committed before it began.
@@ -44,6 +45,7 @@ impl IsolationLevel {
 
 /// A typed query client wrapping an AsyncConn.
 /// Sends parameters in binary format and requests binary results.
+#[derive(Debug)]
 pub struct Client {
     conn: AsyncConn,
 }
@@ -353,6 +355,7 @@ impl Client {
                 Ok(rows)
             }
             PipelineResponse::Done => Ok(Vec::new()),
+            _ => Ok(Vec::new()),
         }
     }
 
@@ -471,6 +474,7 @@ impl Client {
         match resp {
             PipelineResponse::Rows { command_tag, .. } => Ok(parse_row_count(&command_tag)),
             PipelineResponse::Done => Ok(0),
+            _ => Ok(0),
         }
     }
 
@@ -799,6 +803,7 @@ impl Client {
 // ---------------------------------------------------------------------------
 
 /// A transaction guard. Commits on `commit()`, rolls back on drop.
+#[derive(Debug)]
 pub struct Transaction<'a> {
     pub(crate) client: &'a Client,
     pub(crate) done: bool,
@@ -893,6 +898,7 @@ fn resolve_named_params<'a>(
 ///     .run()
 ///     .await?;
 /// ```
+#[derive(Debug)]
 #[must_use = "Pipeline does nothing until .run() is awaited"]
 pub struct Pipeline<'a> {
     client: &'a Client,
@@ -901,6 +907,7 @@ pub struct Pipeline<'a> {
 }
 
 /// Result from a single pipeline step.
+#[non_exhaustive]
 pub enum PipelineResult {
     /// Rows from a SELECT query.
     Rows(Vec<Row>),
@@ -1031,6 +1038,9 @@ impl<'a> Pipeline<'a> {
                 PipelineResponse::Done => {
                     results.push(PipelineResult::Execute(0));
                 }
+                _ => {
+                    results.push(PipelineResult::Execute(0));
+                }
             }
         }
 
@@ -1056,6 +1066,7 @@ impl Client {
 ///
 /// Implements `tokio_stream::Stream<Item = Result<Row, TypedError>>` for
 /// row-at-a-time consumption without buffering the entire result set.
+#[derive(Debug)]
 pub struct RowStream {
     row_rx: mpsc::Receiver<Result<Vec<Option<Vec<u8>>>, pg_wired::PgWireError>>,
     columns: Vec<String>,
