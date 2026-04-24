@@ -128,6 +128,10 @@ pg-wired has an optional `tls` feature for rustls-based TLS connections.
 
 **Performance.** [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) explains where the speedup comes from: binary encode fast path, statement caching, TCP write coalescing, FIFO response matching, lock-free atomics. Also describes the benchmark methodology.
 
+## Minimum Supported Rust Version
+
+Resolute builds on stable Rust 1.75 and newer. Bumping the MSRV is considered a minor-version change.
+
 ## License
 
 Dual licensed under [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT).
