@@ -100,9 +100,15 @@ impl Client {
     /// - `postgresql://user:pass@host:port/dbname`
     /// - `host=localhost port=5432 dbname=mydb user=postgres password=secret`
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn example() -> Result<(), resolute::TypedError> {
+    /// use resolute::Client;
     /// let client = Client::connect_from_str("postgres://user:pass@localhost/mydb").await?;
-    /// let client = Client::connect_from_str("host=localhost dbname=mydb user=postgres").await?;
+    /// # let _ = client;
+    /// # let client = Client::connect_from_str("host=localhost dbname=mydb user=postgres").await?;
+    /// # let _ = client;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Errors
@@ -200,12 +206,16 @@ impl Client {
     ///
     /// Parameters are encoded in binary format. Results are requested in binary.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn example(client: &resolute::Client) -> Result<(), resolute::TypedError> {
     /// let rows = client.query("SELECT id, name FROM users WHERE id = $1", &[&42i32]).await?;
     /// for row in &rows {
     ///     let id: i32 = row.get(0)?;
     ///     let name: String = row.get(1)?;
+    ///     # let _ = (id, name);
     /// }
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Errors
@@ -738,11 +748,15 @@ impl Client {
     /// Named params are rewritten to `$1, $2, ...` before sending to PostgreSQL.
     /// Duplicate names in SQL reuse the same positional slot.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn example(client: &resolute::Client) -> Result<(), resolute::TypedError> {
     /// let rows = client.query_named(
     ///     "SELECT * FROM users WHERE id = :id AND org = :org",
     ///     &[("id", &42i32), ("org", &"acme")],
     /// ).await?;
+    /// # let _ = rows;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Errors

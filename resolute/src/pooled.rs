@@ -17,6 +17,17 @@ use crate::row::Row;
 /// Connections are `AsyncConn` instances that persist across checkouts.
 /// Each checkout returns a `PooledTypedClient` that auto-returns the
 /// connection to the pool on drop.
+///
+/// ```no_run
+/// # async fn example() -> Result<(), resolute::TypedError> {
+/// use resolute::TypedPool;
+/// let pool = TypedPool::connect("127.0.0.1:5432", "user", "pass", "mydb", 10).await?;
+/// let client = pool.get().await?;
+/// let rows = client.query("SELECT 1::int4 AS n", &[]).await?;
+/// # let _ = rows;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct TypedPool {
     pool: Arc<ConnPool<AsyncPoolable>>,
