@@ -395,18 +395,20 @@ fn query_impl(input: QueryInput) -> TokenStream {
     let field_types: Vec<_> = match column_infos
         .iter()
         .zip(overrides.iter())
-        .map(|(c, (_, type_override))| -> Result<proc_macro2::TokenStream, String> {
-            let base = if let Some(ref custom) = type_override {
-                custom.clone()
-            } else {
-                oid_to_rust_type(c.type_oid)?
-            };
-            Ok(if c.nullable {
-                quote! { Option<#base> }
-            } else {
-                base
-            })
-        })
+        .map(
+            |(c, (_, type_override))| -> Result<proc_macro2::TokenStream, String> {
+                let base = if let Some(ref custom) = type_override {
+                    custom.clone()
+                } else {
+                    oid_to_rust_type(c.type_oid)?
+                };
+                Ok(if c.nullable {
+                    quote! { Option<#base> }
+                } else {
+                    base
+                })
+            },
+        )
         .collect::<Result<Vec<_>, String>>()
     {
         Ok(v) => v,

@@ -29,7 +29,7 @@ impl PgPipeline {
         }
     }
 
-    /// Execute a parameterized query, returning rows as Vec<Vec<Option<Vec<u8>>>>.
+    /// Execute a parameterized query, returning rows as `Vec<Vec<Option<Vec<u8>>>>`.
     /// Uses binary format for parameters and results.
     /// On cache miss: Parse+Bind+Execute+Sync in ONE write.
     /// On cache hit: Bind+Execute+Sync in ONE write.

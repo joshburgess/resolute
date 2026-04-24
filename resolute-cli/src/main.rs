@@ -3,7 +3,7 @@
 //! Usage:
 //!   resolute-cli prepare               # Cache query metadata for offline builds
 //!   resolute-cli check                 # Verify cached queries against DB
-//!   resolute-cli migrate create <name> # Create a new migration
+//!   resolute-cli migrate create NAME   # Create a new migration
 //!   resolute-cli migrate run           # Run pending migrations
 //!   resolute-cli migrate revert        # Revert the last migration
 //!   resolute-cli migrate status        # Show migration status
@@ -667,7 +667,11 @@ mod tests {
     use tempfile::tempdir;
 
     fn write_crate(dir: &Path, src: &str) -> PathBuf {
-        fs::write(dir.join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.0.0\"\n").unwrap();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname=\"t\"\nversion=\"0.0.0\"\n",
+        )
+        .unwrap();
         let src_dir = dir.join("src");
         fs::create_dir_all(&src_dir).unwrap();
         let path = src_dir.join("lib.rs");
@@ -766,8 +770,11 @@ mod tests {
     #[test]
     fn unparseable_file_is_warned_not_panicked() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.0.0\"\n")
-            .unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname=\"t\"\nversion=\"0.0.0\"\n",
+        )
+        .unwrap();
         let src_dir = dir.path().join("src");
         fs::create_dir_all(&src_dir).unwrap();
         let path = src_dir.join("lib.rs");
@@ -780,14 +787,20 @@ mod tests {
     #[test]
     fn query_file_reads_sql_from_disk() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.0.0\"\n")
-            .unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname=\"t\"\nversion=\"0.0.0\"\n",
+        )
+        .unwrap();
         let src_dir = dir.path().join("src");
         fs::create_dir_all(&src_dir).unwrap();
         let queries_dir = dir.path().join("queries");
         fs::create_dir_all(&queries_dir).unwrap();
-        fs::write(queries_dir.join("get_user.sql"), "SELECT id FROM users WHERE id = $1\n")
-            .unwrap();
+        fs::write(
+            queries_dir.join("get_user.sql"),
+            "SELECT id FROM users WHERE id = $1\n",
+        )
+        .unwrap();
         let rs_path = src_dir.join("lib.rs");
         fs::write(
             &rs_path,
@@ -802,8 +815,11 @@ mod tests {
     #[test]
     fn query_file_as_skips_type_and_reads_disk() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.0.0\"\n")
-            .unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname=\"t\"\nversion=\"0.0.0\"\n",
+        )
+        .unwrap();
         let src_dir = dir.path().join("src");
         fs::create_dir_all(&src_dir).unwrap();
         let queries_dir = dir.path().join("queries");
@@ -823,8 +839,11 @@ mod tests {
     #[test]
     fn query_file_missing_file_is_skipped() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"t\"\nversion=\"0.0.0\"\n")
-            .unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname=\"t\"\nversion=\"0.0.0\"\n",
+        )
+        .unwrap();
         let src_dir = dir.path().join("src");
         fs::create_dir_all(&src_dir).unwrap();
         let rs_path = src_dir.join("lib.rs");
@@ -840,9 +859,7 @@ mod tests {
 
     #[test]
     fn raw_string_literal_query() {
-        let queries = scan(
-            r##"fn main() { let _ = query!(r#"SELECT "quoted" FROM t"#); }"##,
-        );
+        let queries = scan(r##"fn main() { let _ = query!(r#"SELECT "quoted" FROM t"#); }"##);
         assert_eq!(queries, vec![r#"SELECT "quoted" FROM t"#]);
     }
 }

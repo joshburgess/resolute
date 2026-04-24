@@ -17,7 +17,7 @@ pub trait Encode {
     fn encode(&self, buf: &mut BytesMut);
 
     /// Encode as a binary parameter: 4-byte length + data.
-    /// Returns None for NULL values (handled by Option<T>).
+    /// Returns None for NULL values (handled by `Option<T>`).
     fn encode_param(&self, buf: &mut BytesMut) {
         let start = buf.len();
         buf.put_i32(0); // placeholder for length

@@ -244,8 +244,11 @@ impl<T: DecodeText + PgType> DecodeText for PgRange<T> {
 const INT4RANGE_OID: u32 = 3904;
 const INT8RANGE_OID: u32 = 3926;
 const NUMRANGE_OID: u32 = 3906;
+#[cfg(feature = "chrono")]
 const DATERANGE_OID: u32 = 3912;
+#[cfg(feature = "chrono")]
 const TSRANGE_OID: u32 = 3908;
+#[cfg(feature = "chrono")]
 const TSTZRANGE_OID: u32 = 3910;
 
 impl PgType for PgRange<i32> {
