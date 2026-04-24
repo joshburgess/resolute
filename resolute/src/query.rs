@@ -1138,6 +1138,11 @@ fn parse_row_count(tag: &str) -> u64 {
 /// - `host=localhost port=5432 dbname=mydb user=postgres password=secret`
 ///
 /// Returns `(user, password, host, port, database)` or `None` if parsing fails.
+///
+/// This function is exposed for internal use by `resolute` itself (migrations,
+/// admin helpers, tests). It is not part of the stable public API: the tuple
+/// shape and semantics may change. Prefer `Client::connect` for normal use.
+#[doc(hidden)]
 pub fn parse_connection_string(s: &str) -> Option<(String, String, String, u16, String)> {
     if s.starts_with("postgres://") || s.starts_with("postgresql://") {
         parse_pg_uri(s)
