@@ -1,7 +1,6 @@
-error: proc-macro derive panicked
- --> tests/compile_fail_derive/from_row_flatten_with_try_from.rs:7:10
-  |
-7 | #[derive(resolute::FromRow)]
-  |          ^^^^^^^^^^^^^^^^^
-  |
-  = help: message: from_row(flatten) cannot be combined with rename, json, or try_from
+error: from_row(flatten) cannot be combined with rename, json, or try_from
+  --> tests/compile_fail_derive/from_row_flatten_with_try_from.rs:9:5
+   |
+ 9 | /     #[from_row(flatten, try_from = "Inner")]
+10 | |     inner: Inner,
+   | |________________^

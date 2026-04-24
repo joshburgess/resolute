@@ -1,7 +1,5 @@
-error: proc-macro derive panicked
- --> tests/compile_fail_derive/pg_domain_multiple_fields.rs:2:10
+error: PgDomain requires a tuple struct with exactly one field, e.g. `struct Bad(String)`
+ --> tests/compile_fail_derive/pg_domain_multiple_fields.rs:3:1
   |
-2 | #[derive(resolute::PgDomain)]
-  |          ^^^^^^^^^^^^^^^^^^
-  |
-  = help: message: PgDomain requires a tuple struct with exactly one field, e.g. `struct Bad(String)`
+3 | struct Bad(String, i32);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^

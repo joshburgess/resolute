@@ -28,30 +28,45 @@ use quote::quote;
 use syn::{Data, DeriveInput, LitStr};
 
 pub fn derive(input: DeriveInput) -> TokenStream {
+    match derive_inner(input) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+fn derive_inner(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let variants = match &input.data {
         Data::Enum(data) => &data.variants,
-        _ => panic!("PgEnum can only be derived for enums"),
+        _ => {
+            return Err(syn::Error::new_spanned(
+                &input,
+                "PgEnum can only be derived for enums",
+            ));
+        }
     };
 
     // Validate: all variants must be unit (no fields).
     for v in variants {
         if !v.fields.is_empty() {
-            panic!(
-                "PgEnum: variant `{}` has fields — only unit variants are supported",
-                v.ident
-            );
+            return Err(syn::Error::new_spanned(
+                v,
+                format!(
+                    "PgEnum: variant `{}` has fields, only unit variants are supported",
+                    v.ident
+                ),
+            ));
         }
     }
 
     if let Some(repr) = get_repr_int(&input.attrs) {
         derive_int_enum(&input, &repr)
     } else {
-        derive_string_enum(&input)
+        Ok(derive_string_enum(&input))
     }
 }
 
 /// Generate impls for string-based PostgreSQL enum types.
-fn derive_string_enum(input: &DeriveInput) -> TokenStream {
+fn derive_string_enum(input: &DeriveInput) -> proc_macro2::TokenStream {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -83,7 +98,7 @@ fn derive_string_enum(input: &DeriveInput) -> TokenStream {
 
     let name_str = name.to_string();
 
-    let expanded = quote! {
+    quote! {
         impl #impl_generics resolute::Encode for #name #ty_generics #where_clause {
             fn type_oid(&self) -> resolute::TypeOid {
                 resolute::TypeOid::Unspecified
@@ -129,13 +144,11 @@ fn derive_string_enum(input: &DeriveInput) -> TokenStream {
             const OID: u32 = #custom_oid;
             const ARRAY_OID: u32 = #custom_array_oid;
         }
-    };
-
-    TokenStream::from(expanded)
+    }
 }
 
 /// Generate impls for integer-backed enums (`#[repr(i16/i32/i64)]`).
-fn derive_int_enum(input: &DeriveInput, repr: &str) -> TokenStream {
+fn derive_int_enum(input: &DeriveInput, repr: &str) -> syn::Result<proc_macro2::TokenStream> {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -169,10 +182,13 @@ fn derive_int_enum(input: &DeriveInput, repr: &str) -> TokenStream {
     // Validate all variants have explicit discriminants.
     for v in variants {
         if v.discriminant.is_none() {
-            panic!(
-                "PgEnum with #[repr({repr})]: variant `{}` must have an explicit discriminant (e.g., = 1)",
-                v.ident
-            );
+            return Err(syn::Error::new_spanned(
+                v,
+                format!(
+                    "PgEnum with #[repr({repr})]: variant `{}` must have an explicit discriminant (e.g., = 1)",
+                    v.ident
+                ),
+            ));
         }
     }
 
@@ -203,7 +219,7 @@ fn derive_int_enum(input: &DeriveInput, repr: &str) -> TokenStream {
         })
         .collect();
 
-    let expanded = quote! {
+    Ok(quote! {
         impl #impl_generics resolute::Encode for #name #ty_generics #where_clause {
             fn type_oid(&self) -> resolute::TypeOid {
                 <#repr_type as resolute::Encode>::type_oid(&(0 as #repr_type))
@@ -256,9 +272,7 @@ fn derive_int_enum(input: &DeriveInput, repr: &str) -> TokenStream {
             const OID: u32 = #oid;
             const ARRAY_OID: u32 = #array_oid;
         }
-    };
-
-    TokenStream::from(expanded)
+    })
 }
 
 /// Parse optional `#[pg_type(oid = N)]` and `#[pg_type(array_oid = N)]`.

@@ -1,6 +1,6 @@
 //! Offline query metadata cache.
 //!
-//! Stores query metadata as JSON files in `.sqlx/query-{hash}.json`.
+//! Stores query metadata as JSON files in `.resolute/query-{hash}.json`.
 //! Compatible with CI/Docker builds where no database is available.
 
 use serde::{Deserialize, Serialize};
@@ -29,19 +29,18 @@ pub struct CacheEntry {
     pub columns: Vec<CachedColumn>,
 }
 
-/// Find the `.sqlx` cache directory.
-/// Walks up from the crate's manifest dir to find the workspace root.
+/// Find the `.resolute` cache directory.
+/// Walks up from the crate's manifest dir to the workspace root.
 fn cache_dir() -> PathBuf {
     // CARGO_MANIFEST_DIR points to the crate being compiled.
-    // Walk up to find .sqlx/ (could be at workspace root or crate root).
+    // Walk up to find an existing .resolute/ (could be at workspace root).
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."));
 
-    // Check crate root first, then walk up.
     let mut dir = manifest_dir.clone();
     loop {
-        let candidate = dir.join(".sqlx");
+        let candidate = dir.join(".resolute");
         if candidate.is_dir() {
             return candidate;
         }
@@ -50,15 +49,14 @@ fn cache_dir() -> PathBuf {
         }
     }
 
-    // Default: .sqlx/ next to the workspace Cargo.toml.
-    // Walk up from manifest dir looking for workspace root (has [workspace] in Cargo.toml).
+    // No existing directory: place it next to the workspace Cargo.toml.
     let mut dir = manifest_dir;
     loop {
         let cargo_toml = dir.join("Cargo.toml");
         if cargo_toml.exists() {
             if let Ok(contents) = std::fs::read_to_string(&cargo_toml) {
                 if contents.contains("[workspace]") {
-                    return dir.join(".sqlx");
+                    return dir.join(".resolute");
                 }
             }
         }
@@ -68,7 +66,7 @@ fn cache_dir() -> PathBuf {
     }
 
     // Fallback: current directory.
-    PathBuf::from(".sqlx")
+    PathBuf::from(".resolute")
 }
 
 /// Cache file path for a query hash.
@@ -86,7 +84,8 @@ pub fn read_cache(hash: u64) -> Option<CacheEntry> {
 /// Write query metadata to the cache.
 pub fn write_cache(entry: &CacheEntry) -> Result<(), String> {
     let dir = cache_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create .sqlx directory: {e}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create .resolute directory: {e}"))?;
 
     let path = dir.join(format!("query-{:016x}.json", entry.hash));
     let json = serde_json::to_string_pretty(entry)

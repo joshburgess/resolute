@@ -1,7 +1,5 @@
-error: proc-macro derive panicked
- --> tests/compile_fail_derive/from_row_on_tuple_struct.rs:2:10
+error: FromRow only supports structs with named fields
+ --> tests/compile_fail_derive/from_row_on_tuple_struct.rs:3:1
   |
-2 | #[derive(resolute::FromRow)]
-  |          ^^^^^^^^^^^^^^^^^
-  |
-  = help: message: FromRow only supports structs with named fields
+3 | struct Bad(i32, String);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^

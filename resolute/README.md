@@ -17,7 +17,7 @@ resolute validates SQL against a live database at compile time (or offline via c
 - **Rich FromRow derive**: `skip`, `default`, `json`, `try_from`, `flatten` attributes
 - **Generic arrays**: `Vec<T>` for all Encode/Decode types (bool, i16, i32, i64, f32, f64, String, UUID, chrono types, JSON, numeric, inet)
 - **Pool lifecycle hooks**: `before_acquire`, `on_create`, `on_checkout`, `on_checkin`, `after_release`, `on_destroy`
-- **Offline builds**: `.sqlx/` cache + `resolute-cli prepare` for CI/Docker
+- **Offline builds**: `.resolute/` cache + `resolute-cli prepare` for CI/Docker
 - **Connection pooling**: `TypedPool` with typed checkout
 - **LISTEN/NOTIFY**: `PgListener` for real-time notifications
 - **Migrations**: Embedded runner + CLI (create, run, revert, status)

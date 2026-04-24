@@ -17,6 +17,13 @@ use quote::quote;
 use syn::{Data, DeriveInput, Fields};
 
 pub fn derive(input: DeriveInput) -> TokenStream {
+    match derive_inner(input) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+fn derive_inner(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let (custom_oid, custom_array_oid) = get_custom_oids(&input.attrs);
@@ -26,15 +33,24 @@ pub fn derive(input: DeriveInput) -> TokenStream {
             Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
                 &fields.unnamed.first().unwrap().ty
             }
-            _ => panic!(
-                "PgDomain requires a tuple struct with exactly one field, e.g. `struct {}(String)`",
-                name
-            ),
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    &input,
+                    format!(
+                        "PgDomain requires a tuple struct with exactly one field, e.g. `struct {name}(String)`"
+                    ),
+                ));
+            }
         },
-        _ => panic!("PgDomain only supports tuple structs"),
+        _ => {
+            return Err(syn::Error::new_spanned(
+                &input,
+                "PgDomain only supports tuple structs",
+            ));
+        }
     };
 
-    let expanded = quote! {
+    Ok(quote! {
         impl #impl_generics resolute::Encode for #name #ty_generics #where_clause {
             fn type_oid(&self) -> resolute::TypeOid {
                 resolute::TypeOid::Unspecified
@@ -66,9 +82,7 @@ pub fn derive(input: DeriveInput) -> TokenStream {
             };
         }
 
-    };
-
-    TokenStream::from(expanded)
+    })
 }
 
 /// Parse optional `#[pg_type(oid = N)]` and `#[pg_type(array_oid = N)]`.

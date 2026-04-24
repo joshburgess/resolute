@@ -52,7 +52,7 @@ Tracing a single `query!` call from source through to response:
    1. Parse `query!("SELECT id FROM t WHERE x = :x", x = 1)` input.
    2. Rewrite `:x` to `$1`, produce ordered params.
    3. Hash the rewritten SQL.
-   4. Look up `.sqlx/query-{hash}.json`. Cache hit: skip to 5. Miss and online: connect to `$DATABASE_URL` via pg-wired, `Parse + Describe + Sync`, extract param OIDs, column OIDs, nullability from `pg_attribute`. Write cache file. Miss and offline: compile error.
+   4. Look up `.resolute/query-{hash}.json`. Cache hit: skip to 5. Miss and online: connect to `$DATABASE_URL` via pg-wired, `Parse + Describe + Sync`, extract param OIDs, column OIDs, nullability from `pg_attribute`. Write cache file. Miss and offline: compile error.
    5. Generate a struct, param type assertions, and a `CheckedQuery<__QueryResult_HASH>` value.
 2. **Runtime** (resolute):
    1. User calls `.fetch_all(&client)` on the `CheckedQuery`. This dispatches through the `Executor` trait.

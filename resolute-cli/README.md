@@ -7,7 +7,7 @@ lightweight migration runner. Ships one binary: `resolute-cli`.
 
 - **`prepare`**: scans the crate for `query!` / `query_as!` / etc
   invocations, connects to the live database, and caches the column
-  and parameter metadata in `.sqlx/` so subsequent builds don't need
+  and parameter metadata in `.resolute/` so subsequent builds don't need
   a database. Check this directory into source control if you want
   offline / reproducible builds.
 - **`check`**: re-runs `prepare` in verify mode, flagging any queries
@@ -31,7 +31,7 @@ cargo run -p resolute-cli -- --help
 ```
 export DATABASE_URL=postgres://user:pass@localhost:5432/mydb
 
-resolute-cli prepare               # populate .sqlx/
+resolute-cli prepare               # populate .resolute/
 resolute-cli migrate create add_users
 resolute-cli migrate run
 resolute-cli migrate status

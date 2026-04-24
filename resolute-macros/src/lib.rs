@@ -5,7 +5,7 @@
 //!
 //! # Modes
 //!
-//! - **Online (default):** Connects to DB via `DATABASE_URL`, caches results to `.sqlx/`
+//! - **Online (default):** Connects to DB via `DATABASE_URL`, caches results to `.resolute/`
 //! - **Offline:** Set `RESOLUTE_OFFLINE=true` to use cached metadata only (no DB needed)
 //! - **Prepare:** Run `resolute-cli prepare` to populate the cache from source files
 //!
@@ -241,8 +241,12 @@ fn describe_live(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), Stri
 }
 
 /// Map a PostgreSQL type OID to a Rust type token.
-fn oid_to_rust_type(oid: u32) -> proc_macro2::TokenStream {
-    match oid {
+///
+/// Returns `Err` if the OID maps to a Rust type behind a disabled feature
+/// (`chrono`, `json`, or `uuid`). Callers surface the error as a
+/// `syn::Error` pointing at the SQL literal.
+fn oid_to_rust_type(oid: u32) -> Result<proc_macro2::TokenStream, String> {
+    let ty = match oid {
         // Scalar types
         16 => quote! { bool },
         18 | 19 | 25 | 1042 | 1043 => quote! { String },
@@ -252,12 +256,6 @@ fn oid_to_rust_type(oid: u32) -> proc_macro2::TokenStream {
         700 => quote! { f32 },
         701 => quote! { f64 },
         17 => quote! { Vec<u8> },
-        114 | 3802 => quote! { serde_json::Value },
-        1082 => quote! { chrono::NaiveDate },
-        1083 => quote! { chrono::NaiveTime },
-        1114 => quote! { chrono::NaiveDateTime },
-        1184 => quote! { chrono::DateTime<chrono::Utc> },
-        2950 => quote! { uuid::Uuid },
         869 => quote! { resolute::PgInet },
         1700 => quote! { resolute::PgNumeric },
         // Array types
@@ -269,22 +267,71 @@ fn oid_to_rust_type(oid: u32) -> proc_macro2::TokenStream {
         1021 => quote! { Vec<f32> },
         1022 => quote! { Vec<f64> },
         1041 => quote! { Vec<resolute::PgInet> },
-        1115 => quote! { Vec<chrono::NaiveDateTime> },
-        1182 => quote! { Vec<chrono::NaiveDate> },
-        1183 => quote! { Vec<chrono::NaiveTime> },
-        1185 => quote! { Vec<chrono::DateTime<chrono::Utc>> },
         1231 => quote! { Vec<resolute::PgNumeric> },
-        2951 => quote! { Vec<uuid::Uuid> },
-        3807 => quote! { Vec<serde_json::Value> },
         // Range types
         3904 => quote! { resolute::PgRange<i32> },
         3926 => quote! { resolute::PgRange<i64> },
         3906 => quote! { resolute::PgRange<resolute::PgNumeric> },
+        // JSON (feature = "json")
+        #[cfg(feature = "json")]
+        114 | 3802 => quote! { serde_json::Value },
+        #[cfg(feature = "json")]
+        3807 => quote! { Vec<serde_json::Value> },
+        #[cfg(not(feature = "json"))]
+        114 | 3802 | 3807 => {
+            return Err(format!(
+                "column type `{}` requires the `json` feature, which is disabled. \
+                 Enable `resolute/json` in your Cargo.toml to use JSON/JSONB columns.",
+                oid_to_type_name(oid)
+            ));
+        }
+        // chrono (feature = "chrono")
+        #[cfg(feature = "chrono")]
+        1082 => quote! { chrono::NaiveDate },
+        #[cfg(feature = "chrono")]
+        1083 => quote! { chrono::NaiveTime },
+        #[cfg(feature = "chrono")]
+        1114 => quote! { chrono::NaiveDateTime },
+        #[cfg(feature = "chrono")]
+        1184 => quote! { chrono::DateTime<chrono::Utc> },
+        #[cfg(feature = "chrono")]
+        1115 => quote! { Vec<chrono::NaiveDateTime> },
+        #[cfg(feature = "chrono")]
+        1182 => quote! { Vec<chrono::NaiveDate> },
+        #[cfg(feature = "chrono")]
+        1183 => quote! { Vec<chrono::NaiveTime> },
+        #[cfg(feature = "chrono")]
+        1185 => quote! { Vec<chrono::DateTime<chrono::Utc>> },
+        #[cfg(feature = "chrono")]
         3912 => quote! { resolute::PgRange<chrono::NaiveDate> },
+        #[cfg(feature = "chrono")]
         3908 => quote! { resolute::PgRange<chrono::NaiveDateTime> },
+        #[cfg(feature = "chrono")]
         3910 => quote! { resolute::PgRange<chrono::DateTime<chrono::Utc>> },
+        #[cfg(not(feature = "chrono"))]
+        1082 | 1083 | 1114 | 1184 | 1115 | 1182 | 1183 | 1185 | 3912 | 3908 | 3910 => {
+            return Err(format!(
+                "column type `{}` requires the `chrono` feature, which is disabled. \
+                 Enable `resolute/chrono` in your Cargo.toml to use date/time columns.",
+                oid_to_type_name(oid)
+            ));
+        }
+        // uuid (feature = "uuid")
+        #[cfg(feature = "uuid")]
+        2950 => quote! { uuid::Uuid },
+        #[cfg(feature = "uuid")]
+        2951 => quote! { Vec<uuid::Uuid> },
+        #[cfg(not(feature = "uuid"))]
+        2950 | 2951 => {
+            return Err(format!(
+                "column type `{}` requires the `uuid` feature, which is disabled. \
+                 Enable `resolute/uuid` in your Cargo.toml to use UUID columns.",
+                oid_to_type_name(oid)
+            ));
+        }
         _ => quote! { Vec<u8> },
-    }
+    };
+    Ok(ty)
 }
 
 /// `query!("SQL", param1, param2, ...)` — compile-time checked SQL query.
@@ -319,21 +366,14 @@ fn query_impl(input: QueryInput) -> TokenStream {
         return syn::Error::new_spanned(&sql, msg).to_compile_error().into();
     }
 
-    // Generate compile-time param type checks.
-    // Each check verifies the param type can encode as the PG-expected type.
-    let param_type_checks: Vec<_> = param_oids
+    // Generate compile-time param type checks. The check verifies the param
+    // implements `Encode`/`SqlParam`; downstream trait impls enforce that the
+    // Rust type matches the PostgreSQL OID expected by the server.
+    let param_type_checks: Vec<_> = params
         .iter()
-        .enumerate()
-        .map(|(i, oid)| {
-            let _expected = oid_to_rust_type(*oid);
-            let param = &params[i];
-            let oid_val = *oid;
-            let _type_name = oid_to_type_name(oid_val);
-            // Assert the param implements SqlParam (basic check) and
-            // generate a type hint that catches obvious mismatches.
+        .map(|param| {
             quote! {
                 {
-                    // Verify parameter #i is compatible with PG type (OID #oid_val).
                     fn __resolute_check_param<T: resolute::Encode + Sync>(_: &T) {}
                     __resolute_check_param(&#param);
                     let _ = &#param as &dyn resolute::SqlParam;
@@ -352,22 +392,26 @@ fn query_impl(input: QueryInput) -> TokenStream {
         .iter()
         .map(|(name, _)| format_ident!("{}", sanitize_ident(name)))
         .collect();
-    let field_types: Vec<_> = column_infos
+    let field_types: Vec<_> = match column_infos
         .iter()
         .zip(overrides.iter())
-        .map(|(c, (_, type_override))| {
+        .map(|(c, (_, type_override))| -> Result<proc_macro2::TokenStream, String> {
             let base = if let Some(ref custom) = type_override {
                 custom.clone()
             } else {
-                oid_to_rust_type(c.type_oid)
+                oid_to_rust_type(c.type_oid)?
             };
-            if c.nullable {
+            Ok(if c.nullable {
                 quote! { Option<#base> }
             } else {
                 base
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, String>>()
+    {
+        Ok(v) => v,
+        Err(e) => return syn::Error::new_spanned(&sql, e).to_compile_error().into(),
+    };
     let _field_indices: Vec<_> = (0..column_infos.len()).collect::<Vec<_>>();
     let field_getters: Vec<_> = column_infos
         .iter()
@@ -520,7 +564,13 @@ fn query_scalar_impl(input: QueryInput) -> TokenStream {
 
     let scalar_type = {
         let (_, type_override) = parse_type_override(&column_infos[0].name);
-        type_override.unwrap_or_else(|| oid_to_rust_type(column_infos[0].type_oid))
+        match type_override {
+            Some(ty) => ty,
+            None => match oid_to_rust_type(column_infos[0].type_oid) {
+                Ok(ty) => ty,
+                Err(e) => return syn::Error::new_spanned(&sql, e).to_compile_error().into(),
+            },
+        }
     };
     let param_refs: Vec<_> = params
         .iter()

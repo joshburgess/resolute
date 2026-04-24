@@ -21,6 +21,13 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, LitStr};
 #[proc_macro_derive(FromRow, attributes(from_row))]
 pub fn derive_from_row(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+    match derive_from_row_inner(input) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+fn derive_from_row_inner(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let name = &input.ident;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -28,122 +35,134 @@ pub fn derive_from_row(input: TokenStream) -> TokenStream {
     let fields = match &input.data {
         Data::Struct(data) => match &data.fields {
             Fields::Named(fields) => &fields.named,
-            _ => panic!("FromRow only supports structs with named fields"),
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    &input,
+                    "FromRow only supports structs with named fields",
+                ));
+            }
         },
-        _ => panic!("FromRow only supports structs"),
+        _ => {
+            return Err(syn::Error::new_spanned(
+                &input,
+                "FromRow only supports structs",
+            ));
+        }
     };
 
-    let field_extractions = fields.iter().map(|field| {
-        let field_name = field.ident.as_ref().unwrap();
-        let field_type = &field.ty;
-        let attrs = FromRowFieldAttrs::parse(field);
+    let field_extractions = fields
+        .iter()
+        .map(|field| {
+            let field_name = field.ident.as_ref().unwrap();
+            let field_type = &field.ty;
+            let attrs = FromRowFieldAttrs::parse(field)?;
 
-        let col_name = attrs.rename
-            .unwrap_or_else(|| field_name.to_string());
+            let col_name = attrs.rename.unwrap_or_else(|| field_name.to_string());
 
-        if attrs.skip {
-            return quote! { #field_name: Default::default() };
-        }
-
-        if attrs.flatten {
-            return quote! {
-                #field_name: <#field_type as resolute::FromRow>::from_row(row)?
-            };
-        }
-
-        if let Some(ref source_type) = attrs.try_from {
-            if is_option_type(field_type) {
-                return quote! {
-                    #field_name: {
-                        let __opt: Option<#source_type> = row.get_opt_by_name(#col_name)?;
-                        match __opt {
-                            Some(__src) => Some(
-                                <_ as std::convert::TryFrom<#source_type>>::try_from(__src)
-                                    .map_err(|e| resolute::TypedError::Decode {
-                                        column: 0,
-                                        message: format!("try_from({}): {}", #col_name, e),
-                                    })?
-                            ),
-                            None => None,
-                        }
-                    }
-                };
-            } else {
-                return quote! {
-                    #field_name: {
-                        let __src: #source_type = row.get_by_name(#col_name)?;
-                        <#field_type as std::convert::TryFrom<#source_type>>::try_from(__src)
-                            .map_err(|e| resolute::TypedError::Decode {
-                                column: 0,
-                                message: format!("try_from({}): {}", #col_name, e),
-                            })?
-                    }
-                };
+            if attrs.skip {
+                return Ok(quote! { #field_name: Default::default() });
             }
-        }
 
-        if attrs.json {
-            if is_option_type(field_type) {
-                return quote! {
-                    #field_name: {
-                        let __opt: Option<serde_json::Value> = row.get_opt_by_name(#col_name)?;
-                        match __opt {
-                            Some(__v) => Some(
-                                serde_json::from_value(__v).map_err(|e| resolute::TypedError::Decode {
+            if attrs.flatten {
+                return Ok(quote! {
+                    #field_name: <#field_type as resolute::FromRow>::from_row(row)?
+                });
+            }
+
+            if let Some(ref source_type) = attrs.try_from {
+                if is_option_type(field_type) {
+                    return Ok(quote! {
+                        #field_name: {
+                            let __opt: Option<#source_type> = row.get_opt_by_name(#col_name)?;
+                            match __opt {
+                                Some(__src) => Some(
+                                    <_ as std::convert::TryFrom<#source_type>>::try_from(__src)
+                                        .map_err(|e| resolute::TypedError::Decode {
+                                            column: 0,
+                                            message: format!("try_from({}): {}", #col_name, e),
+                                        })?
+                                ),
+                                None => None,
+                            }
+                        }
+                    });
+                } else {
+                    return Ok(quote! {
+                        #field_name: {
+                            let __src: #source_type = row.get_by_name(#col_name)?;
+                            <#field_type as std::convert::TryFrom<#source_type>>::try_from(__src)
+                                .map_err(|e| resolute::TypedError::Decode {
                                     column: 0,
-                                    message: format!("json({}): {}", #col_name, e),
+                                    message: format!("try_from({}): {}", #col_name, e),
                                 })?
-                            ),
-                            None => None,
                         }
-                    }
-                };
-            } else {
-                return quote! {
-                    #field_name: {
-                        let __v: serde_json::Value = row.get_by_name(#col_name)?;
-                        serde_json::from_value(__v).map_err(|e| resolute::TypedError::Decode {
-                            column: 0,
-                            message: format!("json({}): {}", #col_name, e),
-                        })?
-                    }
-                };
+                    });
+                }
             }
-        }
 
-        if attrs.default {
+            if attrs.json {
+                if is_option_type(field_type) {
+                    return Ok(quote! {
+                        #field_name: {
+                            let __opt: Option<serde_json::Value> = row.get_opt_by_name(#col_name)?;
+                            match __opt {
+                                Some(__v) => Some(
+                                    serde_json::from_value(__v).map_err(|e| resolute::TypedError::Decode {
+                                        column: 0,
+                                        message: format!("json({}): {}", #col_name, e),
+                                    })?
+                                ),
+                                None => None,
+                            }
+                        }
+                    });
+                } else {
+                    return Ok(quote! {
+                        #field_name: {
+                            let __v: serde_json::Value = row.get_by_name(#col_name)?;
+                            serde_json::from_value(__v).map_err(|e| resolute::TypedError::Decode {
+                                column: 0,
+                                message: format!("json({}): {}", #col_name, e),
+                            })?
+                        }
+                    });
+                }
+            }
+
+            if attrs.default {
+                if is_option_type(field_type) {
+                    return Ok(quote! {
+                        #field_name: if row.has_column(#col_name) {
+                            row.get_opt_by_name(#col_name)?
+                        } else {
+                            None
+                        }
+                    });
+                } else {
+                    return Ok(quote! {
+                        #field_name: if row.has_column(#col_name) {
+                            match row.get_by_name(#col_name) {
+                                Ok(v) => v,
+                                Err(resolute::TypedError::UnexpectedNull(_)) => Default::default(),
+                                Err(e) => return Err(e),
+                            }
+                        } else {
+                            Default::default()
+                        }
+                    });
+                }
+            }
+
+            // Normal field, no special attributes.
             if is_option_type(field_type) {
-                return quote! {
-                    #field_name: if row.has_column(#col_name) {
-                        row.get_opt_by_name(#col_name)?
-                    } else {
-                        None
-                    }
-                };
+                Ok(quote! { #field_name: row.get_opt_by_name(#col_name)? })
             } else {
-                return quote! {
-                    #field_name: if row.has_column(#col_name) {
-                        match row.get_by_name(#col_name) {
-                            Ok(v) => v,
-                            Err(resolute::TypedError::UnexpectedNull(_)) => Default::default(),
-                            Err(e) => return Err(e),
-                        }
-                    } else {
-                        Default::default()
-                    }
-                };
+                Ok(quote! { #field_name: row.get_by_name(#col_name)? })
             }
-        }
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
 
-        // Normal field — no special attributes.
-        if is_option_type(field_type) {
-            quote! { #field_name: row.get_opt_by_name(#col_name)? }
-        } else {
-            quote! { #field_name: row.get_by_name(#col_name)? }
-        }
-    });
-
-    let expanded = quote! {
+    Ok(quote! {
         impl #impl_generics resolute::FromRow for #name #ty_generics #where_clause {
             fn from_row(row: &resolute::Row) -> Result<Self, resolute::TypedError> {
                 Ok(Self {
@@ -151,9 +170,7 @@ pub fn derive_from_row(input: TokenStream) -> TokenStream {
                 })
             }
         }
-    };
-
-    TokenStream::from(expanded)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +188,7 @@ struct FromRowFieldAttrs {
 }
 
 impl FromRowFieldAttrs {
-    fn parse(field: &syn::Field) -> Self {
+    fn parse(field: &syn::Field) -> syn::Result<Self> {
         let mut attrs = Self {
             rename: None,
             skip: false,
@@ -199,15 +216,20 @@ impl FromRowFieldAttrs {
                 } else if meta.path.is_ident("try_from") {
                     let value = meta.value()?;
                     let s: LitStr = value.parse()?;
-                    let ty: syn::Type = syn::parse_str(&s.value())
-                        .expect("from_row(try_from = \"...\") must be a valid Rust type");
+                    let ty: syn::Type = syn::parse_str(&s.value()).map_err(|e| {
+                        syn::Error::new(
+                            s.span(),
+                            format!("from_row(try_from = \"...\") must be a valid Rust type: {e}"),
+                        )
+                    })?;
                     attrs.try_from = Some(ty);
                 } else if meta.path.is_ident("flatten") {
                     attrs.flatten = true;
+                } else {
+                    return Err(meta.error("unknown from_row attribute"));
                 }
                 Ok(())
-            })
-            .ok();
+            })?;
         }
 
         // Validate incompatible combinations.
@@ -218,16 +240,25 @@ impl FromRowFieldAttrs {
                 || attrs.try_from.is_some()
                 || attrs.flatten)
         {
-            panic!("from_row(skip) cannot be combined with other attributes");
+            return Err(syn::Error::new_spanned(
+                field,
+                "from_row(skip) cannot be combined with other attributes",
+            ));
         }
         if attrs.flatten && (attrs.rename.is_some() || attrs.json || attrs.try_from.is_some()) {
-            panic!("from_row(flatten) cannot be combined with rename, json, or try_from");
+            return Err(syn::Error::new_spanned(
+                field,
+                "from_row(flatten) cannot be combined with rename, json, or try_from",
+            ));
         }
         if attrs.json && attrs.try_from.is_some() {
-            panic!("from_row(json) cannot be combined with try_from");
+            return Err(syn::Error::new_spanned(
+                field,
+                "from_row(json) cannot be combined with try_from",
+            ));
         }
 
-        attrs
+        Ok(attrs)
     }
 }
 
@@ -284,23 +315,26 @@ pub fn derive_pg_domain(input: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr_str = attr.to_string();
     let input_fn = parse_macro_input!(item as syn::ItemFn);
+
+    let mut migrations: Option<String> = None;
+    let attr_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("migrations") {
+            let value = meta.value()?;
+            let s: LitStr = value.parse()?;
+            migrations = Some(s.value());
+            Ok(())
+        } else {
+            Err(meta.error("unknown resolute::test attribute"))
+        }
+    });
+    parse_macro_input!(attr with attr_parser);
+
     let fn_name = &input_fn.sig.ident;
     let fn_block = &input_fn.block;
     let fn_vis = &input_fn.vis;
     let fn_attrs = &input_fn.attrs;
 
-    // Parse optional migrations path from attribute.
-    let migrations = if attr_str.contains("migrations") {
-        // Extract: migrations = "path"
-        let path = attr_str.split('"').nth(1).unwrap_or("migrations");
-        Some(path.to_string())
-    } else {
-        None
-    };
-
-    // Default connection params from env or hardcoded defaults.
     let create_db = if let Some(mig_path) = &migrations {
         quote! {
             let __test_db = resolute::test_db::TestDb::create_with_migrations(

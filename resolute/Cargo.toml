@@ -41,6 +41,6 @@ harness = false
 
 [features]
 default = ["chrono", "json", "uuid"]
-chrono = ["dep:chrono"]
-json = ["dep:serde_json"]
-uuid = ["dep:uuid"]
+chrono = ["dep:chrono", "resolute-macros/chrono"]
+json = ["dep:serde_json", "resolute-macros/json"]
+uuid = ["dep:uuid", "resolute-macros/uuid"]

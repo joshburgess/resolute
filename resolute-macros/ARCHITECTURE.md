@@ -1,6 +1,6 @@
 # resolute-macros architecture
 
-resolute-macros is the compile-time query validation engine behind `query!`, `query_as!`, `query_scalar!`, and the file-based variants. It parses SQL at compile time, rewrites named parameters, talks to a live PostgreSQL instance to describe the query (or reads a cached describe from `.sqlx/`), and emits typed Rust code.
+resolute-macros is the compile-time query validation engine behind `query!`, `query_as!`, `query_scalar!`, and the file-based variants. It parses SQL at compile time, rewrites named parameters, talks to a live PostgreSQL instance to describe the query (or reads a cached describe from `.resolute/`), and emits typed Rust code.
 
 This document covers the internals. See the [`README`](README.md) for the usage surface.
 
@@ -65,14 +65,14 @@ Named params are numbered by first occurrence. Duplicates (`:id` appearing twice
 
 ## SQL hashing
 
-`hash_sql` ([`lib.rs:818`](src/lib.rs)) computes FNV-1a over the rewritten SQL bytes. The hash is stable and fast, 64 bits, cross-platform identical. It is used as both the cache filename (`.sqlx/query-{hash:016x}.json`) and the generated struct name (`__QueryResult_{hash}`).
+`hash_sql` ([`lib.rs:818`](src/lib.rs)) computes FNV-1a over the rewritten SQL bytes. The hash is stable and fast, 64 bits, cross-platform identical. It is used as both the cache filename (`.resolute/query-{hash:016x}.json`) and the generated struct name (`__QueryResult_{hash}`).
 
 FNV-1a was chosen over SipHash / AHash for stability: the cache files are portable across OSes and Rust versions. The cryptographic weakness of FNV is irrelevant because the input is trusted source SQL, not adversarial input.
 
 ## Cache layout
 
 ```
-.sqlx/
+.resolute/
   query-0123456789abcdef.json
   query-fedcba9876543210.json
   ...
@@ -99,10 +99,10 @@ One file per unique (post-rewrite) SQL. The filename hash matches the compile-ti
 
 `cache_dir` ([`cache.rs:34`](src/cache.rs)) walks up from `$CARGO_MANIFEST_DIR` looking for:
 
-1. An existing `.sqlx/` directory. Found on the first hit.
-2. A `Cargo.toml` containing `[workspace]`. If found, use `$WORKSPACE_ROOT/.sqlx/`.
+1. An existing `.resolute/` directory. Found on the first hit.
+2. A `Cargo.toml` containing `[workspace]`. If found, use `$WORKSPACE_ROOT/.resolute/`.
 
-This finds the workspace-level cache in a workspace crate without the user having to configure anything. If neither is found, the cache falls back to `$CARGO_MANIFEST_DIR/.sqlx/`.
+This finds the workspace-level cache in a workspace crate without the user having to configure anything. If neither is found, the cache falls back to `$CARGO_MANIFEST_DIR/.resolute/`.
 
 ### When entries are written
 
@@ -147,10 +147,10 @@ The `RESOLUTE_OFFLINE` environment variable is checked inside `resolve_metadata`
 
 `DATABASE_URL` is only read inside `describe_live` (so offline builds never require it). The two env vars together form the CI contract:
 
-- Dev machine: set `DATABASE_URL`, unset `RESOLUTE_OFFLINE`. Live describes populate `.sqlx/`.
-- Committed: `.sqlx/` contents.
+- Dev machine: set `DATABASE_URL`, unset `RESOLUTE_OFFLINE`. Live describes populate `.resolute/`.
+- Committed: `.resolute/` contents.
 - CI / Docker build: `RESOLUTE_OFFLINE=true` set, `DATABASE_URL` unset. Builds from cache only.
-- Drift check: run `resolute-cli check` in CI to verify `.sqlx/` matches the current live schema.
+- Drift check: run `resolute-cli check` in CI to verify `.resolute/` matches the current live schema.
 
 ## Generated output
 
@@ -196,6 +196,6 @@ These read the SQL from a file path relative to `$CARGO_MANIFEST_DIR` at macro-e
 
 Escape hatch for "I need macro-built SQL with named-param rewriting but no type check." Skips describe and cache entirely. Produces an `UncheckedQuery` (not `CheckedQuery<T>`), which accepts generic `FromRow` targets at fetch time. Useful for dynamic SQL assembled at runtime that still wants `:name` rewriting, and for test fixtures against an unavailable DB.
 
-## Why FNV and not sqlx's scheme
+## Why FNV
 
-sqlx's cache files use a sibling scheme with a different hash input. resolute-macros uses the same directory name (`.sqlx/`) to avoid yet another cache directory in the repo, but the files are not interchangeable. The `CacheEntry` schema is resolute-specific and includes the nullability field sqlx's cache lacks at the same location.
+FNV-1a is chosen for its stability across Rust versions, operating systems, and CPU architectures: a committed cache file must reproduce the same filename on any developer's machine, CI runner, or Docker image. The `CacheEntry` schema is resolute-specific and tracks per-column nullability alongside OIDs.

@@ -1,7 +1,5 @@
-error: proc-macro derive panicked
- --> tests/compile_fail_derive/pg_enum_with_fields.rs:2:10
+error: PgEnum: variant `B` has fields, only unit variants are supported
+ --> tests/compile_fail_derive/pg_enum_with_fields.rs:5:5
   |
-2 | #[derive(resolute::PgEnum)]
-  |          ^^^^^^^^^^^^^^^^
-  |
-  = help: message: PgEnum: variant `B` has fields — only unit variants are supported
+5 |     B(i32),
+  |     ^^^^^^

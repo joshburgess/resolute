@@ -24,7 +24,7 @@ quoting, so you won't get false positives from embedded tokens.
 ## How the compile-time check works
 
 1. Hash the SQL string.
-2. Look up the hash in `.sqlx/` on disk. If present, use the cached
+2. Look up the hash in `.resolute/` on disk. If present, use the cached
    metadata and skip the network round-trip.
 3. Otherwise, connect to `DATABASE_URL`, send Parse + Describe,
    record the param OIDs and the column (name, OID, nullability)
@@ -44,7 +44,7 @@ Computed columns stay nullable, which means `query!` returns
 
 ## Architecture
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the internals: the macro pipeline, the named-param rewriter (how it handles `::` casts, string literals, comments, and dollar quoting), live describe via pg-wired, nullability inference via `pg_attribute`, the `.sqlx/` cache format, and the generated output shape.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the internals: the macro pipeline, the named-param rewriter (how it handles `::` casts, string literals, comments, and dollar quoting), live describe via pg-wired, nullability inference via `pg_attribute`, the `.resolute/` cache format, and the generated output shape.
 
 ## License
 

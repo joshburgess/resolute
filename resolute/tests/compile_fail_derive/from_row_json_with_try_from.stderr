@@ -1,7 +1,6 @@
-error: proc-macro derive panicked
- --> tests/compile_fail_derive/from_row_json_with_try_from.rs:2:10
+error: from_row(json) cannot be combined with try_from
+ --> tests/compile_fail_derive/from_row_json_with_try_from.rs:4:5
   |
-2 | #[derive(resolute::FromRow)]
-  |          ^^^^^^^^^^^^^^^^^
-  |
-  = help: message: from_row(json) cannot be combined with try_from
+4 | /     #[from_row(json, try_from = "String")]
+5 | |     field: String,
+  | |_________________^

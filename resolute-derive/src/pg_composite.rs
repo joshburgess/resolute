@@ -16,6 +16,13 @@ use quote::quote;
 use syn::{Data, DeriveInput, Fields};
 
 pub fn derive(input: DeriveInput) -> TokenStream {
+    match derive_inner(input) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+fn derive_inner(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let (custom_oid, custom_array_oid) = get_custom_oids(&input.attrs);
@@ -23,9 +30,19 @@ pub fn derive(input: DeriveInput) -> TokenStream {
     let fields = match &input.data {
         Data::Struct(data) => match &data.fields {
             Fields::Named(fields) => &fields.named,
-            _ => panic!("PgComposite only supports structs with named fields"),
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    &input,
+                    "PgComposite only supports structs with named fields",
+                ));
+            }
         },
-        _ => panic!("PgComposite only supports structs"),
+        _ => {
+            return Err(syn::Error::new_spanned(
+                &input,
+                "PgComposite only supports structs",
+            ));
+        }
     };
 
     let field_count = fields.len() as i32;
@@ -126,7 +143,7 @@ pub fn derive(input: DeriveInput) -> TokenStream {
 
     let field_names: Vec<_> = fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
 
-    let expanded = quote! {
+    Ok(quote! {
         impl #impl_generics resolute::Encode for #name #ty_generics #where_clause {
             fn type_oid(&self) -> resolute::TypeOid {
                 resolute::TypeOid::Unspecified
@@ -170,9 +187,7 @@ pub fn derive(input: DeriveInput) -> TokenStream {
             const OID: u32 = #custom_oid;
             const ARRAY_OID: u32 = #custom_array_oid;
         }
-    };
-
-    TokenStream::from(expanded)
+    })
 }
 
 // ---------------------------------------------------------------------------

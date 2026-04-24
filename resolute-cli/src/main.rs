@@ -15,6 +15,7 @@
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use syn::visit::Visit;
 
 #[derive(Parser)]
 #[command(
@@ -41,6 +42,9 @@ enum Command {
     Check {
         #[arg(long, env = "DATABASE_URL")]
         database_url: String,
+        /// Directory to start the workspace-root search from (default: current directory).
+        #[arg(long, default_value = ".")]
+        source_dir: PathBuf,
     },
     /// Database migration management.
     Migrate {
@@ -140,6 +144,8 @@ struct CacheEntry {
     columns: Vec<CachedColumn>,
 }
 
+const CACHE_DIR_NAME: &str = ".resolute";
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -150,8 +156,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             prepare(&database_url, &source_dir).await?;
         }
-        Command::Check { database_url } => {
-            check(&database_url).await?;
+        Command::Check {
+            database_url,
+            source_dir,
+        } => {
+            check(&database_url, &source_dir).await?;
         }
         Command::Migrate { action } => run_migrate(action).await?,
         Command::Database { action } => run_database(action).await?,
@@ -274,6 +283,37 @@ fn database_name(database_url: &str) -> Result<String, Box<dyn std::error::Error
     Ok(database)
 }
 
+/// Resolve the cache directory for a given starting point.
+///
+/// Prefers an existing `.resolute/` walking up from `start`; otherwise places
+/// it next to the nearest `Cargo.toml` containing `[workspace]`. Falls back to
+/// `start/.resolute` if no workspace root can be found.
+fn resolve_cache_dir(start: &Path) -> PathBuf {
+    let mut dir = if start.is_file() {
+        start.parent().unwrap_or(Path::new(".")).to_path_buf()
+    } else {
+        start.to_path_buf()
+    };
+
+    let search_origin = dir.clone();
+
+    loop {
+        let candidate = dir.join(CACHE_DIR_NAME);
+        if candidate.is_dir() {
+            return candidate;
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+
+    if let Some(root) = find_workspace_root(&search_origin) {
+        return root.join(CACHE_DIR_NAME);
+    }
+
+    search_origin.join(CACHE_DIR_NAME)
+}
+
 /// Scan source files for query!() calls, describe each, write cache.
 async fn prepare(database_url: &str, source_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let (user, password, host, port, database) =
@@ -292,10 +332,7 @@ async fn prepare(database_url: &str, source_dir: &Path) -> Result<(), Box<dyn st
     let mut conn = pg_wired::WireConn::connect(&addr, &user, &password, &database).await?;
     println!("Connected to {database}@{host}:{port}");
 
-    // Create .sqlx directory.
-    let cache_dir = find_workspace_root(source_dir)
-        .unwrap_or_else(|| source_dir.to_path_buf())
-        .join(".sqlx");
+    let cache_dir = resolve_cache_dir(source_dir);
     std::fs::create_dir_all(&cache_dir)?;
 
     let mut cached = 0;
@@ -338,14 +375,18 @@ async fn prepare(database_url: &str, source_dir: &Path) -> Result<(), Box<dyn st
 }
 
 /// Check all cached queries against the live database.
-async fn check(database_url: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn check(database_url: &str, source_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let (user, password, host, port, database) =
         parse_pg_uri(database_url).ok_or("Invalid DATABASE_URL")?;
     let addr = format!("{host}:{port}");
 
-    let cache_dir = PathBuf::from(".sqlx");
+    let cache_dir = resolve_cache_dir(source_dir);
     if !cache_dir.is_dir() {
-        println!("No .sqlx cache directory found. Run `resolute-cli prepare` first.");
+        println!(
+            "No {CACHE_DIR_NAME} cache directory found (looked up from {}). \
+             Run `resolute-cli prepare` first.",
+            source_dir.display()
+        );
         return Ok(());
     }
 
@@ -403,11 +444,12 @@ fn columns_match(a: &[CachedColumn], b: &[CachedColumn]) -> bool {
             .all(|(x, y)| x.name == y.name && x.type_oid == y.type_oid)
 }
 
-/// Scan .rs files for `query!("...")` invocations and extract the SQL strings.
+/// Walk `dir` recursively, parse each `.rs` file, and collect SQL strings
+/// from every `query!`, `query_as!`, `query_scalar!`, and the `query_file*`
+/// variants we find in the AST. Skips `target/` and dotfile directories.
 fn scan_source_files(dir: &Path) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut queries = Vec::new();
     scan_dir(dir, &mut queries)?;
-    // Deduplicate.
     queries.sort();
     queries.dedup();
     Ok(queries)
@@ -422,106 +464,136 @@ fn scan_dir(dir: &Path, queries: &mut Vec<String>) -> Result<(), Box<dyn std::er
         let path = entry.path();
         if path.is_dir() {
             let name = path.file_name().unwrap_or_default().to_str().unwrap_or("");
-            // Skip target, .git, etc.
             if name == "target" || name.starts_with('.') {
                 continue;
             }
             scan_dir(&path, queries)?;
         } else if path.extension().map(|e| e == "rs").unwrap_or(false) {
-            scan_file(&path, queries)?;
+            scan_file(&path, queries);
         }
     }
     Ok(())
 }
 
-/// Extract SQL strings from `query!("SQL" ...)`, `query_as!(Type, "SQL" ...)`,
-/// `query_scalar!("SQL" ...)`, and their `resolute::` prefixed variants.
-fn scan_file(path: &Path, queries: &mut Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let source = std::fs::read_to_string(path)?;
-    // Search for all three macro patterns.
-    for pattern in &[
-        "query!(",
-        "query_as!(",
-        "query_scalar!(",
-        "query_file!(",
-        "query_file_as!(",
-        "query_file_scalar!(",
-    ] {
-        let mut pos = 0;
-        while let Some(idx) = source[pos..].find(pattern) {
-            let after_paren = pos + idx + pattern.len();
-            let rest = &source[after_paren..];
-            let trimmed = rest.trim_start();
+/// Parse a single `.rs` file and collect any query macro invocations.
+/// Unparseable files are reported to stderr but do not abort the scan.
+fn scan_file(path: &Path, queries: &mut Vec<String>) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("  warn: cannot read {}: {e}", path.display());
+            return;
+        }
+    };
+    let file = match syn::parse_file(&source) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("  warn: cannot parse {}: {e}", path.display());
+            return;
+        }
+    };
+    let crate_root = find_crate_root(path);
+    let mut visitor = MacroVisitor {
+        queries,
+        crate_root,
+    };
+    visitor.visit_file(&file);
+}
 
-            // For query_as!/query_file_as!, skip the type argument and comma first.
-            let trimmed = if (*pattern == "query_as!(" || *pattern == "query_file_as!(")
-                && !trimmed.starts_with('"')
-            {
-                // Skip to the first comma, then trim again.
-                if let Some(comma_pos) = trimmed.find(',') {
-                    trimmed[comma_pos + 1..].trim_start()
-                } else {
-                    pos = after_paren;
-                    continue;
+/// Syn visitor that finds query macro invocations anywhere in the AST,
+/// including inside expressions, statements, and nested macro arguments.
+struct MacroVisitor<'q> {
+    queries: &'q mut Vec<String>,
+    crate_root: PathBuf,
+}
+
+impl<'ast> Visit<'ast> for MacroVisitor<'_> {
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        if let Some(name) = mac.path.segments.last().map(|s| s.ident.to_string()) {
+            let tokens = mac.tokens.clone();
+            let raw = match name.as_str() {
+                "query" | "query_scalar" => parse_first_litstr(tokens.clone()),
+                "query_as" => parse_second_litstr_after_type(tokens.clone()),
+                "query_file" | "query_file_scalar" => {
+                    parse_first_litstr(tokens.clone()).and_then(|p| self.read_query_file(&p))
                 }
-            } else {
-                trimmed
+                "query_file_as" => parse_second_litstr_after_type(tokens.clone())
+                    .and_then(|p| self.read_query_file(&p)),
+                _ => None,
             };
-
-            if !trimmed.starts_with('"') {
-                pos = after_paren;
-                continue;
+            if let Some(sql) = raw {
+                self.queries.push(sql);
             }
-            let actual_start = source.len() - trimmed.len();
-            let quote_start = actual_start + 1; // After the `"`
-            if let Some(end) = find_string_end(&source, quote_start) {
-                let raw = &source[quote_start..end];
-                let raw = raw
-                    .replace("\\\"", "\"")
-                    .replace("\\n", "\n")
-                    .replace("\\\\", "\\");
-
-                // For query_file! variants, raw is a file path — read the SQL.
-                let sql = if pattern.starts_with("query_file") {
-                    let manifest_dir = path.parent().unwrap_or(Path::new("."));
-                    // Walk up to find CARGO_MANIFEST_DIR equivalent.
-                    let crate_root = find_crate_root(manifest_dir);
-                    let full_path = crate_root.join(&raw);
-                    match std::fs::read_to_string(&full_path) {
-                        Ok(s) => s.trim().to_string(),
-                        Err(_) => {
-                            // Try relative to source dir root.
-                            raw
-                        }
-                    }
-                } else {
-                    raw
-                };
-
-                queries.push(sql);
-                pos = end + 1;
-            } else {
-                pos = after_paren;
+            // Re-visit the macro's inner tokens as expressions so nested
+            // `query!` calls (e.g. inside another macro's arguments) are
+            // picked up. Silently ignore parse failures — not every macro's
+            // body is a valid expression list.
+            if let Ok(parsed) = syn::parse2::<ExprList>(mac.tokens.clone()) {
+                for expr in &parsed.exprs {
+                    self.visit_expr(expr);
+                }
             }
         }
+        syn::visit::visit_macro(self, mac);
     }
-    Ok(())
 }
 
-/// Find the closing `"` of a Rust string literal, handling escapes.
-fn find_string_end(source: &str, start: usize) -> Option<usize> {
-    let bytes = source.as_bytes();
-    let mut i = start;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            i += 2; // Skip escaped char.
-        } else if bytes[i] == b'"' {
-            return Some(i);
-        } else {
-            i += 1;
-        }
+impl MacroVisitor<'_> {
+    fn read_query_file(&self, rel_path: &str) -> Option<String> {
+        let full = self.crate_root.join(rel_path);
+        std::fs::read_to_string(&full)
+            .map(|s| s.trim().to_string())
+            .ok()
     }
-    None
+}
+
+/// Parser that extracts the first `LitStr` in a macro argument list and
+/// discards the rest. Used for `query!("SQL", args...)`.
+struct FirstLitStr(String);
+
+impl syn::parse::Parse for FirstLitStr {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let lit: syn::LitStr = input.parse()?;
+        let _rest: proc_macro2::TokenStream = input.parse()?;
+        Ok(FirstLitStr(lit.value()))
+    }
+}
+
+/// Parser for `query_as!(TargetType, "SQL", args...)` shape — skips the type
+/// and comma, returns the SQL string.
+struct SecondLitStr(String);
+
+impl syn::parse::Parse for SecondLitStr {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let _ty: syn::Type = input.parse()?;
+        input.parse::<syn::Token![,]>()?;
+        let lit: syn::LitStr = input.parse()?;
+        let _rest: proc_macro2::TokenStream = input.parse()?;
+        Ok(SecondLitStr(lit.value()))
+    }
+}
+
+/// A comma-separated list of expressions, used for re-visiting macro args.
+struct ExprList {
+    exprs: Vec<syn::Expr>,
+}
+
+impl syn::parse::Parse for ExprList {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let punctuated: syn::punctuated::Punctuated<syn::Expr, syn::Token![,]> =
+            syn::punctuated::Punctuated::parse_terminated(input)?;
+        Ok(ExprList {
+            exprs: punctuated.into_iter().collect(),
+        })
+    }
+}
+
+fn parse_first_litstr(tokens: proc_macro2::TokenStream) -> Option<String> {
+    syn::parse2::<FirstLitStr>(tokens).ok().map(|s| s.0)
+}
+
+fn parse_second_litstr_after_type(tokens: proc_macro2::TokenStream) -> Option<String> {
+    syn::parse2::<SecondLitStr>(tokens).ok().map(|s| s.0)
 }
 
 fn hash_sql(sql: &str) -> u64 {

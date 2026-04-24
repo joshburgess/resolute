@@ -16,3 +16,11 @@ bytes = "1"
 tokio = { version = "1", features = ["rt", "net"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[features]
+# Feature flags are propagated from `resolute`. When a feature is disabled,
+# the corresponding PostgreSQL OIDs (e.g. timestamp/uuid/jsonb) produce a
+# helpful compile error instead of a confusing downstream type mismatch.
+chrono = []
+json = []
+uuid = []
