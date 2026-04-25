@@ -3,17 +3,17 @@
 //! Provides `PgRange<T>` for `int4range`, `int8range`, `numrange`,
 //! `daterange`, `tsrange`, `tstzrange`.
 //!
-//! ```ignore
+//! ```no_run
 //! use resolute::PgRange;
 //!
 //! // Inclusive-exclusive range: [1, 10)
-//! let r = PgRange::new(Some(1i32), Some(10i32), true, false);
+//! let _r = PgRange::new(Some(1i32), Some(10i32), true, false);
 //!
 //! // Empty range:
-//! let r: PgRange<i32> = PgRange::empty();
+//! let _empty: PgRange<i32> = PgRange::empty();
 //!
 //! // Unbounded lower:
-//! let r = PgRange::new(None, Some(100i32), false, false);
+//! let _r = PgRange::new(None, Some(100i32), false, false);
 //! ```
 
 use crate::decode::{Decode, DecodeText};

@@ -47,15 +47,21 @@
 //! Write functions once with `&impl Executor`. Unlike sqlx (which consumes `self`),
 //! resolute's Executor uses `&self` — multi-query reuse just works.
 //!
-//! ```ignore
+//! ```no_run
+//! # use resolute::{Client, Executor, TypedError};
 //! async fn create_user(db: &impl Executor, name: &str) -> Result<i32, TypedError> {
 //!     let rows = db.query("INSERT INTO users (name) VALUES ($1) RETURNING id", &[&name.to_string()]).await?;
 //!     rows[0].get(0)
 //! }
 //!
+//! # async fn _demo() -> Result<(), TypedError> {
+//! # let client: Client = unimplemented!();
+//! # let txn: resolute::Transaction = unimplemented!();
+//! # let pooled: resolute::PooledTypedClient = unimplemented!();
 //! create_user(&client, "Alice").await?;  // Client
 //! create_user(&txn, "Alice").await?;     // Transaction
 //! create_user(&pooled, "Alice").await?;  // Pool
+//! # Ok(()) }
 //! ```
 //!
 //! # Context-aware atomicity
@@ -63,7 +69,8 @@
 //! `db.atomic(|db| ...)` does `BEGIN/COMMIT` on Client, `SAVEPOINT/RELEASE` on
 //! Transaction. Same function, correct behavior in any context.
 //!
-//! ```ignore
+//! ```no_run
+//! # use resolute::{Executor, TypedError};
 //! async fn transfer(db: &impl Executor, from: i32, to: i32) -> Result<(), TypedError> {
 //!     db.atomic(|db| Box::pin(async move {
 //!         db.execute("UPDATE accounts SET balance = balance - 100 WHERE id = $1", &[&from]).await?;
@@ -75,7 +82,9 @@
 //!
 //! # Custom PostgreSQL types
 //!
-//! ```ignore
+//! ```no_run
+//! use resolute::{PgComposite, PgDomain, PgEnum};
+//!
 //! // String-based enum (PostgreSQL CREATE TYPE ... AS ENUM):
 //! #[derive(PgEnum)]
 //! #[pg_type(rename_all = "snake_case")]
@@ -89,14 +98,21 @@
 //! #[derive(PgComposite)]
 //! struct Address { street: String, city: String, zip: Option<String> }
 //!
-//! // Domain type — inherits array OID from inner type:
+//! // Domain type: inherits array OID from inner type.
 //! #[derive(PgDomain)]
 //! struct Email(String);  // ARRAY_OID = 1009 (text[])
 //! ```
 //!
 //! # FromRow derive
 //!
-//! ```ignore
+//! ```no_run
+//! use resolute::FromRow;
+//! # use serde::Deserialize;
+//! # #[derive(Default, Deserialize)] struct MyStruct;
+//! # #[derive(Default)] struct MyStatus;
+//! # impl TryFrom<i32> for MyStatus { type Error = String; fn try_from(_: i32) -> Result<Self, Self::Error> { Ok(MyStatus) } }
+//! # #[derive(FromRow)] struct Address { street: String }
+//!
 //! #[derive(FromRow)]
 //! struct User {
 //!     id: i32,

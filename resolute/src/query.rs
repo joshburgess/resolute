@@ -126,11 +126,14 @@ impl Client {
 
     /// Connect and run initialization SQL (e.g. `SET search_path`, `SET role`).
     ///
-    /// ```ignore
-    /// let client = Client::connect_with_init(
+    /// ```no_run
+    /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+    /// use resolute::Client;
+    /// let _client = Client::connect_with_init(
     ///     "127.0.0.1:5432", "user", "pass", "mydb",
     ///     &["SET search_path TO myschema, public", "SET statement_timeout = '30s'"],
     /// ).await?;
+    /// # Ok(()) }
     /// ```
     ///
     /// # Errors
@@ -158,9 +161,12 @@ impl Client {
     /// Useful for custom enums, composites, and domains where you need the
     /// actual OID (e.g., for array operations or explicit type casting).
     ///
-    /// ```ignore
-    /// let mood_oid = client.lookup_type_oid("mood").await?;
-    /// let mood_array_oid = client.lookup_type_oid("_mood").await?; // array type
+    /// ```no_run
+    /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let client: resolute::Client = unimplemented!();
+    /// let _mood_oid = client.lookup_type_oid("mood").await?;
+    /// let _mood_array_oid = client.lookup_type_oid("_mood").await?; // array type
+    /// # Ok(()) }
     /// ```
     pub async fn lookup_type_oid(&self, type_name: &str) -> Result<Option<u32>, TypedError> {
         let rows = self
@@ -182,9 +188,12 @@ impl Client {
     /// Returns `(type_oid, array_oid)`. The array type name in PostgreSQL
     /// is conventionally `_typename` (e.g., `_mood` for `mood[]`).
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let client: resolute::Client = unimplemented!();
     /// let (oid, array_oid) = client.lookup_type_oids("mood").await?;
     /// println!("mood OID: {oid}, mood[] OID: {array_oid}");
+    /// # Ok(()) }
     /// ```
     pub async fn lookup_type_oids(&self, type_name: &str) -> Result<(u32, u32), TypedError> {
         let rows = self
@@ -505,13 +514,16 @@ impl Client {
     /// Rows are delivered one at a time as they arrive from PostgreSQL,
     /// without buffering the entire result set in memory.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let client: resolute::Client = unimplemented!();
     /// use tokio_stream::StreamExt;
     /// let mut stream = client.query_stream("SELECT * FROM large_table", &[]).await?;
     /// while let Some(row) = stream.next().await {
     ///     let row = row?;
-    ///     let id: i32 = row.get(0)?;
+    ///     let _id: i32 = row.get(0)?;
     /// }
+    /// # Ok(()) }
     /// ```
     pub async fn query_stream(
         &self,
@@ -591,10 +603,13 @@ impl Client {
     /// Sends `COPY table FROM STDIN (FORMAT csv)` (or whatever `copy_sql` specifies),
     /// then streams `data` to PostgreSQL. Returns the number of rows copied.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let client: resolute::Client = unimplemented!();
     /// let csv = b"1,Alice\n2,Bob\n";
     /// let count = client.copy_in("COPY users (id, name) FROM STDIN WITH (FORMAT csv)", csv).await?;
     /// assert_eq!(count, 2);
+    /// # Ok(()) }
     /// ```
     pub async fn copy_in(&self, copy_sql: &str, data: &[u8]) -> Result<u64, TypedError> {
         self.conn
@@ -607,9 +622,12 @@ impl Client {
     ///
     /// Sends `COPY table TO STDOUT (FORMAT csv)` and returns all the data.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let client: resolute::Client = unimplemented!();
     /// let csv_data = client.copy_out("COPY users TO STDOUT WITH (FORMAT csv)").await?;
     /// println!("{}", String::from_utf8_lossy(&csv_data));
+    /// # Ok(()) }
     /// ```
     pub async fn copy_out(&self, copy_sql: &str) -> Result<Vec<u8>, TypedError> {
         self.conn
@@ -635,10 +653,15 @@ impl Client {
 
     /// Begin a transaction with a specific isolation level.
     ///
-    /// ```ignore
-    /// let txn = client.begin_with(IsolationLevel::Serializable).await?;
-    /// // or with read-only:
-    /// let txn = client.begin_with(IsolationLevel::RepeatableRead).await?;
+    /// ```no_run
+    /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let client: resolute::Client = unimplemented!();
+    /// use resolute::IsolationLevel;
+    /// let _txn = client.begin_with(IsolationLevel::Serializable).await?;
+    /// // or with repeatable read:
+    /// # let client: resolute::Client = unimplemented!();
+    /// let _txn = client.begin_with(IsolationLevel::RepeatableRead).await?;
+    /// # Ok(()) }
     /// ```
     ///
     /// # Errors
@@ -655,10 +678,13 @@ impl Client {
 
     /// Acquire a session-level advisory lock (blocks until acquired).
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let client: resolute::Client = unimplemented!();
     /// client.advisory_lock(12345).await?;
     /// // ... critical section ...
     /// client.advisory_unlock(12345).await?;
+    /// # Ok(()) }
     /// ```
     pub async fn advisory_lock(&self, key: i64) -> Result<(), TypedError> {
         self.simple_query(&format!("SELECT pg_advisory_lock({key})"))
@@ -771,12 +797,16 @@ impl Client {
 
     /// Execute a query with a timeout. Auto-cancels via CancelRequest if exceeded.
     ///
-    /// ```ignore
-    /// let rows = client.query_timeout(
+    /// ```no_run
+    /// # async fn _doctest() {
+    /// # let client: resolute::Client = unimplemented!();
+    /// use std::time::Duration;
+    /// let _result = client.query_timeout(
     ///     "SELECT pg_sleep(60)",
     ///     &[],
     ///     Duration::from_secs(5),
     /// ).await; // returns Err after 5s
+    /// # }
     /// ```
     pub async fn query_timeout(
         &self,
@@ -816,13 +846,17 @@ impl Client {
     /// The token can be cloned, sent to another task, and used to cancel
     /// a long-running query. Cancellation is best-effort.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _doctest() {
+    /// # let client: resolute::Client = unimplemented!();
+    /// use std::time::Duration;
     /// let token = client.cancel_token();
     /// tokio::spawn(async move {
     ///     tokio::time::sleep(Duration::from_secs(5)).await;
     ///     token.cancel().await.ok();
     /// });
-    /// client.query("SELECT pg_sleep(60)", &[]).await; // cancelled after 5s
+    /// let _ = client.query("SELECT pg_sleep(60)", &[]).await; // cancelled after 5s
+    /// # }
     /// ```
     pub fn cancel_token(&self) -> pg_wired::CancelToken {
         self.conn.cancel_token()
@@ -969,13 +1003,26 @@ pub(crate) fn resolve_named_params<'a>(
 
 /// A batch of queries to execute in a single network round-trip.
 ///
-/// ```ignore
-/// let (rows1, rows2, count) = client.pipeline()
+/// ```no_run
+/// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+/// # let client: resolute::Client = unimplemented!();
+/// use resolute::PipelineResult;
+///
+/// let results = client.pipeline()
 ///     .query("SELECT 1::int4 AS n", &[])
 ///     .query("SELECT 'hello'::text AS s", &[])
 ///     .execute("INSERT INTO t VALUES ($1)", &[&42i32])
 ///     .run()
 ///     .await?;
+///
+/// for result in results {
+///     match result {
+///         PipelineResult::Rows(rows) => println!("got {} rows", rows.len()),
+///         PipelineResult::Execute(count) => println!("affected {count} rows"),
+///         _ => {}
+///     }
+/// }
+/// # Ok(()) }
 /// ```
 #[derive(Debug)]
 #[must_use = "Pipeline does nothing until .run() is awaited"]

@@ -6,9 +6,11 @@
 //! `seed`) mirror what `resolute-cli migrate ...` exposes: the CLI is a thin
 //! presentation layer on top of these functions.
 //!
-//! ```ignore
+//! ```no_run
+//! # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
 //! // In main.rs or startup code:
 //! resolute::migrate::run("postgres://user:pass@localhost/db", "migrations").await?;
+//! # Ok(()) }
 //! ```
 
 use std::path::{Path, PathBuf};

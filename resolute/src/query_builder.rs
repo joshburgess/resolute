@@ -44,12 +44,18 @@ pub struct QueryBuilder {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
+/// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+/// # let client: resolute::Client = unimplemented!();
+/// # let org_id: i32 = 0;
+/// # let user_id: i32 = 0;
 /// let rows = resolute::sql("SELECT * FROM users WHERE org = $1 AND id = $2")
 ///     .bind(org_id)
 ///     .bind(user_id)
 ///     .fetch_all(&client)
 ///     .await?;
+/// # let _: Vec<resolute::Row> = rows;
+/// # Ok(()) }
 /// ```
 pub fn sql(sql: impl Into<String>) -> QueryBuilder {
     QueryBuilder {

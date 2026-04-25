@@ -3,14 +3,18 @@
 //! Detects connection loss and re-establishes transparently.
 //! Uses `ArcSwap` for lock-free reads — only acquires a lock during reconnection.
 //!
-//! ```ignore
+//! ```no_run
+//! # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+//! use resolute::reconnect::ReconnectingClient;
+//!
 //! let client = ReconnectingClient::new(
 //!     "127.0.0.1:5432", "user", "pass", "mydb",
-//!     vec!["SET search_path TO myschema"],
+//!     vec!["SET search_path TO myschema".into()],
 //! ).await?;
 //!
 //! // If the connection drops, the next query auto-reconnects.
-//! let rows = client.query("SELECT 1", &[]).await?;
+//! let _rows = client.query("SELECT 1", &[]).await?;
+//! # Ok(()) }
 //! ```
 
 use std::sync::Arc;
@@ -30,17 +34,20 @@ use crate::row::Row;
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
+/// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+/// # use resolute::reconnect::ReconnectingClient;
 /// let client = ReconnectingClient::new(
 ///     "127.0.0.1:5432", "app_user", "secret", "mydb",
 ///     vec!["SET search_path TO app".into()],
 /// ).await?;
 ///
 /// // Queries automatically reconnect if the connection drops:
-/// let rows = client.query("SELECT * FROM users LIMIT 10", &[]).await?;
+/// let _rows = client.query("SELECT * FROM users LIMIT 10", &[]).await?;
 ///
 /// // Check connection health:
 /// assert!(client.is_alive());
+/// # Ok(()) }
 /// ```
 pub struct ReconnectingClient {
     client: ArcSwap<Client>,

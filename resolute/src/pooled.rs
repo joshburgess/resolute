@@ -102,9 +102,12 @@ impl TypedPool {
     /// Pre-populate the pool to a target number of connections.
     /// Avoids cold-start latency on the first requests.
     ///
-    /// ```ignore
-    /// let pool = TypedPool::connect("...", "user", "pass", "db", 10).await?;
+    /// ```no_run
+    /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use resolute::TypedPool;
+    /// let pool = TypedPool::connect("127.0.0.1:5432", "user", "pass", "db", 10).await?;
     /// pool.warm_up(5).await;  // pre-create 5 connections
+    /// # Ok(()) }
     /// ```
     pub async fn warm_up(&self, target: usize) {
         self.pool.warm_up(target).await;

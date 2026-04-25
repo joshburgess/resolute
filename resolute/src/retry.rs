@@ -1,13 +1,17 @@
 //! Automatic retry for transient database errors.
 //!
-//! ```ignore
+//! ```no_run
+//! # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+//! use std::time::Duration;
 //! use resolute::retry::RetryPolicy;
+//! # let client: resolute::Client = unimplemented!();
 //!
 //! let policy = RetryPolicy::new(3, Duration::from_millis(100));
 //!
-//! let rows = policy.execute(&client, |db| Box::pin(async move {
+//! let _rows = policy.execute(&client, |db| Box::pin(async move {
 //!     db.query("SELECT * FROM users WHERE id = $1", &[&1i32]).await
 //! })).await?;
+//! # Ok(()) }
 //! ```
 
 use std::future::Future;
@@ -21,17 +25,20 @@ use crate::executor::Executor;
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
+/// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
 /// use std::time::Duration;
 /// use resolute::retry::RetryPolicy;
+/// # let client: resolute::Client = unimplemented!();
 ///
 /// // Retry up to 3 times with exponential backoff starting at 100ms:
 /// let policy = RetryPolicy::new(3, Duration::from_millis(100))
 ///     .with_max_backoff(Duration::from_secs(5));
 ///
-/// let rows = policy.execute(&client, |db| Box::pin(async move {
-///     db.query("SELECT * FROM orders WHERE status = $1", &[&"pending"]).await
+/// let _rows = policy.execute(&client, |db| Box::pin(async move {
+///     db.query("SELECT * FROM orders WHERE status = $1", &[&"pending".to_string()]).await
 /// })).await?;
+/// # Ok(()) }
 /// ```
 #[derive(Debug, Clone)]
 #[non_exhaustive]

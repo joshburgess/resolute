@@ -113,11 +113,14 @@ impl WireConn {
     /// Parameters are sent in the startup message and appear in `pg_stat_activity`.
     /// Common parameters: `application_name`, `client_encoding`, `options`.
     ///
-    /// ```ignore
-    /// let conn = WireConn::connect_with_params(
+    /// ```no_run
+    /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+    /// use pg_wired::WireConn;
+    /// let _conn = WireConn::connect_with_params(
     ///     "127.0.0.1:5432", "user", "pass", "mydb",
     ///     &[("application_name", "my-service")],
     /// ).await?;
+    /// # Ok(()) }
     /// ```
     pub async fn connect_with_params(
         addr: &str,

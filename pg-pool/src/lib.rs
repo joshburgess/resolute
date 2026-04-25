@@ -6,7 +6,9 @@
 //!
 //! # Example with pg-wired (requires `wire` feature)
 //!
-//! ```ignore
+//! ```no_run
+//! # #[cfg(feature = "wire")]
+//! # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
 //! use pg_pool::{ConnPool, ConnPoolConfig, LifecycleHooks};
 //! use pg_pool::wire::WirePoolable;
 //!
@@ -16,7 +18,8 @@
 //! config.password = "postgres".into();
 //! config.database = "mydb".into();
 //!
-//! let pool = ConnPool::<WirePoolable>::new(config, LifecycleHooks::default()).await?;
+//! let _pool = ConnPool::<WirePoolable>::new(config, LifecycleHooks::default()).await?;
+//! # Ok(()) }
 //! ```
 
 #![deny(missing_docs)]

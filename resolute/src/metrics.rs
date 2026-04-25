@@ -3,12 +3,13 @@
 //! Enable with the `metrics` feature flag. Tracks query durations,
 //! pool utilization, and error counts.
 //!
-//! ```ignore
-//! // Register metrics once at startup:
-//! resolute::metrics::register();
+//! ```no_run
+//! // Read a snapshot for ad-hoc inspection:
+//! let snap = resolute::metrics::snapshot();
+//! println!("queries: {}", snap.query_count);
 //!
-//! // Expose via your HTTP server's /metrics endpoint:
-//! let output = resolute::metrics::gather();
+//! // Or expose via your HTTP server's /metrics endpoint:
+//! let _output: String = resolute::metrics::gather();
 //! ```
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -81,7 +82,7 @@ pub struct QueryMetrics {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
 /// let metrics = resolute::metrics::snapshot();
 /// println!("total queries: {}, errors: {}", metrics.query_count, metrics.query_error_count);
 /// ```
@@ -101,7 +102,7 @@ pub fn snapshot() -> QueryMetrics {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
 /// // Expose on an Axum /metrics endpoint:
 /// async fn metrics_handler() -> String {
 ///     resolute::metrics::gather()

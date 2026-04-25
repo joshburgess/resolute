@@ -1,13 +1,15 @@
 //! Test database helper: creates a temporary database for isolated testing.
 //!
-//! ```ignore
+//! ```no_run
+//! use resolute::test_db::TestDb;
+//!
 //! #[tokio::test]
 //! async fn my_test() {
 //!     let db = TestDb::create("127.0.0.1:5432", "postgres", "postgres").await.unwrap();
 //!     let client = db.client().await.unwrap();
 //!     client.simple_query("CREATE TABLE t (id int)").await.unwrap();
 //!     // ... test ...
-//!     // database dropped automatically on `db.drop_db().await`
+//!     db.drop_db().await.unwrap();
 //! }
 //! ```
 
@@ -74,7 +76,9 @@ pub fn test_database_url() -> String {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
+/// use resolute::test_db::TestDb;
+///
 /// #[tokio::test]
 /// async fn test_insert() {
 ///     let db = TestDb::create("127.0.0.1:5432", "postgres", "postgres").await.unwrap();

@@ -353,10 +353,13 @@ impl AsyncConn {
     /// reads data from an async reader in chunks, avoiding buffering the entire
     /// payload in memory.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let conn: pg_wired::AsyncConn = unimplemented!();
     /// use tokio::fs::File;
     /// let file = File::open("data.csv").await?;
-    /// let count = conn.copy_in_stream("COPY users FROM STDIN WITH (FORMAT csv)", file).await?;
+    /// let _count = conn.copy_in_stream("COPY users FROM STDIN WITH (FORMAT csv)", file).await?;
+    /// # Ok(()) }
     /// ```
     pub async fn copy_in_stream<R: tokio::io::AsyncRead + Unpin>(
         &self,

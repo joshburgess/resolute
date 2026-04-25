@@ -4,16 +4,23 @@
 //! this trait uses `&self` methods. Write generic functions once, call them with
 //! any executor type:
 //!
-//! ```ignore
+//! ```no_run
+//! # use resolute::{Client, Executor, FromRow, TypedError};
+//! # #[derive(FromRow)] struct User { id: i32 }
 //! async fn get_user(db: &impl Executor, id: i32) -> Result<User, TypedError> {
 //!     let rows = db.query("SELECT * FROM users WHERE id = $1", &[&id]).await?;
 //!     User::from_row(&rows[0])
 //! }
 //!
+//! # async fn _demo() -> Result<(), TypedError> {
+//! # let client: Client = unimplemented!();
+//! # let txn: resolute::Transaction = unimplemented!();
+//! # let pooled: resolute::PooledTypedClient = unimplemented!();
 //! // Works with Client, Transaction, or PooledTypedClient:
 //! get_user(&client, 1).await?;
 //! get_user(&txn, 1).await?;
 //! get_user(&pooled, 1).await?;
+//! # Ok(()) }
 //! ```
 
 use std::future::Future;
@@ -36,16 +43,22 @@ static SAVEPOINT_COUNTER: AtomicU64 = AtomicU64::new(0);
 ///
 /// Write generic functions that work with any executor:
 ///
-/// ```ignore
+/// ```no_run
+/// # use resolute::{Client, Executor, TypedError};
 /// async fn count_users(db: &impl Executor) -> Result<i64, TypedError> {
 ///     let row = db.query_one("SELECT count(*) FROM users", &[]).await?;
 ///     row.get::<i64>(0)
 /// }
 ///
+/// # async fn _demo() -> Result<(), TypedError> {
+/// # let client: Client = unimplemented!();
+/// # let txn: resolute::Transaction = unimplemented!();
+/// # let pooled: resolute::PooledTypedClient = unimplemented!();
 /// // Call with a Client, Transaction, or PooledTypedClient:
-/// let n = count_users(&client).await?;
-/// let n = count_users(&txn).await?;
-/// let n = count_users(&pooled).await?;
+/// let _n = count_users(&client).await?;
+/// let _n = count_users(&txn).await?;
+/// let _n = count_users(&pooled).await?;
+/// # Ok(()) }
 /// ```
 pub trait Executor: Send + Sync {
     /// Execute a query and return all result rows.
@@ -128,7 +141,13 @@ pub trait Executor: Send + Sync {
     /// This lets you write functions that always run atomically, regardless of
     /// whether the caller already has a transaction open:
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use resolute::{Client, Executor, TypedError};
+    /// # struct Item;
+    /// # struct Order { id: i32 }
+    /// # async fn insert_order(_db: &(impl Executor + ?Sized)) -> Result<Order, TypedError> { unimplemented!() }
+    /// # async fn insert_line_item(_db: &(impl Executor + ?Sized), _id: i32, _item: &Item) -> Result<(), TypedError> { unimplemented!() }
+    /// # async fn do_other_stuff(_db: &(impl Executor + ?Sized)) -> Result<(), TypedError> { unimplemented!() }
     /// async fn create_order(db: &impl Executor, items: &[Item]) -> Result<Order, TypedError> {
     ///     db.atomic(|db| Box::pin(async move {
     ///         let order = insert_order(db).await?;
@@ -139,14 +158,18 @@ pub trait Executor: Send + Sync {
     ///     })).await
     /// }
     ///
-    /// // Without a transaction — atomic() creates one:
+    /// # async fn _demo() -> Result<(), TypedError> {
+    /// # let client: Client = unimplemented!();
+    /// # let items: Vec<Item> = vec![];
+    /// // Without a transaction, atomic() creates one:
     /// create_order(&client, &items).await?;
     ///
-    /// // Inside an existing transaction — atomic() uses a savepoint:
+    /// // Inside an existing transaction, atomic() uses a savepoint:
     /// let txn = client.begin().await?;
     /// create_order(&txn, &items).await?;  // savepoint, not a nested BEGIN
     /// do_other_stuff(&txn).await?;
     /// txn.commit().await?;
+    /// # Ok(()) }
     /// ```
     fn atomic<'a, T: Send + 'a>(
         &'a self,
@@ -512,12 +535,18 @@ impl crate::query::Client {
     /// The closure receives the `Client` reference (which is inside a BEGIN..COMMIT
     /// block), so any `&impl Executor` function works inside it.
     ///
-    /// ```ignore
-    /// let user_id = client.with_transaction(|db| Box::pin(async move {
+    /// ```no_run
+    /// # use resolute::{Client, Executor, TypedError};
+    /// # async fn create_user(_db: &Client, _name: &str) -> Result<i32, TypedError> { unimplemented!() }
+    /// # async fn create_profile(_db: &Client, _id: i32) -> Result<(), TypedError> { unimplemented!() }
+    /// # async fn _demo() -> Result<(), TypedError> {
+    /// # let client: Client = unimplemented!();
+    /// let _user_id = client.with_transaction(|db| Box::pin(async move {
     ///     let id = create_user(db, "Alice").await?;
     ///     create_profile(db, id).await?;
     ///     Ok(id)
     /// })).await?;
+    /// # Ok(()) }
     /// ```
     pub async fn with_transaction<'a, T: Send + 'a>(
         &'a self,
