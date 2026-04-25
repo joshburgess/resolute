@@ -2,6 +2,7 @@
 
 /// Metadata about a PostgreSQL type.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct TypeInfo {
     pub oid: u32,
     pub name: &'static str,

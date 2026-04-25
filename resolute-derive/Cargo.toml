@@ -8,6 +8,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation = "https://docs.rs/resolute-derive"
 readme = "README.md"
 keywords = ["postgres", "postgresql", "derive", "macro", "resolute"]
 categories = ["database", "development-tools::procedural-macro-helpers"]

@@ -8,6 +8,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation = "https://docs.rs/pg-pool"
 readme = "README.md"
 keywords = ["postgres", "postgresql", "pool", "connection-pool", "async"]
 categories = ["database", "asynchronous"]

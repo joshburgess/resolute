@@ -1151,15 +1151,11 @@ mod tests {
     use super::*;
 
     fn mkfield(name: &str, type_oid: u32, format: FormatCode) -> FieldDescription {
-        FieldDescription {
-            name: name.into(),
-            table_oid: 0,
-            column_id: 0,
-            type_oid,
-            type_size: -1,
-            type_modifier: -1,
-            format,
-        }
+        let mut f = FieldDescription::default();
+        f.name = name.into();
+        f.type_oid = type_oid;
+        f.format = format;
+        f
     }
 
     /// Build a [`RawRow`] from per-cell byte slices for tests; `None` means SQL NULL.
@@ -1416,14 +1412,12 @@ mod tests {
 
     #[test]
     fn map_err_pg_encodes_json_payload() {
-        let pg = pg_wired::protocol::types::PgError {
-            severity: "ERROR".into(),
-            code: "42P01".into(),
-            message: "relation does not exist".into(),
-            detail: Some("missing table".into()),
-            hint: None,
-            position: Some("7".into()),
-        };
+        let mut pg = pg_wired::protocol::types::PgError::default();
+        pg.severity = "ERROR".into();
+        pg.code = "42P01".into();
+        pg.message = "relation does not exist".into();
+        pg.detail = Some("missing table".into());
+        pg.position = Some("7".into());
         let err = map_err(PgWireError::Pg(pg));
         let reason = err.reason;
         let rest = reason

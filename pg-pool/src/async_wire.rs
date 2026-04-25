@@ -11,8 +11,28 @@ use crate::Poolable;
 /// The `AsyncConn` spawns reader/writer tasks on creation and keeps them
 /// running until the connection dies. Pooling `AsyncConn` directly means
 /// connections are reused without re-establishing TCP or re-authenticating.
+///
+/// The wrapped connection is exposed read-only via [`AsyncPoolable::conn`].
+/// Constructing an `AsyncPoolable` directly is intentionally not part of the
+/// public API: connections enter the wrapper through [`Poolable::connect`]
+/// and the pool's lifecycle hooks, which keeps pool accounting consistent.
 #[derive(Debug)]
-pub struct AsyncPoolable(pub pg_wired::AsyncConn);
+pub struct AsyncPoolable(pg_wired::AsyncConn);
+
+impl AsyncPoolable {
+    /// Borrow the wrapped connection. Use this for read-only access from
+    /// pool consumers (e.g., to check liveness or fetch a cancel token).
+    pub fn conn(&self) -> &pg_wired::AsyncConn {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for AsyncPoolable {
+    type Target = pg_wired::AsyncConn;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl Poolable for AsyncPoolable {
     type Error = pg_wired::PgWireError;
@@ -39,7 +59,7 @@ impl Poolable for AsyncPoolable {
     /// connection state-mutated whenever ReadyForQuery reports a non-idle
     /// transaction status; callers that issue `SET` / advisory-lock / temp
     /// table / `LISTEN` / etc. via simple-query call
-    /// [`AsyncConn::mark_state_mutated`] explicitly. The bulk of pooled
+    /// [`pg_wired::AsyncConn::mark_state_mutated`] explicitly. The bulk of pooled
     /// usage is self-contained Bind/Execute/Sync queries which never set
     /// the flag, so the fast path is the common case.
     ///

@@ -8,6 +8,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation = "https://docs.rs/pg-wired"
 readme = "README.md"
 keywords = ["postgres", "postgresql", "database", "async", "driver"]
 categories = ["database", "asynchronous", "network-programming"]

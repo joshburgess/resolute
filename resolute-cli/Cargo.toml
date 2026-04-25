@@ -8,6 +8,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation = "https://docs.rs/resolute-cli"
 readme = "README.md"
 keywords = ["postgres", "postgresql", "migrations", "cli", "resolute"]
 categories = ["database", "command-line-utilities"]

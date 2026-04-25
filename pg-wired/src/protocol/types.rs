@@ -148,8 +148,18 @@ pub const CELL_INLINE_CAP: usize = 12;
 
 #[derive(Debug, Clone)]
 pub struct RawRow {
-    pub body: bytes::Bytes,
+    pub(crate) body: bytes::Bytes,
     cells: Cells,
+}
+
+impl RawRow {
+    /// Raw wire-protocol body the cell offsets index into. Exposed for
+    /// downstream typed-row decoders (e.g., `resolute::Row`); offset/length
+    /// semantics are an internal contract, treat as opaque.
+    #[doc(hidden)]
+    pub fn body(&self) -> &bytes::Bytes {
+        &self.body
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -272,6 +282,7 @@ impl RawRow {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FieldDescription {
     pub name: String,
     pub table_oid: Oid,
@@ -282,7 +293,22 @@ pub struct FieldDescription {
     pub format: FormatCode,
 }
 
+impl Default for FieldDescription {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            table_oid: 0,
+            column_id: 0,
+            type_oid: 0,
+            type_size: -1,
+            type_modifier: -1,
+            format: FormatCode::Binary,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct PgError {
     pub severity: String,
     pub code: String,

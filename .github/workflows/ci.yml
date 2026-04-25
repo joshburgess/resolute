@@ -113,6 +113,37 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54322/postgrest_test
         run: cargo test --workspace --doc
 
+  doc:
+    name: doc (warnings as errors)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build docs with warnings as errors
+        env:
+          RUSTDOCFLAGS: -Dwarnings
+        run: cargo doc --workspace --no-deps --all-features
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  msrv:
+    name: msrv (1.75)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.75
+      - uses: Swatinem/rust-cache@v2
+      - name: Check workspace builds on declared MSRV
+        run: cargo check --workspace --all-targets
+
   test-tls-feature:
     name: test (pg-wired tls feature)
     runs-on: ubuntu-latest

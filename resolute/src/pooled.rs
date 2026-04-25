@@ -133,18 +133,18 @@ impl std::fmt::Debug for PooledTypedClient {
 impl PooledTypedClient {
     /// Access the underlying `AsyncConn` for direct use.
     pub fn conn(&self) -> &pg_wired::AsyncConn {
-        &self.guard.conn().0
+        self.guard.conn()
     }
 
     /// Execute a query via the pooled connection.
     pub async fn query(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<Vec<Row>, TypedError> {
         // Build a temporary Client-like wrapper that uses the pooled AsyncConn.
-        crate::query::Client::query_on_conn(&self.guard.conn().0, sql, params).await
+        crate::query::Client::query_on_conn(self.guard.conn(), sql, params).await
     }
 
     /// Execute a statement via the pooled connection.
     pub async fn execute(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<u64, TypedError> {
-        crate::query::Client::execute_on_conn(&self.guard.conn().0, sql, params).await
+        crate::query::Client::execute_on_conn(self.guard.conn(), sql, params).await
     }
 
     /// Send a simple text query.
@@ -154,16 +154,15 @@ impl PooledTypedClient {
     /// checkout return, which is the safe default for arbitrary user SQL
     /// (could be `SET`, `LISTEN`, `BEGIN`, etc.).
     pub async fn simple_query(&self, sql: &str) -> Result<(), TypedError> {
-        self.guard.conn().0.mark_state_mutated();
-        crate::query::Client::simple_query_on_conn(&self.guard.conn().0, sql).await
+        self.guard.conn().mark_state_mutated();
+        crate::query::Client::simple_query_on_conn(self.guard.conn(), sql).await
     }
 
     /// Bulk-load data via COPY FROM STDIN.
     pub async fn copy_in(&self, copy_sql: &str, data: &[u8]) -> Result<u64, TypedError> {
-        self.guard.conn().0.mark_state_mutated();
+        self.guard.conn().mark_state_mutated();
         self.guard
             .conn()
-            .0
             .copy_in(copy_sql, data)
             .await
             .map_err(|e| TypedError::from(e).with_sql(copy_sql))
@@ -171,10 +170,9 @@ impl PooledTypedClient {
 
     /// Export data via COPY TO STDOUT.
     pub async fn copy_out(&self, copy_sql: &str) -> Result<Vec<u8>, TypedError> {
-        self.guard.conn().0.mark_state_mutated();
+        self.guard.conn().mark_state_mutated();
         self.guard
             .conn()
-            .0
             .copy_out(copy_sql)
             .await
             .map_err(|e| TypedError::from(e).with_sql(copy_sql))
@@ -182,13 +180,13 @@ impl PooledTypedClient {
 
     /// Check if the connection is alive.
     pub fn is_alive(&self) -> bool {
-        self.guard.conn().0.is_alive()
+        self.guard.conn().is_alive()
     }
 
     /// Get a `CancelToken` that can be used to cancel an in-flight query on
     /// this connection from another task.
     pub fn cancel_token(&self) -> pg_wired::CancelToken {
-        self.guard.conn().0.cancel_token()
+        self.guard.conn().cancel_token()
     }
 
     /// Acquire a session-level advisory lock. Blocks until the lock is granted.
@@ -200,7 +198,7 @@ impl PooledTypedClient {
         // Session-level locks survive across statements and require
         // DISCARD ALL on return to release. Mark dirty so the pool
         // resets the connection.
-        self.guard.conn().0.mark_state_mutated();
+        self.guard.conn().mark_state_mutated();
         self.execute("SELECT pg_advisory_lock($1)", &[&key]).await?;
         Ok(())
     }
@@ -214,7 +212,7 @@ impl PooledTypedClient {
     pub async fn try_advisory_lock(&self, key: i64) -> Result<bool, TypedError> {
         // Session-level lock survives across statements; flag dirty so the
         // pool releases it via DISCARD ALL on return.
-        self.guard.conn().0.mark_state_mutated();
+        self.guard.conn().mark_state_mutated();
         let rows = self
             .query("SELECT pg_try_advisory_lock($1)", &[&key])
             .await?;
