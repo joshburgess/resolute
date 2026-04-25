@@ -15,19 +15,19 @@ const PASS: &str = "postgres";
 const DB: &str = "postgrest_test";
 
 fn test_config() -> ConnPoolConfig {
-    ConnPoolConfig {
-        addr: ADDR.to_string(),
-        user: USER.to_string(),
-        password: PASS.to_string(),
-        database: DB.to_string(),
-        min_idle: 1,
-        max_size: 5,
-        max_lifetime: Duration::from_secs(300),
-        max_lifetime_jitter: Duration::from_secs(0),
-        checkout_timeout: Duration::from_secs(2),
-        maintenance_interval: Duration::from_secs(3600),
-        test_on_checkout: true,
-    }
+    let mut c = ConnPoolConfig::default();
+    c.addr = ADDR.to_string();
+    c.user = USER.to_string();
+    c.password = PASS.to_string();
+    c.database = DB.to_string();
+    c.min_idle = 1;
+    c.max_size = 5;
+    c.max_lifetime = Duration::from_secs(300);
+    c.max_lifetime_jitter = Duration::from_secs(0);
+    c.checkout_timeout = Duration::from_secs(2);
+    c.maintenance_interval = Duration::from_secs(3600);
+    c.test_on_checkout = true;
+    c
 }
 
 // ---------------------------------------------------------------------------
@@ -165,21 +165,19 @@ async fn test_hooks_all_fire() {
     let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
     let (l1, l2, l3, l4) = (log.clone(), log.clone(), log.clone(), log.clone());
 
-    let hooks = LifecycleHooks {
-        on_create: Some(Box::new(move |_| {
-            l1.lock().unwrap().push("create");
-        })),
-        on_checkout: Some(Box::new(move |_| {
-            l2.lock().unwrap().push("checkout");
-        })),
-        on_checkin: Some(Box::new(move |_| {
-            l3.lock().unwrap().push("checkin");
-        })),
-        on_destroy: Some(Box::new(move || {
-            l4.lock().unwrap().push("destroy");
-        })),
-        ..Default::default()
-    };
+    let mut hooks = LifecycleHooks::default();
+    hooks.on_create = Some(Box::new(move |_| {
+        l1.lock().unwrap().push("create");
+    }));
+    hooks.on_checkout = Some(Box::new(move |_| {
+        l2.lock().unwrap().push("checkout");
+    }));
+    hooks.on_checkin = Some(Box::new(move |_| {
+        l3.lock().unwrap().push("checkin");
+    }));
+    hooks.on_destroy = Some(Box::new(move || {
+        l4.lock().unwrap().push("destroy");
+    }));
 
     let mut config = test_config();
     config.min_idle = 0;

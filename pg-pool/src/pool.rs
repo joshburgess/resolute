@@ -88,7 +88,12 @@ impl<E: std::error::Error + 'static> std::error::Error for PoolError<E> {
 // ---------------------------------------------------------------------------
 
 /// Connection pool configuration.
+///
+/// Construct via [`ConnPoolConfig::default`] and update only the fields you care
+/// about. Marked `#[non_exhaustive]` so adding new tuning knobs in future minor
+/// releases is not a breaking change.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct ConnPoolConfig {
     /// Address (host:port).
     pub addr: String,
@@ -165,6 +170,10 @@ type Hook = Option<Box<dyn Fn() + Send + Sync>>;
 /// reference to the connection. Non-connection hooks (`before_acquire`, `after_release`,
 /// `on_destroy`) take no parameters — `on_destroy` because the connection may be invalid,
 /// and `before_acquire`/`after_release` because no specific connection is involved yet.
+///
+/// Marked `#[non_exhaustive]` so additional hooks can be introduced in future
+/// minor releases without breaking downstream construction.
+#[non_exhaustive]
 pub struct LifecycleHooks<C> {
     /// Called after a new connection is created.
     pub on_create: ConnHook<C>,
@@ -211,7 +220,11 @@ impl<C> Default for LifecycleHooks<C> {
 // ---------------------------------------------------------------------------
 
 /// Snapshot of pool metrics.
+///
+/// Marked `#[non_exhaustive]` so new counters can be added without breaking
+/// downstream pattern matches or struct construction.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct PoolMetrics {
     pub total: usize,
     pub idle: usize,
@@ -230,6 +243,18 @@ pub struct PoolMetrics {
 struct IdleConn<C> {
     conn: C,
     expires_at: Instant,
+}
+
+/// Decrements `waiter_count` when dropped. Ensures the gauge stays accurate
+/// even if the `get()` future is cancelled while parked on the waiter queue.
+struct WaiterCountGuard<'a> {
+    counter: &'a AtomicUsize,
+}
+
+impl Drop for WaiterCountGuard<'_> {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 struct Waiter<C> {
@@ -365,9 +390,15 @@ impl<C: Poolable> ConnPool<C> {
             self.waiter_count.fetch_add(1, Ordering::Relaxed);
         }
 
+        // Decrement waiter_count on every exit path, including future cancellation.
+        // Without this, a caller that drops the get() future (e.g. via tokio::select!
+        // or an outer timeout) would leak the counter, eventually saturating it.
+        let _waiter_guard = WaiterCountGuard {
+            counter: &self.waiter_count,
+        };
+
         match tokio::time::timeout(self.config.checkout_timeout, rx).await {
             Ok(Ok(conn)) => {
-                self.waiter_count.fetch_sub(1, Ordering::Relaxed);
                 self.in_use_count.fetch_add(1, Ordering::Release);
                 self.total_checkouts.fetch_add(1, Ordering::Relaxed);
                 if let Some(ref hook) = self.hooks.on_checkout {
@@ -378,12 +409,8 @@ impl<C: Poolable> ConnPool<C> {
                     pool: Arc::clone(self),
                 })
             }
-            Ok(Err(_)) => {
-                self.waiter_count.fetch_sub(1, Ordering::Relaxed);
-                Err(PoolError::Closed)
-            }
+            Ok(Err(_)) => Err(PoolError::Closed),
             Err(_) => {
-                self.waiter_count.fetch_sub(1, Ordering::Relaxed);
                 self.total_timeouts.fetch_add(1, Ordering::Relaxed);
                 // Clean up our dead waiter from the queue to prevent unbounded growth.
                 // The sender (tx) is dropped by the timeout, so return_conn_async will

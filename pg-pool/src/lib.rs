@@ -10,16 +10,13 @@
 //! use pg_pool::{ConnPool, ConnPoolConfig, LifecycleHooks};
 //! use pg_pool::wire::WirePoolable;
 //!
-//! let pool = ConnPool::<WirePoolable>::new(
-//!     ConnPoolConfig {
-//!         addr: "127.0.0.1:5432".into(),
-//!         user: "postgres".into(),
-//!         password: "postgres".into(),
-//!         database: "mydb".into(),
-//!         ..Default::default()
-//!     },
-//!     LifecycleHooks::default(),
-//! ).await?;
+//! let mut config = ConnPoolConfig::default();
+//! config.addr = "127.0.0.1:5432".into();
+//! config.user = "postgres".into();
+//! config.password = "postgres".into();
+//! config.database = "mydb".into();
+//!
+//! let pool = ConnPool::<WirePoolable>::new(config, LifecycleHooks::default()).await?;
 //! ```
 
 #[cfg(feature = "wire")]

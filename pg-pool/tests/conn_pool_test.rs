@@ -17,19 +17,19 @@ const PASS: &str = "postgres";
 const DB: &str = "postgrest_test";
 
 fn test_config() -> ConnPoolConfig {
-    ConnPoolConfig {
-        addr: ADDR.to_string(),
-        user: USER.to_string(),
-        password: PASS.to_string(),
-        database: DB.to_string(),
-        min_idle: 1,
-        max_size: 5,
-        max_lifetime: Duration::from_secs(300),
-        max_lifetime_jitter: Duration::from_secs(0), // no jitter for determinism
-        checkout_timeout: Duration::from_secs(2),
-        maintenance_interval: Duration::from_secs(3600), // 1h — effectively disabled for tests
-        test_on_checkout: true,
-    }
+    let mut c = ConnPoolConfig::default();
+    c.addr = ADDR.to_string();
+    c.user = USER.to_string();
+    c.password = PASS.to_string();
+    c.database = DB.to_string();
+    c.min_idle = 1;
+    c.max_size = 5;
+    c.max_lifetime = Duration::from_secs(300);
+    c.max_lifetime_jitter = Duration::from_secs(0); // no jitter for determinism
+    c.checkout_timeout = Duration::from_secs(2);
+    c.maintenance_interval = Duration::from_secs(3600); // 1h, effectively disabled for tests
+    c.test_on_checkout = true;
+    c
 }
 
 // ---------------------------------------------------------------------------
@@ -415,12 +415,10 @@ async fn test_checkout_timeout_counter_accumulates() {
 async fn test_lifecycle_hooks_on_create() {
     let counter = Arc::new(AtomicU64::new(0));
     let c = Arc::clone(&counter);
-    let hooks = LifecycleHooks {
-        on_create: Some(Box::new(move |_| {
-            c.fetch_add(1, Ordering::Relaxed);
-        })),
-        ..Default::default()
-    };
+    let mut hooks = LifecycleHooks::default();
+    hooks.on_create = Some(Box::new(move |_| {
+        c.fetch_add(1, Ordering::Relaxed);
+    }));
 
     let mut config = test_config();
     config.min_idle = 2;
@@ -443,12 +441,10 @@ async fn test_lifecycle_hooks_on_create() {
 async fn test_lifecycle_hooks_on_checkout() {
     let counter = Arc::new(AtomicU64::new(0));
     let c = Arc::clone(&counter);
-    let hooks = LifecycleHooks {
-        on_checkout: Some(Box::new(move |_| {
-            c.fetch_add(1, Ordering::Relaxed);
-        })),
-        ..Default::default()
-    };
+    let mut hooks = LifecycleHooks::default();
+    hooks.on_checkout = Some(Box::new(move |_| {
+        c.fetch_add(1, Ordering::Relaxed);
+    }));
 
     let pool = Pool::new(test_config(), hooks).await.unwrap();
 
@@ -465,12 +461,10 @@ async fn test_lifecycle_hooks_on_checkout() {
 async fn test_lifecycle_hooks_on_checkin() {
     let counter = Arc::new(AtomicU64::new(0));
     let c = Arc::clone(&counter);
-    let hooks = LifecycleHooks {
-        on_checkin: Some(Box::new(move |_| {
-            c.fetch_add(1, Ordering::Relaxed);
-        })),
-        ..Default::default()
-    };
+    let mut hooks = LifecycleHooks::default();
+    hooks.on_checkin = Some(Box::new(move |_| {
+        c.fetch_add(1, Ordering::Relaxed);
+    }));
 
     let pool = Pool::new(test_config(), hooks).await.unwrap();
 
@@ -489,12 +483,10 @@ async fn test_lifecycle_hooks_on_checkin() {
 async fn test_lifecycle_hooks_on_destroy() {
     let counter = Arc::new(AtomicU64::new(0));
     let c = Arc::clone(&counter);
-    let hooks = LifecycleHooks {
-        on_destroy: Some(Box::new(move || {
-            c.fetch_add(1, Ordering::Relaxed);
-        })),
-        ..Default::default()
-    };
+    let mut hooks = LifecycleHooks::default();
+    hooks.on_destroy = Some(Box::new(move || {
+        c.fetch_add(1, Ordering::Relaxed);
+    }));
 
     let pool = Pool::new(test_config(), hooks).await.unwrap();
     assert_eq!(counter.load(Ordering::Relaxed), 0);
@@ -516,21 +508,19 @@ async fn test_all_hooks_fire_in_sequence() {
     let l3 = Arc::clone(&log);
     let l4 = Arc::clone(&log);
 
-    let hooks = LifecycleHooks {
-        on_create: Some(Box::new(move |_| {
-            l1.lock().unwrap().push("create");
-        })),
-        on_checkout: Some(Box::new(move |_| {
-            l2.lock().unwrap().push("checkout");
-        })),
-        on_checkin: Some(Box::new(move |_| {
-            l3.lock().unwrap().push("checkin");
-        })),
-        on_destroy: Some(Box::new(move || {
-            l4.lock().unwrap().push("destroy");
-        })),
-        ..Default::default()
-    };
+    let mut hooks = LifecycleHooks::default();
+    hooks.on_create = Some(Box::new(move |_| {
+        l1.lock().unwrap().push("create");
+    }));
+    hooks.on_checkout = Some(Box::new(move |_| {
+        l2.lock().unwrap().push("checkout");
+    }));
+    hooks.on_checkin = Some(Box::new(move |_| {
+        l3.lock().unwrap().push("checkin");
+    }));
+    hooks.on_destroy = Some(Box::new(move || {
+        l4.lock().unwrap().push("destroy");
+    }));
 
     let mut config = test_config();
     config.min_idle = 0;
@@ -553,12 +543,10 @@ async fn test_all_hooks_fire_in_sequence() {
 async fn test_lifecycle_hooks_before_acquire() {
     let counter = Arc::new(AtomicU64::new(0));
     let c = Arc::clone(&counter);
-    let hooks = LifecycleHooks {
-        before_acquire: Some(Box::new(move || {
-            c.fetch_add(1, Ordering::Relaxed);
-        })),
-        ..Default::default()
-    };
+    let mut hooks = LifecycleHooks::default();
+    hooks.before_acquire = Some(Box::new(move || {
+        c.fetch_add(1, Ordering::Relaxed);
+    }));
 
     let pool = Pool::new(test_config(), hooks).await.unwrap();
 
@@ -599,12 +587,10 @@ async fn test_lifecycle_hooks_before_acquire() {
 async fn test_lifecycle_hooks_after_release() {
     let counter = Arc::new(AtomicU64::new(0));
     let c = Arc::clone(&counter);
-    let hooks = LifecycleHooks {
-        after_release: Some(Box::new(move || {
-            c.fetch_add(1, Ordering::Relaxed);
-        })),
-        ..Default::default()
-    };
+    let mut hooks = LifecycleHooks::default();
+    hooks.after_release = Some(Box::new(move || {
+        c.fetch_add(1, Ordering::Relaxed);
+    }));
 
     let pool = Pool::new(test_config(), hooks).await.unwrap();
 
@@ -633,12 +619,10 @@ async fn test_lifecycle_hooks_after_release() {
 async fn test_after_release_fires_on_drain() {
     let counter = Arc::new(AtomicU64::new(0));
     let c = Arc::clone(&counter);
-    let hooks = LifecycleHooks {
-        after_release: Some(Box::new(move || {
-            c.fetch_add(1, Ordering::Relaxed);
-        })),
-        ..Default::default()
-    };
+    let mut hooks = LifecycleHooks::default();
+    hooks.after_release = Some(Box::new(move || {
+        c.fetch_add(1, Ordering::Relaxed);
+    }));
 
     let pool = Pool::new(test_config(), hooks).await.unwrap();
 
@@ -654,16 +638,14 @@ async fn test_after_release_fires_on_drain() {
 async fn test_connection_aware_on_checkout_receives_valid_conn() {
     let saw_conn = Arc::new(AtomicU64::new(0));
     let s = Arc::clone(&saw_conn);
-    let hooks = LifecycleHooks {
-        on_checkout: Some(Box::new(move |conn: &pg_pool::wire::WirePoolable| {
-            // Verify we got a real connection — has_pending_data should be false
-            // for a healthy connection.
-            if !conn.0.has_pending_data() {
-                s.fetch_add(1, Ordering::Relaxed);
-            }
-        })),
-        ..Default::default()
-    };
+    let mut hooks = LifecycleHooks::default();
+    hooks.on_checkout = Some(Box::new(move |conn: &pg_pool::wire::WirePoolable| {
+        // Verify we got a real connection. has_pending_data should be false
+        // for a healthy connection.
+        if !conn.0.has_pending_data() {
+            s.fetch_add(1, Ordering::Relaxed);
+        }
+    }));
 
     let pool = Pool::new(test_config(), hooks).await.unwrap();
     let _g = pool.get().await.unwrap();
@@ -685,26 +667,25 @@ async fn test_all_hooks_fire_in_sequence_with_new_hooks() {
     let l5 = Arc::clone(&log);
     let l6 = Arc::clone(&log);
 
-    let hooks = LifecycleHooks {
-        on_create: Some(Box::new(move |_| {
-            l1.lock().unwrap().push("create");
-        })),
-        before_acquire: Some(Box::new(move || {
-            l2.lock().unwrap().push("before_acquire");
-        })),
-        on_checkout: Some(Box::new(move |_| {
-            l3.lock().unwrap().push("checkout");
-        })),
-        on_checkin: Some(Box::new(move |_| {
-            l4.lock().unwrap().push("checkin");
-        })),
-        after_release: Some(Box::new(move || {
-            l5.lock().unwrap().push("after_release");
-        })),
-        on_destroy: Some(Box::new(move || {
-            l6.lock().unwrap().push("destroy");
-        })),
-    };
+    let mut hooks = LifecycleHooks::default();
+    hooks.on_create = Some(Box::new(move |_| {
+        l1.lock().unwrap().push("create");
+    }));
+    hooks.before_acquire = Some(Box::new(move || {
+        l2.lock().unwrap().push("before_acquire");
+    }));
+    hooks.on_checkout = Some(Box::new(move |_| {
+        l3.lock().unwrap().push("checkout");
+    }));
+    hooks.on_checkin = Some(Box::new(move |_| {
+        l4.lock().unwrap().push("checkin");
+    }));
+    hooks.after_release = Some(Box::new(move || {
+        l5.lock().unwrap().push("after_release");
+    }));
+    hooks.on_destroy = Some(Box::new(move || {
+        l6.lock().unwrap().push("destroy");
+    }));
 
     let mut config = test_config();
     config.min_idle = 0;
