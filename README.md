@@ -48,7 +48,7 @@ Resolute is for you if:
 - You have used sqlx and like its workflow and general selling points: compile-time checked queries against a live database, offline cache for CI, derive-driven `FromRow`. You do not want to give any of that up.
 - You only target PostgreSQL. You are not looking for a cross-database abstraction and you do not want the lowest-common-denominator API that comes with one. You would rather have first-class support for PostgreSQL features (LISTEN/NOTIFY, advisory locks, COPY, composites, domains, ranges, integer-backed enums) than portability to MySQL or SQLite.
 - You want a more flexible, more convenient API than sqlx offers: named parameters that survive dollar-quoting and casts, an `Executor` trait that takes `&self` so generic helpers compose, an `atomic()` method that dispatches `BEGIN` or `SAVEPOINT` based on the receiver so transactional helpers nest without knowing the caller's context, and richer `FromRow` attributes. See "Why Resolute" below for the full list.
-- You care about performance. Resolute implements the wire protocol, pool, and typed surface from scratch rather than layering over tokio-postgres, and it uses the binary wire format throughout. Benchmarks against the same PostgreSQL instance show it running 2 to 5 times faster than sqlx on parameter encoding and roughly 2.4 times faster on end-to-end query latency. The "Performance" section below lists the full numbers.
+- You care about performance. Resolute implements the wire protocol, pool, and typed surface from scratch rather than layering over tokio-postgres, and it uses the binary wire format throughout. Benchmarks against the same PostgreSQL instance show it running 3 to 5 times faster than sqlx on parameter encoding and roughly 2.4 times faster on end-to-end query latency. The "Performance" section below lists the full numbers.
 
 If that sounds like you, keep reading.
 
@@ -68,7 +68,7 @@ If that sounds like you, keep reading.
 
 **Query type overrides.** `query!(r#"SELECT id as "id: UserId" FROM users"#)` maps columns to custom Rust types in compile-time macros. Works with any type that implements `Decode`.
 
-**Binary format everywhere.** Parameters and results use PostgreSQL's binary wire format. No text parsing, no intermediate representations. 2-5x faster than sqlx on encode, 2.3-2.5x faster on query latency.
+**Binary format everywhere.** Parameters and results use PostgreSQL's binary wire format. No text parsing, no intermediate representations. 3-5x faster than sqlx on encode, ~2.4x faster on query latency.
 
 **Statement caching.** `Parse` once per connection, `Bind+Execute` on reuse. LRU cache with 256 entries per connection.
 
