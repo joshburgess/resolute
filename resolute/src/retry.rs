@@ -34,6 +34,7 @@ use crate::executor::Executor;
 /// })).await?;
 /// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RetryPolicy {
     /// Maximum number of retry attempts (not counting the initial attempt).
     pub max_retries: u32,

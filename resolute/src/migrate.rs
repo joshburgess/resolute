@@ -19,6 +19,7 @@ use crate::error::TypedError;
 
 /// A migration file pair on disk.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Migration {
     pub version: i64,
     pub name: String,
@@ -28,6 +29,7 @@ pub struct Migration {
 
 /// A row from `_resolute_migrations`: a migration that has been applied.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct AppliedMigration {
     pub version: i64,
     pub name: String,
@@ -37,6 +39,7 @@ pub struct AppliedMigration {
 
 /// Combined view of on-disk files and applied rows, as used by `status`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct StatusReport {
     /// Migration files found on disk, sorted by version.
     pub files: Vec<Migration>,
@@ -46,6 +49,7 @@ pub struct StatusReport {
 
 /// Result of `validate`: how the on-disk state compares to the tracking table.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct ValidateReport {
     /// Applied migrations whose on-disk name matches the recorded name.
     pub ok: Vec<AppliedMigration>,

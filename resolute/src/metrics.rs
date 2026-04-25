@@ -58,6 +58,7 @@ pub fn record_pool_timeout() {
 
 /// Snapshot of all metrics.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct QueryMetrics {
     pub query_count: u64,
     pub query_error_count: u64,
