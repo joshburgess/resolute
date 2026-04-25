@@ -93,7 +93,7 @@ impl RetryPolicy {
             }
         }
 
-        Err(last_err.unwrap())
+        Err(last_err.expect("retry loop sets last_err on every transient error before iterating"))
     }
 }
 

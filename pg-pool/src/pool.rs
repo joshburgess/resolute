@@ -709,14 +709,14 @@ impl<C: Poolable> PoolGuard<C> {
     pub fn conn(&self) -> &C {
         self.conn
             .as_ref()
-            .expect("PoolGuard: connection already taken via take()")
+            .expect("PoolGuard: connection has been moved out via PoolGuard::take(); the guard is consumed by `take()` and must not be accessed afterwards (a logic bug in the caller)")
     }
 
     /// Mutably borrow the wrapped connection. Panics if [`PoolGuard::take`] was already called.
     pub fn conn_mut(&mut self) -> &mut C {
         self.conn
             .as_mut()
-            .expect("PoolGuard: connection already taken via take()")
+            .expect("PoolGuard: connection has been moved out via PoolGuard::take(); the guard is consumed by `take()` and must not be accessed afterwards (a logic bug in the caller)")
     }
 
     /// Take ownership of the connection, removing it from the pool.
@@ -725,7 +725,7 @@ impl<C: Poolable> PoolGuard<C> {
         let conn = self
             .conn
             .take()
-            .expect("PoolGuard: connection already taken");
+            .expect("PoolGuard: connection has been moved out via PoolGuard::take(); the guard is consumed by `take()` and must not be accessed afterwards (a logic bug in the caller)");
         self.pool.in_use_count.fetch_sub(1, Ordering::Release);
         self.pool.total_count.fetch_sub(1, Ordering::Release);
         conn
@@ -745,7 +745,7 @@ impl<C: Poolable> std::ops::Deref for PoolGuard<C> {
     fn deref(&self) -> &Self::Target {
         self.conn
             .as_ref()
-            .expect("PoolGuard: connection already taken via take()")
+            .expect("PoolGuard: connection has been moved out via PoolGuard::take(); the guard is consumed by `take()` and must not be accessed afterwards (a logic bug in the caller)")
     }
 }
 
@@ -753,7 +753,7 @@ impl<C: Poolable> std::ops::DerefMut for PoolGuard<C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.conn
             .as_mut()
-            .expect("PoolGuard: connection already taken via take()")
+            .expect("PoolGuard: connection has been moved out via PoolGuard::take(); the guard is consumed by `take()` and must not be accessed afterwards (a logic bug in the caller)")
     }
 }
 

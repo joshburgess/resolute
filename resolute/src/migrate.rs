@@ -202,7 +202,10 @@ async fn release_advisory_lock(pg: &mut pg_wired::PgPipeline) {
         .simple_query(&format!("SELECT pg_advisory_unlock({MIGRATION_LOCK_KEY})"))
         .await
     {
-        tracing::warn!(error = %e, "failed to release migration advisory lock");
+        tracing::warn!(
+            error = %e,
+            "failed to release migration advisory lock; subsequent migrate() calls reusing this connection will block on pg_advisory_lock until the session ends"
+        );
     }
 }
 

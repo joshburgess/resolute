@@ -530,7 +530,12 @@ impl crate::query::Client {
                 Ok(val)
             }
             Err(e) => {
-                let _ = self.simple_query("ROLLBACK").await;
+                if let Err(rollback_err) = self.simple_query("ROLLBACK").await {
+                    tracing::warn!(
+                        error = %rollback_err,
+                        "ROLLBACK failed after transaction error; connection may be unhealthy"
+                    );
+                }
                 Err(e)
             }
         }
