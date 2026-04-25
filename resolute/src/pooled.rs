@@ -214,9 +214,7 @@ impl PooledTypedClient {
     ///
     /// Returns `TypedError::Wire` if the unlock query fails.
     pub async fn advisory_unlock(&self, key: i64) -> Result<bool, TypedError> {
-        let rows = self
-            .query("SELECT pg_advisory_unlock($1)", &[&key])
-            .await?;
+        let rows = self.query("SELECT pg_advisory_unlock($1)", &[&key]).await?;
         rows[0].get::<bool>(0)
     }
 
