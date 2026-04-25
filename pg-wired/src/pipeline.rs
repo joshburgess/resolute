@@ -9,7 +9,7 @@ use bytes::BytesMut;
 use crate::connection::WireConn;
 use crate::error::PgWireError;
 use crate::protocol::frontend;
-use crate::protocol::types::{FormatCode, FrontendMsg, RawRow};
+use crate::protocol::types::{BackendMsg, FormatCode, FrontendMsg, RawRow};
 
 /// High-level pipelined PostgreSQL client.
 /// Coalesces Parse+Bind+Execute+Sync into a single TCP write.
@@ -104,13 +104,30 @@ impl PgPipeline {
 
     /// Execute a simple query (no parameters, text protocol).
     /// Used for SET LOCAL ROLE, set_config, BEGIN, COMMIT etc.
+    ///
+    /// Drains all backend messages until `ReadyForQuery`. If the server sent
+    /// an `ErrorResponse`, the first such error is captured and returned as
+    /// `Err(PgWireError::Pg(_))` once the resync completes.
     pub async fn simple_query(&mut self, sql: &str) -> Result<(), PgWireError> {
         self.send_buf.clear();
         frontend::encode_message(&FrontendMsg::Query(sql.as_bytes()), &mut self.send_buf);
         self.conn.send_raw(&self.send_buf).await?;
 
-        // Drain until ReadyForQuery.
-        self.conn.drain_until_ready().await?;
+        let mut first_error = None;
+        loop {
+            match self.conn.recv_msg().await? {
+                BackendMsg::ReadyForQuery { .. } => break,
+                BackendMsg::ErrorResponse { fields } => {
+                    if first_error.is_none() {
+                        first_error = Some(fields);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(err) = first_error {
+            return Err(PgWireError::Pg(err));
+        }
         Ok(())
     }
 
