@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use resolute::TypedPool;
+use resolute::{SharedTypedPool, TypedPool};
 use sqlx::postgres::PgPoolOptions;
 
 const ADDR: &str = "127.0.0.1:54322";
@@ -70,6 +70,33 @@ fn bench_concurrent_select_4c_16t(c: &mut Criterion) {
                     let p = Arc::clone(&pt_pool);
                     handles.push(tokio::spawn(async move {
                         let conn = p.get().await.unwrap();
+                        let rows = conn.query("SELECT 1::int4", &[]).await.unwrap();
+                        let _: i32 = rows[0].get(0).unwrap();
+                    }));
+                }
+                for h in handles {
+                    h.await.unwrap();
+                }
+            });
+        });
+    });
+
+    // Shared (multiplexed) pool: 16 tasks submit concurrently to 4 conns; the
+    // writer task on each conn coalesces submissions into batched writes.
+    // No exclusive checkout, no waiter queue.
+    let shared_pool = Arc::new(
+        rt.block_on(SharedTypedPool::connect(ADDR, USER, PASS, DB, 4))
+            .unwrap(),
+    );
+
+    group.bench_function("resolute_shared", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut handles = Vec::with_capacity(16);
+                for _ in 0..16 {
+                    let p = Arc::clone(&shared_pool);
+                    handles.push(tokio::spawn(async move {
+                        let conn = p.get().await;
                         let rows = conn.query("SELECT 1::int4", &[]).await.unwrap();
                         let _: i32 = rows[0].get(0).unwrap();
                     }));
@@ -152,6 +179,30 @@ fn bench_coalesce_single_conn_8t(c: &mut Criterion) {
         });
     });
 
+    let shared_pool = Arc::new(
+        rt.block_on(SharedTypedPool::connect(ADDR, USER, PASS, DB, 1))
+            .unwrap(),
+    );
+
+    group.bench_function("resolute_shared", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut handles = Vec::with_capacity(8);
+                for _ in 0..8 {
+                    let p = Arc::clone(&shared_pool);
+                    handles.push(tokio::spawn(async move {
+                        let conn = p.get().await;
+                        let rows = conn.query("SELECT 1::int4", &[]).await.unwrap();
+                        let _: i32 = rows[0].get(0).unwrap();
+                    }));
+                }
+                for h in handles {
+                    h.await.unwrap();
+                }
+            });
+        });
+    });
+
     let sqlx_pool = rt
         .block_on(
             PgPoolOptions::new()
@@ -209,6 +260,30 @@ fn bench_concurrent_select_8c_64t(c: &mut Criterion) {
                     let p = Arc::clone(&pt_pool);
                     handles.push(tokio::spawn(async move {
                         let conn = p.get().await.unwrap();
+                        let rows = conn.query("SELECT 1::int4", &[]).await.unwrap();
+                        let _: i32 = rows[0].get(0).unwrap();
+                    }));
+                }
+                for h in handles {
+                    h.await.unwrap();
+                }
+            });
+        });
+    });
+
+    let shared_pool = Arc::new(
+        rt.block_on(SharedTypedPool::connect(ADDR, USER, PASS, DB, 8))
+            .unwrap(),
+    );
+
+    group.bench_function("resolute_shared", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut handles = Vec::with_capacity(64);
+                for _ in 0..64 {
+                    let p = Arc::clone(&shared_pool);
+                    handles.push(tokio::spawn(async move {
+                        let conn = p.get().await;
                         let rows = conn.query("SELECT 1::int4", &[]).await.unwrap();
                         let _: i32 = rows[0].get(0).unwrap();
                     }));

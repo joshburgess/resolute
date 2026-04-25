@@ -151,6 +151,7 @@ pub mod range;
 pub mod reconnect;
 pub mod retry;
 mod row;
+mod shared_pool;
 #[cfg(feature = "test-utils")]
 pub mod test_db;
 mod types;
@@ -172,6 +173,7 @@ pub use query::{
 };
 pub use query_builder::{sql, QueryBuilder};
 pub use range::PgRange;
+pub use shared_pool::{SharedTypedClient, SharedTypedPool};
 /// Attribute macro for database-backed tests. Auto-creates a temp DB,
 /// runs migrations, injects a `Client`, and drops the DB on completion.
 pub use resolute_derive::test;
