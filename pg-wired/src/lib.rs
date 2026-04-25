@@ -4,6 +4,7 @@ pub mod cancel;
 pub mod connection;
 pub mod error;
 pub mod pipeline;
+#[doc(hidden)]
 pub mod protocol;
 mod scram;
 pub mod tls;

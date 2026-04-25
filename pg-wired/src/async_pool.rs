@@ -15,7 +15,11 @@ use crate::error::PgWireError;
 use crate::tls::TlsMode;
 
 /// Connection configuration for reconnection.
+///
+/// Marked `#[non_exhaustive]` so additional connection options (compression,
+/// statement_timeout, etc.) can be added without breaking downstream construction.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct ConnConfig {
     pub addr: String,
     pub user: String,
