@@ -34,6 +34,12 @@ pub struct WireConn {
     /// `SET TimeZone = ...`). Treat these values as startup defaults, not a
     /// live view of the session state.
     pub params: std::collections::HashMap<String, String>,
+    /// Authentication mechanism the server selected during startup.
+    ///
+    /// One of `"trust"`, `"cleartext"`, `"md5"`, `"SCRAM-SHA-256"`, or
+    /// `"SCRAM-SHA-256-PLUS"`. Useful for tests that need to verify channel
+    /// binding actually fired and for operational logging.
+    pub(crate) auth_mechanism: &'static str,
 }
 
 impl WireConn {
@@ -43,6 +49,15 @@ impl WireConn {
     /// can send a cancel request.
     pub fn pid(&self) -> i32 {
         self.pid
+    }
+
+    /// Authentication mechanism the server selected during startup.
+    ///
+    /// Returns one of `"trust"`, `"cleartext"`, `"md5"`, `"SCRAM-SHA-256"`,
+    /// or `"SCRAM-SHA-256-PLUS"`. `"SCRAM-SHA-256-PLUS"` confirms that
+    /// `tls-server-end-point` channel binding was negotiated.
+    pub fn auth_mechanism(&self) -> &'static str {
+        self.auth_mechanism
     }
 }
 
@@ -64,7 +79,7 @@ impl WireConn {
     fn choose_scram_mechanism(
         &self,
         mechanisms: &[String],
-    ) -> Result<(crate::scram::ChannelBinding, &'static [u8]), PgWireError> {
+    ) -> Result<(crate::scram::ChannelBinding, &'static [u8], &'static str), PgWireError> {
         // If TLS is active and server supports SCRAM-SHA-256-PLUS, use channel binding.
         #[cfg(feature = "tls")]
         if let MaybeTlsStream::Tls(ref tls) = self.stream {
@@ -76,6 +91,7 @@ impl WireConn {
                         return Ok((
                             crate::scram::ChannelBinding::TlsServerEndPoint(hash),
                             b"SCRAM-SHA-256-PLUS",
+                            "SCRAM-SHA-256-PLUS",
                         ));
                     }
                 }
@@ -84,7 +100,11 @@ impl WireConn {
 
         // Fall back to plain SCRAM-SHA-256.
         if mechanisms.iter().any(|m| m == "SCRAM-SHA-256") {
-            Ok((crate::scram::ChannelBinding::None, b"SCRAM-SHA-256"))
+            Ok((
+                crate::scram::ChannelBinding::None,
+                b"SCRAM-SHA-256",
+                "SCRAM-SHA-256",
+            ))
         } else {
             Err(PgWireError::Protocol(format!(
                 "No supported SASL mechanism: {:?}",
@@ -266,6 +286,9 @@ impl WireConn {
             pid: 0,
             secret: 0,
             params: std::collections::HashMap::new(),
+            // Default to "trust": if the server sends AuthenticationOk without
+            // a prior challenge, no real auth method ran.
+            auth_mechanism: "trust",
         };
 
         // Send startup message with optional extra parameters.
@@ -279,11 +302,13 @@ impl WireConn {
             match msg {
                 BackendMsg::AuthenticationOk => {}
                 BackendMsg::AuthenticationCleartextPassword => {
+                    conn.auth_mechanism = "cleartext";
                     let mut buf = BytesMut::new();
                     frontend::encode_password(password.as_bytes(), &mut buf);
                     conn.send_raw(&buf).await?;
                 }
                 BackendMsg::AuthenticationMd5Password { salt } => {
+                    conn.auth_mechanism = "md5";
                     let hash = frontend::md5_password(user, password, &salt);
                     let mut buf = BytesMut::new();
                     frontend::encode_password(&hash, &mut buf);
@@ -291,7 +316,8 @@ impl WireConn {
                 }
                 BackendMsg::AuthenticationSASL { mechanisms } => {
                     // Prefer SCRAM-SHA-256-PLUS (with channel binding) when TLS is active.
-                    let (cb, mechanism) = conn.choose_scram_mechanism(&mechanisms)?;
+                    let (cb, mechanism, name) = conn.choose_scram_mechanism(&mechanisms)?;
+                    conn.auth_mechanism = name;
                     let (scram, client_first) = ScramClient::new(password, cb);
                     let mut buf = BytesMut::new();
                     frontend::encode_message(

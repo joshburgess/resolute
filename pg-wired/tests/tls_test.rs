@@ -43,8 +43,35 @@ async fn tls_connect_with_custom_ca_succeeds() {
     .await
     .expect("connect over TLS with custom root CA");
 
+    // SCRAM-SHA-256-PLUS must win over plain SCRAM-SHA-256 whenever TLS is
+    // active and the server advertises both. Anything else is a silent
+    // channel-binding downgrade.
+    assert_eq!(
+        conn.auth_mechanism(),
+        "SCRAM-SHA-256-PLUS",
+        "expected channel binding (SCRAM-SHA-256-PLUS) over TLS"
+    );
+
     let mut pg = PgPipeline::new(conn);
     pg.simple_query("SELECT 1").await.expect("SELECT 1 over TLS");
+}
+
+#[tokio::test]
+async fn plain_scram_used_without_tls() {
+    let conn = WireConn::connect(
+        test_env::addr(),
+        test_env::user(),
+        test_env::pass(),
+        test_env::db(),
+    )
+    .await
+    .expect("connect over plain TCP");
+
+    assert_eq!(
+        conn.auth_mechanism(),
+        "SCRAM-SHA-256",
+        "expected plain SCRAM-SHA-256 without TLS"
+    );
 }
 
 #[tokio::test]
