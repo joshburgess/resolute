@@ -57,6 +57,10 @@ harness = false
 name = "query_latency"
 harness = false
 
+[[bench]]
+name = "concurrent_load"
+harness = false
+
 [features]
 default = ["chrono", "json", "uuid"]
 chrono = ["dep:chrono", "resolute-macros/chrono"]
