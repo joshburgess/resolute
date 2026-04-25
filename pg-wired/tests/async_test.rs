@@ -3,13 +3,11 @@
 
 use pg_wired::{AsyncConn, WireConn};
 
-const ADDR: &str = "127.0.0.1:54322";
-const USER: &str = "postgres";
-const PASS: &str = "postgres";
-const DB: &str = "postgrest_test";
+mod test_env;
+use test_env::{addr, db, pass, user};
 
 async fn connect() -> AsyncConn {
-    let conn = WireConn::connect(ADDR, USER, PASS, DB).await.unwrap();
+    let conn = WireConn::connect(addr(), user(), pass(), db()).await.unwrap();
     AsyncConn::new(conn)
 }
 

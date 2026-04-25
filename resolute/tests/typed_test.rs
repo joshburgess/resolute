@@ -76,13 +76,23 @@ async fn test_resolute_test_macro(client: resolute::Client) {
 }
 use tokio_stream::StreamExt;
 
-const ADDR: &str = "127.0.0.1:54322";
-const USER: &str = "postgres";
-const PASS: &str = "postgres";
-const DB: &str = "postgrest_test";
+use resolute::test_db::{test_addr, test_database, test_database_url, test_password, test_user};
+
+fn addr() -> &'static str {
+    test_addr()
+}
+fn user() -> &'static str {
+    test_user()
+}
+fn pass() -> &'static str {
+    test_password()
+}
+fn db() -> &'static str {
+    test_database()
+}
 
 async fn connect() -> Client {
-    Client::connect(ADDR, USER, PASS, DB).await.unwrap()
+    Client::connect(addr(), user(), pass(), db()).await.unwrap()
 }
 
 // ---------------------------------------------------------------------------
@@ -1999,7 +2009,7 @@ async fn test_database_create_and_connect() {
     let db_name = "resolute_test_db_lifecycle";
 
     // Use a maintenance connection.
-    let maint = Client::connect(ADDR, USER, PASS, "postgres").await.unwrap();
+    let maint = Client::connect(addr(), user(), pass(), "postgres").await.unwrap();
 
     // Clean up from prior runs.
     let _ = maint
@@ -2013,7 +2023,7 @@ async fn test_database_create_and_connect() {
         .unwrap();
 
     // Verify we can connect and query.
-    let test_client = Client::connect(ADDR, USER, PASS, db_name).await.unwrap();
+    let test_client = Client::connect(addr(), user(), pass(), db_name).await.unwrap();
     let rows = test_client.query("SELECT 1::int4 AS n", &[]).await.unwrap();
     assert_eq!(rows[0].get::<i32>(0).unwrap(), 1);
     drop(test_client);
@@ -2705,10 +2715,7 @@ async fn test_concurrent_queries() {
     let futures: Vec<_> = (0..10)
         .map(|i| {
             tokio::spawn(async move {
-                let client =
-                    Client::connect("127.0.0.1:54322", "postgres", "postgres", "postgrest_test")
-                        .await
-                        .unwrap();
+                let client = Client::connect(addr(), user(), pass(), db()).await.unwrap();
                 let rows = client.query("SELECT $1::int4 AS n", &[&i]).await.unwrap();
                 rows[0].get::<i32>(0).unwrap()
             })
@@ -3034,7 +3041,7 @@ async fn test_executor_trait_with_transaction() {
 
 #[tokio::test]
 async fn test_executor_trait_with_pool() {
-    let pool = resolute::TypedPool::connect(ADDR, USER, PASS, DB, 3)
+    let pool = resolute::TypedPool::connect(addr(), user(), pass(), db(), 3)
         .await
         .unwrap();
     let pooled = pool.get().await.unwrap();
@@ -3832,7 +3839,7 @@ async fn test_stress_pool_concurrent() {
     // 50 concurrent tasks sharing a pool of 5 connections, each does 10 queries.
     // With the fixed pool (AsyncConn reuse), connections are returned and reused.
     let pool = std::sync::Arc::new(
-        resolute::TypedPool::connect(ADDR, USER, PASS, DB, 5)
+        resolute::TypedPool::connect(addr(), user(), pass(), db(), 5)
             .await
             .unwrap(),
     );
@@ -3863,7 +3870,7 @@ async fn test_stress_pool_concurrent() {
 #[tokio::test]
 async fn test_stress_pool_mixed_operations() {
     let pool = std::sync::Arc::new(
-        resolute::TypedPool::connect(ADDR, USER, PASS, DB, 5)
+        resolute::TypedPool::connect(addr(), user(), pass(), db(), 5)
             .await
             .unwrap(),
     );
@@ -3981,7 +3988,7 @@ fn test_pg_date_encode_decode_roundtrip() {
 
 #[tokio::test]
 async fn test_pool_warm_up() {
-    let pool = resolute::TypedPool::connect(ADDR, USER, PASS, DB, 5)
+    let pool = resolute::TypedPool::connect(addr(), user(), pass(), db(), 5)
         .await
         .unwrap();
     pool.warm_up(3).await;
@@ -3999,7 +4006,7 @@ async fn test_pool_warm_up() {
 
 #[tokio::test]
 async fn test_pool_discard_all_clears_state() {
-    let pool = resolute::TypedPool::connect(ADDR, USER, PASS, DB, 1)
+    let pool = resolute::TypedPool::connect(addr(), user(), pass(), db(), 1)
         .await
         .unwrap();
 
@@ -4064,7 +4071,7 @@ async fn test_metrics_recording() {
 
 #[tokio::test]
 async fn test_test_db_lifecycle() {
-    let db = resolute::test_db::TestDb::create(ADDR, USER, PASS)
+    let db = resolute::test_db::TestDb::create(addr(), user(), pass())
         .await
         .unwrap();
 
@@ -4094,7 +4101,7 @@ async fn test_test_db_lifecycle() {
     db.drop_db().await.unwrap();
 
     // Verify the database is gone by trying to connect — should fail.
-    let result = Client::connect(ADDR, USER, PASS, &db.database).await;
+    let result = Client::connect(addr(), user(), pass(), &db.database).await;
     assert!(
         result.is_err(),
         "expected connection to dropped database to fail",
@@ -4284,7 +4291,7 @@ async fn test_atomic_rollback_on_error() {
 #[tokio::test]
 async fn test_pg_listener_listen_notify() {
     use resolute::PgListener;
-    let mut listener = PgListener::connect(ADDR, USER, PASS, DB).await.unwrap();
+    let mut listener = PgListener::connect(addr(), user(), pass(), db()).await.unwrap();
     listener.listen("test_channel_1").await.unwrap();
 
     // Send a notification from a separate connection.
@@ -4307,7 +4314,7 @@ async fn test_pg_listener_listen_notify() {
 #[tokio::test]
 async fn test_pg_listener_unlisten() {
     use resolute::PgListener;
-    let mut listener = PgListener::connect(ADDR, USER, PASS, DB).await.unwrap();
+    let mut listener = PgListener::connect(addr(), user(), pass(), db()).await.unwrap();
     listener.listen("test_channel_2").await.unwrap();
     assert_eq!(listener.channels().len(), 1);
     listener.unlisten("test_channel_2").await.unwrap();
@@ -4322,7 +4329,7 @@ async fn test_pg_listener_reconnects_and_re_listens() {
     // Unique channel so this test can't race with other listener tests.
     let channel = format!("test_reconnect_{}", std::process::id());
 
-    let mut listener = PgListener::connect(ADDR, USER, PASS, DB).await.unwrap();
+    let mut listener = PgListener::connect(addr(), user(), pass(), db()).await.unwrap();
     listener.listen(&channel).await.unwrap();
     let original_pid = listener.backend_pid();
 
@@ -4378,7 +4385,7 @@ async fn test_pg_listener_reconnects_and_re_listens() {
 
 #[tokio::test]
 async fn test_connect_from_str_uri() {
-    let connstr = format!("postgres://{USER}:{PASS}@{ADDR}/{DB}");
+    let connstr = test_database_url();
     let client = resolute::Client::connect_from_str(&connstr).await.unwrap();
     let rows = client.query("SELECT 1::int4 AS n", &[]).await.unwrap();
     assert_eq!(rows[0].get::<i32>(0).unwrap(), 1);
@@ -4463,7 +4470,7 @@ async fn test_lookup_type_oids_builtin() {
 async fn test_migrate_run_serializes_via_advisory_lock() {
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-    let database_url = format!("postgres://{USER}:{PASS}@{ADDR}/{DB}");
+    let database_url = test_database_url();
 
     // Unique version numbers per test run so we don't collide with any
     // prior applied migrations in the shared test DB.

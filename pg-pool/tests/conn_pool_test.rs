@@ -11,17 +11,15 @@ use pg_wired::{PgWireError, WireConn};
 
 type Pool = ConnPool<WirePoolable>;
 
-const ADDR: &str = "127.0.0.1:54322";
-const USER: &str = "postgres";
-const PASS: &str = "postgres";
-const DB: &str = "postgrest_test";
+mod test_env;
+use test_env::{addr, db, pass, user};
 
 fn test_config() -> ConnPoolConfig {
     let mut c = ConnPoolConfig::default();
-    c.addr = ADDR.to_string();
-    c.user = USER.to_string();
-    c.password = PASS.to_string();
-    c.database = DB.to_string();
+    c.addr = addr().to_string();
+    c.user = user().to_string();
+    c.password = pass().to_string();
+    c.database = db().to_string();
     c.min_idle = 1;
     c.max_size = 5;
     c.max_lifetime = Duration::from_secs(300);
@@ -1055,7 +1053,7 @@ async fn test_connection_invalid_after_pg_terminate() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Kill the PG backend from a separate connection.
-    let mut killer = WireConn::connect(ADDR, USER, PASS, DB).await.unwrap();
+    let mut killer = WireConn::connect(addr(), user(), pass(), db()).await.unwrap();
     let _ = send_query_raw(&mut killer, &format!("SELECT pg_terminate_backend({pid})")).await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1238,7 +1236,7 @@ async fn test_async_conn_no_cpu_spin_when_idle() {
     // We can't measure CPU directly, but we can verify it works
     // correctly after being idle for a while.
     let conn = pg_wired::AsyncConn::new(
-        pg_wired::WireConn::connect(ADDR, USER, PASS, DB)
+        pg_wired::WireConn::connect(addr(), user(), pass(), db())
             .await
             .unwrap(),
     );

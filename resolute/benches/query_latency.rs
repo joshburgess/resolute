@@ -4,15 +4,17 @@
 //! Run: cargo bench -p resolute --bench query_latency
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use resolute::test_db::{
+    test_addr as addr, test_database as db, test_database_url, test_password as pass,
+    test_user as user,
+};
 use resolute::Client;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Row as SqlxRow;
 
-const ADDR: &str = "127.0.0.1:54322";
-const USER: &str = "postgres";
-const PASS: &str = "postgres";
-const DB: &str = "postgrest_test";
-const SQLX_URL: &str = "postgres://postgres:postgres@127.0.0.1:54322/postgrest_test";
+fn sqlx_url() -> String {
+    test_database_url()
+}
 
 fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
@@ -30,7 +32,7 @@ fn bench_select_1(c: &mut Criterion) {
     let rt = rt();
 
     // resolute
-    let pt_client = rt.block_on(Client::connect(ADDR, USER, PASS, DB)).unwrap();
+    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
     group.bench_function("resolute", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -42,7 +44,7 @@ fn bench_select_1(c: &mut Criterion) {
 
     // sqlx
     let sqlx_pool = rt
-        .block_on(PgPoolOptions::new().max_connections(1).connect(SQLX_URL))
+        .block_on(PgPoolOptions::new().max_connections(1).connect(&sqlx_url()))
         .unwrap();
     group.bench_function("sqlx", |b| {
         b.iter(|| {
@@ -67,7 +69,7 @@ fn bench_select_param(c: &mut Criterion) {
     let mut group = c.benchmark_group("select_param_i32");
     let rt = rt();
 
-    let pt_client = rt.block_on(Client::connect(ADDR, USER, PASS, DB)).unwrap();
+    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
     group.bench_function("resolute", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -81,7 +83,7 @@ fn bench_select_param(c: &mut Criterion) {
     });
 
     let sqlx_pool = rt
-        .block_on(PgPoolOptions::new().max_connections(1).connect(SQLX_URL))
+        .block_on(PgPoolOptions::new().max_connections(1).connect(&sqlx_url()))
         .unwrap();
     group.bench_function("sqlx", |b| {
         b.iter(|| {
@@ -107,7 +109,7 @@ fn bench_select_3col(c: &mut Criterion) {
     let mut group = c.benchmark_group("select_3col");
     let rt = rt();
 
-    let pt_client = rt.block_on(Client::connect(ADDR, USER, PASS, DB)).unwrap();
+    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
     group.bench_function("resolute", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -126,7 +128,7 @@ fn bench_select_3col(c: &mut Criterion) {
     });
 
     let sqlx_pool = rt
-        .block_on(PgPoolOptions::new().max_connections(1).connect(SQLX_URL))
+        .block_on(PgPoolOptions::new().max_connections(1).connect(&sqlx_url()))
         .unwrap();
     group.bench_function("sqlx", |b| {
         b.iter(|| {
@@ -156,7 +158,7 @@ fn bench_select_100_rows(c: &mut Criterion) {
     let mut group = c.benchmark_group("select_100_rows");
     let rt = rt();
 
-    let pt_client = rt.block_on(Client::connect(ADDR, USER, PASS, DB)).unwrap();
+    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
     group.bench_function("resolute", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -170,7 +172,7 @@ fn bench_select_100_rows(c: &mut Criterion) {
     });
 
     let sqlx_pool = rt
-        .block_on(PgPoolOptions::new().max_connections(1).connect(SQLX_URL))
+        .block_on(PgPoolOptions::new().max_connections(1).connect(&sqlx_url()))
         .unwrap();
     group.bench_function("sqlx", |b| {
         b.iter(|| {
@@ -195,7 +197,7 @@ fn bench_insert_delete(c: &mut Criterion) {
     let mut group = c.benchmark_group("insert_delete_cycle");
     let rt = rt();
 
-    let pt_client = rt.block_on(Client::connect(ADDR, USER, PASS, DB)).unwrap();
+    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
     rt.block_on(
         pt_client
             .simple_query("CREATE TABLE IF NOT EXISTS bench_cycle (id int PRIMARY KEY, val text)"),
@@ -221,7 +223,7 @@ fn bench_insert_delete(c: &mut Criterion) {
     });
 
     let sqlx_pool = rt
-        .block_on(PgPoolOptions::new().max_connections(1).connect(SQLX_URL))
+        .block_on(PgPoolOptions::new().max_connections(1).connect(&sqlx_url()))
         .unwrap();
     group.bench_function("sqlx", |b| {
         b.iter(|| {
@@ -254,7 +256,7 @@ fn bench_cache_hit(c: &mut Criterion) {
     let mut group = c.benchmark_group("cache_hit");
     let rt = rt();
 
-    let pt_client = rt.block_on(Client::connect(ADDR, USER, PASS, DB)).unwrap();
+    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
     rt.block_on(pt_client.query("SELECT $1::int4 AS n", &[&1i32]))
         .unwrap();
 
@@ -272,7 +274,7 @@ fn bench_cache_hit(c: &mut Criterion) {
 
     // sqlx also has statement caching via PgPool
     let sqlx_pool = rt
-        .block_on(PgPoolOptions::new().max_connections(1).connect(SQLX_URL))
+        .block_on(PgPoolOptions::new().max_connections(1).connect(&sqlx_url()))
         .unwrap();
     // Warm cache.
     rt.block_on(async {

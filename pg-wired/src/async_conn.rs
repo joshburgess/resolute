@@ -109,6 +109,11 @@ pub struct AsyncConn {
     /// only run self-contained Bind/Execute/Sync queries leave this `false`,
     /// allowing pools to skip an expensive DISCARD ALL on return.
     state_mutated: Arc<std::sync::atomic::AtomicBool>,
+    /// Cumulative count of asynchronous notifications dropped because the
+    /// notification channel was full or no application code was draining it.
+    /// Surfaced via [`AsyncConn::dropped_notifications`] so callers can detect
+    /// missed `LISTEN` events.
+    dropped_notifications: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl std::fmt::Debug for AsyncConn {
@@ -190,6 +195,7 @@ impl AsyncConn {
         let pending_notify = Arc::new(tokio::sync::Notify::new());
         let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let state_mutated = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let dropped_notifications = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
         let (stream_read, stream_write) = tokio::io::split(conn.into_stream());
 
@@ -212,8 +218,17 @@ impl AsyncConn {
             let alive_clone = Arc::clone(&alive);
             let state_mutated = Arc::clone(&state_mutated);
             let ntf_tx = notification_tx.clone();
+            let dropped = Arc::clone(&dropped_notifications);
             tokio::spawn(async move {
-                reader_task(stream_read, pending, pending_notify, ntf_tx, state_mutated).await;
+                reader_task(
+                    stream_read,
+                    pending,
+                    pending_notify,
+                    ntf_tx,
+                    state_mutated,
+                    dropped,
+                )
+                .await;
                 alive_clone.store(false, std::sync::atomic::Ordering::Relaxed);
                 tracing::warn!("pg-wired reader task exited");
             });
@@ -230,7 +245,20 @@ impl AsyncConn {
             notification_tx,
             notification_rx: std::sync::Mutex::new(Some(notification_rx)),
             state_mutated,
+            dropped_notifications,
         }
+    }
+
+    /// Cumulative number of `NotificationResponse` messages this connection
+    /// has discarded since it was created.
+    ///
+    /// Notifications are dropped when (a) the application has not called
+    /// [`AsyncConn::take_notification_receiver`] yet, or (b) the receiver is
+    /// not draining fast enough and the bounded channel fills up. Compare
+    /// successive readings to detect missed `LISTEN` events.
+    pub fn dropped_notifications(&self) -> u64 {
+        self.dropped_notifications
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Take the notification receiver. Call once to get a channel that
@@ -928,6 +956,7 @@ async fn reader_task(
     pending_notify: Arc<tokio::sync::Notify>,
     notification_tx: mpsc::Sender<BackendMsg>,
     state_mutated: Arc<std::sync::atomic::AtomicBool>,
+    dropped_notifications: Arc<std::sync::atomic::AtomicU64>,
 ) {
     let mut recv_buf = BytesMut::with_capacity(32 * 1024);
 
@@ -947,7 +976,14 @@ async fn reader_task(
         // Collect the response based on the collector type.
         let result = match pr.collector {
             ResponseCollector::Rows => {
-                collect_rows(&mut stream, &mut recv_buf, &notification_tx, &state_mutated).await
+                collect_rows(
+                    &mut stream,
+                    &mut recv_buf,
+                    &notification_tx,
+                    &state_mutated,
+                    &dropped_notifications,
+                )
+                .await
             }
             ResponseCollector::Drain => {
                 drain_until_ready(&mut stream, &mut recv_buf, Some(&state_mutated))
@@ -960,7 +996,9 @@ async fn reader_task(
                     &mut recv_buf,
                     header_tx,
                     row_tx,
+                    &notification_tx,
                     &state_mutated,
+                    &dropped_notifications,
                 )
                 .await;
                 Ok(PipelineResponse::Done)
@@ -1013,6 +1051,7 @@ async fn collect_rows(
     buf: &mut BytesMut,
     notification_tx: &mpsc::Sender<BackendMsg>,
     state_mutated: &std::sync::atomic::AtomicBool,
+    dropped_notifications: &std::sync::atomic::AtomicU64,
 ) -> Result<PipelineResponse, PgWireError> {
     let mut rows = Vec::new();
     let mut fields = Vec::new();
@@ -1038,7 +1077,8 @@ async fn collect_rows(
             msg @ BackendMsg::NotificationResponse { .. } => {
                 // Forward notification instead of dropping.
                 if notification_tx.try_send(msg).is_err() {
-                    tracing::warn!("notification channel full — dropping notification");
+                    dropped_notifications.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    tracing::warn!("notification channel full, dropping notification");
                 }
             }
             BackendMsg::ParseComplete
@@ -1076,7 +1116,9 @@ async fn stream_rows(
     buf: &mut BytesMut,
     header_tx: oneshot::Sender<Result<StreamHeader, PgWireError>>,
     row_tx: mpsc::Sender<Result<StreamedRow, PgWireError>>,
+    notification_tx: &mpsc::Sender<BackendMsg>,
     state_mutated: &std::sync::atomic::AtomicBool,
+    dropped_notifications: &std::sync::atomic::AtomicU64,
 ) {
     let mut header_tx = Some(header_tx);
     let mut fields = Vec::new();
@@ -1131,6 +1173,12 @@ async fn stream_rows(
                 }
                 let _ = drain_until_ready(stream, buf, Some(state_mutated)).await;
                 return;
+            }
+            msg @ BackendMsg::NotificationResponse { .. } => {
+                if notification_tx.try_send(msg).is_err() {
+                    dropped_notifications.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    tracing::warn!("notification channel full, dropping notification");
+                }
             }
             BackendMsg::ParseComplete
             | BackendMsg::BindComplete

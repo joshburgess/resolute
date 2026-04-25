@@ -14,6 +14,62 @@
 use crate::error::TypedError;
 use crate::query::Client;
 
+/// Default `host:port` used when `RESOLUTE_TEST_ADDR` is unset.
+pub const DEFAULT_TEST_ADDR: &str = "127.0.0.1:54322";
+/// Default role used when `RESOLUTE_TEST_USER` is unset.
+pub const DEFAULT_TEST_USER: &str = "postgres";
+/// Default password used when `RESOLUTE_TEST_PASSWORD` is unset.
+pub const DEFAULT_TEST_PASSWORD: &str = "postgres";
+/// Default database used when `RESOLUTE_TEST_DB` is unset.
+pub const DEFAULT_TEST_DB: &str = "postgrest_test";
+
+fn cached(slot: &'static std::sync::OnceLock<String>, var: &str, default: &str) -> &'static str {
+    slot.get_or_init(|| std::env::var(var).unwrap_or_else(|_| default.to_string()))
+        .as_str()
+}
+
+/// `host:port` of the test PostgreSQL server.
+///
+/// Reads `RESOLUTE_TEST_ADDR` once on first call and caches the result. Falls
+/// back to [`DEFAULT_TEST_ADDR`]. Use this from integration tests, examples,
+/// and benches so a single environment variable can redirect every connection
+/// at a different cluster.
+pub fn test_addr() -> &'static str {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    cached(&V, "RESOLUTE_TEST_ADDR", DEFAULT_TEST_ADDR)
+}
+
+/// Test role. Reads `RESOLUTE_TEST_USER`; falls back to [`DEFAULT_TEST_USER`].
+pub fn test_user() -> &'static str {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    cached(&V, "RESOLUTE_TEST_USER", DEFAULT_TEST_USER)
+}
+
+/// Test password. Reads `RESOLUTE_TEST_PASSWORD`; falls back to [`DEFAULT_TEST_PASSWORD`].
+pub fn test_password() -> &'static str {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    cached(&V, "RESOLUTE_TEST_PASSWORD", DEFAULT_TEST_PASSWORD)
+}
+
+/// Test database name. Reads `RESOLUTE_TEST_DB`; falls back to [`DEFAULT_TEST_DB`].
+pub fn test_database() -> &'static str {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    cached(&V, "RESOLUTE_TEST_DB", DEFAULT_TEST_DB)
+}
+
+/// Compose a `postgres://user:password@host/database` URL from the
+/// `RESOLUTE_TEST_*` env vars (or defaults). Used by tests and benches that
+/// take a libpq-style connection string.
+pub fn test_database_url() -> String {
+    format!(
+        "postgres://{}:{}@{}/{}",
+        test_user(),
+        test_password(),
+        test_addr(),
+        test_database()
+    )
+}
+
 /// A temporary test database that is dropped on cleanup.
 ///
 /// # Examples
@@ -31,9 +87,11 @@ use crate::query::Client;
 /// }
 /// ```
 pub struct TestDb {
-    /// Connection address.
+    /// Connection address (`host:port`) of the underlying PostgreSQL server.
     pub addr: String,
+    /// Role used to create and connect to the test database.
     pub user: String,
+    /// Password for [`TestDb::user`].
     pub password: String,
     /// The randomly-generated database name.
     pub database: String,

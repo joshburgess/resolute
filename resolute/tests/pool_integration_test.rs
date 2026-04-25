@@ -3,23 +3,21 @@
 
 #![allow(dead_code)]
 
+use resolute::test_db::{
+    test_addr as addr, test_database as db, test_password as pass, test_user as user,
+};
 use resolute::{Executor, TypedPool};
-
-const ADDR: &str = "127.0.0.1:54322";
-const USER: &str = "postgres";
-const PASS: &str = "postgres";
-const DB: &str = "postgrest_test";
 
 #[tokio::test]
 async fn test_typed_pool_connect() {
-    let pool = TypedPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
     let m = pool.metrics();
     assert_eq!(m.total, 1); // min_idle default = 1
 }
 
 #[tokio::test]
 async fn test_typed_pool_query() {
-    let pool = TypedPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
     let client = pool.get().await.unwrap();
     let rows = client.query("SELECT 42::int4 AS n", &[]).await.unwrap();
     assert_eq!(rows[0].get::<i32>(0).unwrap(), 42);
@@ -27,7 +25,7 @@ async fn test_typed_pool_query() {
 
 #[tokio::test]
 async fn test_typed_pool_parameterized() {
-    let pool = TypedPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
     let client = pool.get().await.unwrap();
     let rows = client
         .query("SELECT name FROM api.authors WHERE id = $1", &[&1i32])
@@ -38,7 +36,7 @@ async fn test_typed_pool_parameterized() {
 
 #[tokio::test]
 async fn test_typed_pool_reuse() {
-    let pool = TypedPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
 
     // Check out, query, return. Repeat — connection should be reused.
     for i in 0..10i32 {
@@ -63,7 +61,7 @@ async fn test_typed_pool_from_row() {
         name: String,
     }
 
-    let pool = TypedPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
     let client = pool.get().await.unwrap();
     let rows = client
         .query("SELECT id, name FROM api.authors ORDER BY id", &[])
@@ -80,14 +78,14 @@ async fn test_typed_pool_from_row() {
 
 #[tokio::test]
 async fn test_typed_pool_drain() {
-    let pool = TypedPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = TypedPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
     pool.drain().await;
     assert_eq!(pool.metrics().total, 0);
 }
 
 #[tokio::test]
 async fn test_typed_pool_query_named() {
-    let pool = TypedPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
     let client = pool.get().await.unwrap();
     let rows = client
         .query_named(
@@ -105,7 +103,7 @@ async fn test_typed_pool_query_named() {
 
 #[tokio::test]
 async fn test_typed_pool_execute_named() {
-    let pool = TypedPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
     let client = pool.get().await.unwrap();
     client
         .simple_query("CREATE TEMP TABLE pool_named_test (id int, val text)")
@@ -126,7 +124,7 @@ async fn test_typed_pool_execute_named() {
 
 #[tokio::test]
 async fn test_typed_pool_connection_survives_return() {
-    let pool = TypedPool::connect(ADDR, USER, PASS, DB, 1).await.unwrap();
+    let pool = TypedPool::connect(addr(), user(), pass(), db(), 1).await.unwrap();
 
     // First checkout.
     {

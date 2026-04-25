@@ -146,6 +146,7 @@ Run benchmarks: `cargo bench -p resolute`
 | `chrono` | yes | `NaiveDate`, `NaiveTime`, `NaiveDateTime`, `DateTime<Utc>` |
 | `json` | yes | `serde_json::Value` for JSON/JSONB |
 | `uuid` | yes | `uuid::Uuid` |
+| `test-utils` | no | Exposes the `resolute::test_db` module: ephemeral test databases (`TestDb::create`, `create_with_migrations`, `drop_db`) and env-driven connection helpers (`test_addr`, `test_user`, `test_password`, `test_database`, `test_database_url`). Read by `RESOLUTE_TEST_ADDR`, `RESOLUTE_TEST_USER`, `RESOLUTE_TEST_PASSWORD`, `RESOLUTE_TEST_DB`. Also enabled automatically by the `#[resolute::test]` attribute macro. |
 
 pg-wired has an optional `tls` feature for rustls-based TLS connections.
 

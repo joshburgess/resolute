@@ -16,14 +16,16 @@
 use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use resolute::test_db::{
+    test_addr as addr, test_database as db, test_database_url, test_password as pass,
+    test_user as user,
+};
 use resolute::{SharedTypedPool, TypedPool};
 use sqlx::postgres::PgPoolOptions;
 
-const ADDR: &str = "127.0.0.1:54322";
-const USER: &str = "postgres";
-const PASS: &str = "postgres";
-const DB: &str = "postgrest_test";
-const SQLX_URL: &str = "postgres://postgres:postgres@127.0.0.1:54322/postgrest_test";
+fn sqlx_url() -> String {
+    test_database_url()
+}
 
 /// Multi-thread runtime so spawned tasks actually run in parallel.
 fn rt_mt() -> tokio::runtime::Runtime {
@@ -57,7 +59,7 @@ fn bench_concurrent_select_4c_16t(c: &mut Criterion) {
     let rt = rt_mt();
 
     let pt_pool = Arc::new(
-        rt.block_on(TypedPool::connect(ADDR, USER, PASS, DB, 4))
+        rt.block_on(TypedPool::connect(addr(), user(), pass(), db(), 4))
             .unwrap(),
     );
     rt.block_on(pt_pool.warm_up(4));
@@ -85,7 +87,7 @@ fn bench_concurrent_select_4c_16t(c: &mut Criterion) {
     // writer task on each conn coalesces submissions into batched writes.
     // No exclusive checkout, no waiter queue.
     let shared_pool = Arc::new(
-        rt.block_on(SharedTypedPool::connect(ADDR, USER, PASS, DB, 4))
+        rt.block_on(SharedTypedPool::connect(addr(), user(), pass(), db(), 4))
             .unwrap(),
     );
 
@@ -113,7 +115,7 @@ fn bench_concurrent_select_4c_16t(c: &mut Criterion) {
             PgPoolOptions::new()
                 .min_connections(4)
                 .max_connections(4)
-                .connect(SQLX_URL),
+                .connect(&sqlx_url()),
         )
         .unwrap();
 
@@ -155,7 +157,7 @@ fn bench_coalesce_single_conn_8t(c: &mut Criterion) {
     let rt = rt_st();
 
     let pt_pool = Arc::new(
-        rt.block_on(TypedPool::connect(ADDR, USER, PASS, DB, 1))
+        rt.block_on(TypedPool::connect(addr(), user(), pass(), db(), 1))
             .unwrap(),
     );
     rt.block_on(pt_pool.warm_up(1));
@@ -180,7 +182,7 @@ fn bench_coalesce_single_conn_8t(c: &mut Criterion) {
     });
 
     let shared_pool = Arc::new(
-        rt.block_on(SharedTypedPool::connect(ADDR, USER, PASS, DB, 1))
+        rt.block_on(SharedTypedPool::connect(addr(), user(), pass(), db(), 1))
             .unwrap(),
     );
 
@@ -208,7 +210,7 @@ fn bench_coalesce_single_conn_8t(c: &mut Criterion) {
             PgPoolOptions::new()
                 .min_connections(1)
                 .max_connections(1)
-                .connect(SQLX_URL),
+                .connect(&sqlx_url()),
         )
         .unwrap();
 
@@ -247,7 +249,7 @@ fn bench_concurrent_select_8c_64t(c: &mut Criterion) {
     let rt = rt_mt();
 
     let pt_pool = Arc::new(
-        rt.block_on(TypedPool::connect(ADDR, USER, PASS, DB, 8))
+        rt.block_on(TypedPool::connect(addr(), user(), pass(), db(), 8))
             .unwrap(),
     );
     rt.block_on(pt_pool.warm_up(8));
@@ -272,7 +274,7 @@ fn bench_concurrent_select_8c_64t(c: &mut Criterion) {
     });
 
     let shared_pool = Arc::new(
-        rt.block_on(SharedTypedPool::connect(ADDR, USER, PASS, DB, 8))
+        rt.block_on(SharedTypedPool::connect(addr(), user(), pass(), db(), 8))
             .unwrap(),
     );
 
@@ -300,7 +302,7 @@ fn bench_concurrent_select_8c_64t(c: &mut Criterion) {
             PgPoolOptions::new()
                 .min_connections(8)
                 .max_connections(8)
-                .connect(SQLX_URL),
+                .connect(&sqlx_url()),
         )
         .unwrap();
 
@@ -341,7 +343,7 @@ fn bench_server_bound_aggregate(c: &mut Criterion) {
     let rt = rt_st();
 
     let pt_client = rt
-        .block_on(resolute::Client::connect(ADDR, USER, PASS, DB))
+        .block_on(resolute::Client::connect(addr(), user(), pass(), db()))
         .unwrap();
 
     group.bench_function("resolute", |b| {
@@ -357,7 +359,7 @@ fn bench_server_bound_aggregate(c: &mut Criterion) {
     });
 
     let sqlx_pool = rt
-        .block_on(PgPoolOptions::new().max_connections(1).connect(SQLX_URL))
+        .block_on(PgPoolOptions::new().max_connections(1).connect(&sqlx_url()))
         .unwrap();
 
     group.bench_function("sqlx", |b| {
@@ -387,7 +389,7 @@ fn bench_large_result_10k(c: &mut Criterion) {
     let rt = rt_st();
 
     let pt_client = rt
-        .block_on(resolute::Client::connect(ADDR, USER, PASS, DB))
+        .block_on(resolute::Client::connect(addr(), user(), pass(), db()))
         .unwrap();
 
     group.bench_function("resolute", |b| {
@@ -403,7 +405,7 @@ fn bench_large_result_10k(c: &mut Criterion) {
     });
 
     let sqlx_pool = rt
-        .block_on(PgPoolOptions::new().max_connections(1).connect(SQLX_URL))
+        .block_on(PgPoolOptions::new().max_connections(1).connect(&sqlx_url()))
         .unwrap();
 
     group.bench_function("sqlx", |b| {
@@ -445,7 +447,7 @@ fn bench_wide_rows(c: &mut Criterion) {
         FROM generate_series(1, 1000) AS i";
 
     let pt_client = rt
-        .block_on(resolute::Client::connect(ADDR, USER, PASS, DB))
+        .block_on(resolute::Client::connect(addr(), user(), pass(), db()))
         .unwrap();
 
     group.bench_function("resolute", |b| {
@@ -461,7 +463,7 @@ fn bench_wide_rows(c: &mut Criterion) {
     });
 
     let sqlx_pool = rt
-        .block_on(PgPoolOptions::new().max_connections(1).connect(SQLX_URL))
+        .block_on(PgPoolOptions::new().max_connections(1).connect(&sqlx_url()))
         .unwrap();
 
     group.bench_function("sqlx", |b| {

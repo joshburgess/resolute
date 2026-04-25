@@ -130,6 +130,17 @@
 //! - Message coalescing: multiple queries batched into one write() syscall
 //! - Statement caching: Parse once, Bind+Execute on reuse
 //! - Generic array encode/decode for all types via `Vec<T>`
+//!
+//! # Cargo features
+//!
+//! - `chrono` (default): `chrono::NaiveDate`, `NaiveTime`, `NaiveDateTime`, `DateTime<Utc>`.
+//! - `json` (default): `serde_json::Value` for `json` / `jsonb`.
+//! - `uuid` (default): `uuid::Uuid`.
+//! - `test-utils` (off by default): exposes the `test_db` module with
+//!   ephemeral test-database helpers and env-driven connection settings
+//!   (`RESOLUTE_TEST_ADDR`, `RESOLUTE_TEST_USER`, `RESOLUTE_TEST_PASSWORD`,
+//!   `RESOLUTE_TEST_DB`). Enabled automatically by the
+//!   `#[resolute::test]` attribute macro.
 
 #![deny(missing_docs)]
 

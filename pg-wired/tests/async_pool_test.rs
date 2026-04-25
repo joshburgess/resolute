@@ -8,10 +8,8 @@ use std::time::Duration;
 
 use pg_wired::{AsyncPool, WireConn};
 
-const ADDR: &str = "127.0.0.1:54322";
-const USER: &str = "postgres";
-const PASS: &str = "postgres";
-const DB: &str = "postgrest_test";
+mod test_env;
+use test_env::{addr, db, pass, user};
 
 // ---------------------------------------------------------------------------
 // Pool creation and sizing
@@ -19,27 +17,27 @@ const DB: &str = "postgrest_test";
 
 #[tokio::test]
 async fn test_pool_connect_single() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 1).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 1).await.unwrap();
     assert_eq!(pool.size(), 1);
     assert_eq!(pool.alive_count().await, 1);
 }
 
 #[tokio::test]
 async fn test_pool_connect_multiple() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 4).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 4).await.unwrap();
     assert_eq!(pool.size(), 4);
     assert_eq!(pool.alive_count().await, 4);
 }
 
 #[tokio::test]
 async fn test_pool_connect_invalid_address() {
-    let result = AsyncPool::connect("127.0.0.1:1", USER, PASS, DB, 1).await;
+    let result = AsyncPool::connect("127.0.0.1:1", user(), pass(), db(), 1).await;
     assert!(result.is_err(), "invalid address should fail");
 }
 
 #[tokio::test]
 async fn test_pool_connect_size_zero_rejected() {
-    let result = AsyncPool::connect(ADDR, USER, PASS, DB, 0).await;
+    let result = AsyncPool::connect(addr(), user(), pass(), db(), 0).await;
     assert!(result.is_err(), "size=0 should be rejected");
 }
 
@@ -49,7 +47,7 @@ async fn test_pool_connect_size_zero_rejected() {
 
 #[tokio::test]
 async fn test_pool_exec_query_select_one() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
     let rows = pool.exec_query("SELECT 1 AS n", &[], &[]).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(col_str(&rows[0], 0), "1");
@@ -57,7 +55,7 @@ async fn test_pool_exec_query_select_one() {
 
 #[tokio::test]
 async fn test_pool_exec_query_parameterized() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
     let rows = pool
         .exec_query(
             "SELECT $1::text AS val",
@@ -72,7 +70,7 @@ async fn test_pool_exec_query_parameterized() {
 
 #[tokio::test]
 async fn test_pool_exec_query_multiple_rows() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
     let rows = pool
         .exec_query("SELECT id, name FROM api.authors ORDER BY id", &[], &[])
         .await
@@ -82,7 +80,7 @@ async fn test_pool_exec_query_multiple_rows() {
 
 #[tokio::test]
 async fn test_pool_exec_query_null_param() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 1).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 1).await.unwrap();
     let rows = pool
         .exec_query("SELECT $1::text AS val", &[None], &[0])
         .await
@@ -93,7 +91,7 @@ async fn test_pool_exec_query_null_param() {
 
 #[tokio::test]
 async fn test_pool_exec_query_empty_result() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 1).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 1).await.unwrap();
     let rows = pool
         .exec_query(
             "SELECT id FROM api.authors WHERE id = ($1::text)::int4",
@@ -111,7 +109,7 @@ async fn test_pool_exec_query_empty_result() {
 
 #[tokio::test]
 async fn test_pool_exec_transaction_basic() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
     let rows = pool
         .exec_transaction(
             "BEGIN; SET LOCAL ROLE web_anon",
@@ -128,7 +126,7 @@ async fn test_pool_exec_transaction_basic() {
 
 #[tokio::test]
 async fn test_pool_exec_transaction_with_jwt() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
     let rows = pool
         .exec_transaction(
             "BEGIN; SET LOCAL ROLE test_user; SELECT set_config('request.jwt.claims', '{\"role\":\"test_user\"}', true)",
@@ -145,7 +143,7 @@ async fn test_pool_exec_transaction_with_jwt() {
 
 #[tokio::test]
 async fn test_pool_exec_transaction_with_params() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
     let rows = pool
         .exec_transaction(
             "BEGIN; SET LOCAL ROLE web_anon",
@@ -165,7 +163,7 @@ async fn test_pool_exec_transaction_with_params() {
 
 #[tokio::test]
 async fn test_pool_round_robin_dispatch() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
 
     // Execute multiple queries — they should distribute across connections.
     for i in 0..9 {
@@ -179,7 +177,7 @@ async fn test_pool_round_robin_dispatch() {
 
 #[tokio::test]
 async fn test_pool_get_async_returns_alive_connections() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
 
     for _ in 0..10 {
         let conn = pool.get_async().await;
@@ -193,7 +191,7 @@ async fn test_pool_get_async_returns_alive_connections() {
 
 #[tokio::test]
 async fn test_pool_concurrent_queries() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 4).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 4).await.unwrap();
 
     let mut handles = Vec::new();
     for i in 0..20 {
@@ -215,7 +213,7 @@ async fn test_pool_concurrent_queries() {
 
 #[tokio::test]
 async fn test_pool_concurrent_transactions() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 4).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 4).await.unwrap();
 
     let mut handles = Vec::new();
     for i in 0..10 {
@@ -242,7 +240,7 @@ async fn test_pool_concurrent_transactions() {
 
 #[tokio::test]
 async fn test_pool_high_concurrency_stress() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 4).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 4).await.unwrap();
 
     // 100 concurrent queries.
     let mut handles = Vec::new();
@@ -271,7 +269,7 @@ async fn test_pool_high_concurrency_stress() {
 
 #[tokio::test]
 async fn test_pool_error_recovery() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
 
     // Query that errors.
     let result = pool
@@ -286,7 +284,7 @@ async fn test_pool_error_recovery() {
 
 #[tokio::test]
 async fn test_pool_transaction_error_recovery() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
 
     // Transaction with error in the data query.
     let result = pool
@@ -306,7 +304,7 @@ async fn test_pool_transaction_error_recovery() {
 
 #[tokio::test]
 async fn test_pool_multiple_errors_then_recovery() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
 
     // Multiple errors in a row.
     for _ in 0..5 {
@@ -329,7 +327,7 @@ async fn test_pool_multiple_errors_then_recovery() {
 
 #[tokio::test]
 async fn test_pool_detects_dead_connection() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
 
     // Get a PID from the pool via a query.
     let rows = pool
@@ -339,7 +337,7 @@ async fn test_pool_detects_dead_connection() {
     let pid = col_str(&rows[0], 0).parse::<i32>().unwrap();
 
     // Kill that backend from outside.
-    let mut killer = WireConn::connect(ADDR, USER, PASS, DB).await.unwrap();
+    let mut killer = WireConn::connect(addr(), user(), pass(), db()).await.unwrap();
     kill_backend(&mut killer, pid).await;
 
     // Give the reader task time to notice the disconnect.
@@ -357,7 +355,7 @@ async fn test_pool_detects_dead_connection() {
 
 #[tokio::test]
 async fn test_pool_reconnection_via_health_monitor() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
     assert_eq!(pool.alive_count().await, 2);
 
     // Kill one backend.
@@ -367,7 +365,7 @@ async fn test_pool_reconnection_via_health_monitor() {
         .unwrap();
     let pid = col_str(&rows[0], 0).parse::<i32>().unwrap();
 
-    let mut killer = WireConn::connect(ADDR, USER, PASS, DB).await.unwrap();
+    let mut killer = WireConn::connect(addr(), user(), pass(), db()).await.unwrap();
     kill_backend(&mut killer, pid).await;
 
     // The reader task only detects a broken socket when it tries to read.
@@ -407,7 +405,7 @@ async fn test_pool_reconnection_via_health_monitor() {
 
 #[tokio::test]
 async fn test_pool_skips_dead_connections_in_round_robin() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
 
     // Query on each slot to get all PIDs.
     let mut pids = Vec::new();
@@ -424,7 +422,7 @@ async fn test_pool_skips_dead_connections_in_round_robin() {
 
     // Kill the first PID we found.
     if let Some(&pid) = pids.first() {
-        let mut killer = WireConn::connect(ADDR, USER, PASS, DB).await.unwrap();
+        let mut killer = WireConn::connect(addr(), user(), pass(), db()).await.unwrap();
         kill_backend(&mut killer, pid).await;
     }
 
@@ -462,7 +460,7 @@ async fn test_pool_skips_dead_connections_in_round_robin() {
 
 #[tokio::test]
 async fn test_pool_statement_cache_per_connection() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
 
     // Same SQL executed repeatedly should use cached statements.
     for _ in 0..10 {
@@ -477,7 +475,7 @@ async fn test_pool_statement_cache_per_connection() {
 
 #[tokio::test]
 async fn test_pool_mixed_queries_and_transactions() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
 
     let mut handles = Vec::new();
 
@@ -519,7 +517,7 @@ async fn test_pool_mixed_queries_and_transactions() {
 
 #[tokio::test]
 async fn test_pool_single_connection_serial_queries() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 1).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 1).await.unwrap();
 
     for i in 0..10 {
         let rows = pool
@@ -532,7 +530,7 @@ async fn test_pool_single_connection_serial_queries() {
 
 #[tokio::test]
 async fn test_pool_single_connection_concurrent_queries() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 1).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 1).await.unwrap();
 
     // Multiple concurrent queries on a single backend connection.
     let mut handles = Vec::new();
@@ -554,7 +552,7 @@ async fn test_pool_single_connection_concurrent_queries() {
 
 #[tokio::test]
 async fn test_pool_large_result_set() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
 
     let rows = pool
         .exec_query("SELECT generate_series(1, 1000)::text AS n", &[], &[])
@@ -567,7 +565,7 @@ async fn test_pool_large_result_set() {
 
 #[tokio::test]
 async fn test_pool_multiple_columns() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 1).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 1).await.unwrap();
 
     let rows = pool
         .exec_query(
@@ -589,7 +587,7 @@ async fn test_pool_multiple_columns() {
 
 #[tokio::test]
 async fn test_pool_all_connections_dead_recovers() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 2).await.unwrap();
 
     // Collect all backend PIDs.
     let mut pids = Vec::new();
@@ -605,7 +603,7 @@ async fn test_pool_all_connections_dead_recovers() {
     }
 
     // Kill all backends.
-    let mut killer = WireConn::connect(ADDR, USER, PASS, DB).await.unwrap();
+    let mut killer = WireConn::connect(addr(), user(), pass(), db()).await.unwrap();
     for pid in &pids {
         kill_backend(&mut killer, *pid).await;
     }
@@ -641,7 +639,7 @@ async fn test_pool_all_connections_dead_recovers() {
 
 #[tokio::test]
 async fn test_pool_concurrent_queries_during_reconnection() {
-    let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 3).await.unwrap();
+    let pool = AsyncPool::connect(addr(), user(), pass(), db(), 3).await.unwrap();
 
     // Kill one backend.
     let rows = pool
@@ -649,7 +647,7 @@ async fn test_pool_concurrent_queries_during_reconnection() {
         .await
         .unwrap();
     let pid = col_str(&rows[0], 0).parse::<i32>().unwrap();
-    let mut killer = WireConn::connect(ADDR, USER, PASS, DB).await.unwrap();
+    let mut killer = WireConn::connect(addr(), user(), pass(), db()).await.unwrap();
     kill_backend(&mut killer, pid).await;
 
     // Immediately fire concurrent queries — some will hit the dead connection,

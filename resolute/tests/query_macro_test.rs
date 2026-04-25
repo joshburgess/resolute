@@ -5,15 +5,13 @@
 
 #![allow(clippy::approx_constant)]
 
+use resolute::test_db::{test_addr, test_database, test_password, test_user};
 use resolute::Client;
 
-const ADDR: &str = "127.0.0.1:54322";
-const USER: &str = "postgres";
-const PASS: &str = "postgres";
-const DB: &str = "postgrest_test";
-
 async fn connect() -> Client {
-    Client::connect(ADDR, USER, PASS, DB).await.unwrap()
+    Client::connect(test_addr(), test_user(), test_password(), test_database())
+        .await
+        .unwrap()
 }
 
 // ---------------------------------------------------------------------------

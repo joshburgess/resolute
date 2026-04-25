@@ -9,17 +9,15 @@ use pg_pool::{ConnPool, ConnPoolConfig, LifecycleHooks};
 
 type Pool = ConnPool<WirePoolable>;
 
-const ADDR: &str = "127.0.0.1:54322";
-const USER: &str = "postgres";
-const PASS: &str = "postgres";
-const DB: &str = "postgrest_test";
+mod test_env;
+use test_env::{addr, db, pass, user};
 
 fn test_config() -> ConnPoolConfig {
     let mut c = ConnPoolConfig::default();
-    c.addr = ADDR.to_string();
-    c.user = USER.to_string();
-    c.password = PASS.to_string();
-    c.database = DB.to_string();
+    c.addr = addr().to_string();
+    c.user = user().to_string();
+    c.password = pass().to_string();
+    c.database = db().to_string();
     c.min_idle = 1;
     c.max_size = 5;
     c.max_lifetime = Duration::from_secs(300);
