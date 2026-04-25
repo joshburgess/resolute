@@ -48,7 +48,7 @@ Resolute is for you if:
 - You have used sqlx and like its workflow and general selling points: compile-time checked queries against a live database, offline cache for CI, derive-driven `FromRow`. You do not want to give any of that up.
 - You only target PostgreSQL. You are not looking for a cross-database abstraction and you do not want the lowest-common-denominator API that comes with one. You would rather have first-class support for PostgreSQL features (LISTEN/NOTIFY, advisory locks, COPY, composites, domains, ranges, integer-backed enums) than portability to MySQL or SQLite.
 - You want a more flexible, more convenient API than sqlx offers: named parameters that survive dollar-quoting and casts, an `Executor` trait that takes `&self` so generic helpers compose, an `atomic()` method that dispatches `BEGIN` or `SAVEPOINT` based on the receiver so transactional helpers nest without knowing the caller's context, and richer `FromRow` attributes. See "Why Resolute" below for the full list.
-- You care about performance. Resolute implements the wire protocol, pool, and typed surface from scratch rather than layering over tokio-postgres, and it uses the binary wire format throughout. Benchmarks against the same PostgreSQL instance show it running 3 to 5 times faster than sqlx on parameter encoding and roughly 2.4 times faster on end-to-end query latency. The "Performance" section below lists the full numbers.
+- You care about performance. Resolute implements the wire protocol, pool, and typed surface from scratch rather than layering over tokio-postgres, and it uses the binary wire format throughout. Benchmarks against the same PostgreSQL instance show it running roughly 4 to 5 times faster than sqlx on parameter encoding (depending on type) and around 2 to 3 times faster on end-to-end query latency. The "Performance" section below lists the full numbers.
 
 If that sounds like you, keep reading.
 
@@ -68,7 +68,7 @@ If that sounds like you, keep reading.
 
 **Query type overrides.** `query!(r#"SELECT id as "id: UserId" FROM users"#)` maps columns to custom Rust types in compile-time macros. Works with any type that implements `Decode`.
 
-**Binary format everywhere.** Parameters and results use PostgreSQL's binary wire format. No text parsing, no intermediate representations. 3-5x faster than sqlx on encode, ~2.4x faster on query latency.
+**Binary format everywhere.** Parameters and results use PostgreSQL's binary wire format. No text parsing, no intermediate representations. Roughly 4-5x faster than sqlx on encode (most types), 2-3x faster on end-to-end query latency.
 
 **Statement caching.** `Parse` once per connection, `Bind+Execute` on reuse. LRU cache with 256 entries per connection.
 
@@ -92,16 +92,29 @@ pg-wired-js            ── JS bindings (Node, Bun, Deno) via napi-rs
 
 ## Performance
 
-Benchmarked against sqlx 0.8 on the same queries, same PostgreSQL instance:
+Benchmarked against sqlx 0.8 on the same queries, same PostgreSQL instance. Numbers below are from an Apple M4 Max running `postgres:17-alpine` over a local Docker socket; see [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) for methodology.
 
-| Benchmark | resolute | sqlx | Speedup |
-|-----------|----------|------|---------|
-| Encode i32 | 4.5 ns | 22 ns | 4.9x |
-| Encode String | 8.2 ns | 35 ns | 4.3x |
-| Encode UUID | 5.1 ns | 24 ns | 4.7x |
-| Decode i32 | 1.8 ns | 5.2 ns | 2.9x |
-| Query (SELECT 1) | 89 us | 210 us | 2.4x |
-| Query (10 cols) | 125 us | 295 us | 2.4x |
+**Encode throughput (in-process, no network):**
+
+| Type | resolute | sqlx | Speedup |
+|------|----------|------|---------|
+| `i32` | 3.3 ns | 14 ns | 4.3x |
+| `i64` | 3.0 ns | 15 ns | 4.9x |
+| `String` (39 bytes) | 5.2 ns | 26 ns | 5.0x |
+| `Uuid` | 3.0 ns | 16 ns | 5.4x |
+| `DateTime<Utc>` | 3.9 ns | 19 ns | 4.9x |
+| `serde_json::Value` (small object) | 63 ns | 146 ns | 2.3x |
+
+**End-to-end query latency (single connection, localhost Postgres):**
+
+| Scenario | resolute | sqlx | Speedup |
+|----------|----------|------|---------|
+| `SELECT 1` | 78 µs | 189 µs | 2.4x |
+| Parameterized `SELECT $1::int4` | 76 µs | 141 µs | 1.9x |
+| 3-column / 3-param SELECT | 62 µs | 152 µs | 2.5x |
+| 100-row `generate_series` | 72 µs | 158 µs | 2.2x |
+| INSERT + DELETE round-trip | 132 µs | 300 µs | 2.3x |
+| Warm prepared-statement cache hit | 58 µs | 187 µs | 3.2x |
 
 Run benchmarks: `cargo bench -p resolute`
 

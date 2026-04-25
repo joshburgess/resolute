@@ -111,7 +111,7 @@ fn bench_encode_string(c: &mut Criterion) {
         let mut buf = bytes::BytesMut::with_capacity(128);
         b.iter(|| {
             buf.clear();
-            pt_encode(&s.to_string(), &mut buf);
+            pt_encode(&s, &mut buf);
             black_box(&buf);
         });
     });

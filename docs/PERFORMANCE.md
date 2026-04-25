@@ -35,7 +35,7 @@ The latency benches use a single Tokio current-thread runtime, a single resolute
 
 ### Reported numbers
 
-The numbers in the top-level README (`Encode i32: 4.5 ns vs sqlx 22 ns`, `SELECT 1: 89 µs vs 210 µs`, etc.) come from those two bench files. They are not stored as artifacts in the repo: re-run `cargo bench -p resolute` on your hardware to regenerate. Exact ratios will shift with hardware, network stack, and PostgreSQL version, but the relative advantages of each mechanism described below are structural.
+The numbers in the top-level README (`encode i32: 3.3 ns vs sqlx 14 ns`, `SELECT 1: 78 µs vs 189 µs`, etc.) come from these two bench files, measured on an Apple M4 Max with `postgres:17-alpine` running locally over a Docker socket. They are not stored as artifacts in the repo: re-run `cargo bench -p resolute` on your hardware to regenerate. Exact ratios will shift with hardware, network stack, and PostgreSQL version, but the relative advantages of each mechanism described below are structural.
 
 ## Why the encode path is fast
 
