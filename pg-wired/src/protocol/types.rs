@@ -99,7 +99,7 @@ pub enum BackendMsg {
         tag: String,
     },
     DataRow {
-        columns: Vec<Option<Vec<u8>>>,
+        columns: Vec<Option<bytes::Bytes>>,
     },
     RowDescription {
         fields: Vec<FieldDescription>,

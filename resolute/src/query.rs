@@ -6,7 +6,7 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use tokio::sync::mpsc;
 
 use pg_wired::protocol::frontend;
@@ -1136,7 +1136,7 @@ impl Client {
 /// row-at-a-time consumption without buffering the entire result set.
 #[derive(Debug)]
 pub struct RowStream {
-    row_rx: mpsc::Receiver<Result<Vec<Option<Vec<u8>>>, pg_wired::PgWireError>>,
+    row_rx: mpsc::Receiver<Result<Vec<Option<Bytes>>, pg_wired::PgWireError>>,
     schema: Arc<RowSchema>,
     /// True if the schema came from a real RowDescription. If false, the
     /// stream fills `formats` from the first row's column count on the fly
@@ -1174,7 +1174,7 @@ impl tokio_stream::Stream for RowStream {
 /// the first row" since we always request binary in `Bind`.
 fn build_row_schema(
     fields: &[pg_wired::protocol::types::FieldDescription],
-    first_row: Option<&Vec<Option<Vec<u8>>>>,
+    first_row: Option<&Vec<Option<Bytes>>>,
 ) -> RowSchema {
     if !fields.is_empty() {
         RowSchema {

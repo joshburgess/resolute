@@ -1,4 +1,4 @@
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -304,7 +304,7 @@ impl WireConn {
     /// Returns (rows, command_tag).
     pub async fn collect_rows(
         &mut self,
-    ) -> Result<(Vec<Vec<Option<Vec<u8>>>>, String), PgWireError> {
+    ) -> Result<(Vec<Vec<Option<Bytes>>>, String), PgWireError> {
         let mut rows = Vec::new();
         let mut tag = String::new();
 

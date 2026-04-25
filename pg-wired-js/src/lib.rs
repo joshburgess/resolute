@@ -114,7 +114,7 @@ fn fields_to_info(fields: Vec<FieldDescription>) -> Vec<FieldInfo> {
 
 /// Decode text-format cells to owned `String`s. Invalid UTF-8 becomes
 /// lossy-replaced; pg-wired's result bytes are text-format so this is safe.
-fn rows_to_strings(rows: Vec<Vec<Option<Vec<u8>>>>) -> Vec<Vec<Option<String>>> {
+fn rows_to_strings(rows: Vec<Vec<Option<bytes::Bytes>>>) -> Vec<Vec<Option<String>>> {
     rows.into_iter()
         .map(|row| {
             row.into_iter()
@@ -130,17 +130,20 @@ fn row_to_strings(row: StreamedRow) -> Vec<Option<String>> {
         .collect()
 }
 
-fn bytes_to_string(bytes: Vec<u8>) -> String {
-    match String::from_utf8(bytes) {
-        Ok(s) => s,
-        Err(e) => String::from_utf8_lossy(&e.into_bytes()).into_owned(),
+fn bytes_to_string(bytes: bytes::Bytes) -> String {
+    match std::str::from_utf8(&bytes) {
+        Ok(s) => s.to_owned(),
+        Err(_) => String::from_utf8_lossy(&bytes).into_owned(),
     }
 }
 
 /// Flatten row-oriented text-format cells into a columnar `(data, offsets, nulls)`
 /// triple. Offsets include a trailing terminator so each cell is
 /// `data[offsets[i]..offsets[i+1]]`.
-fn rows_to_columnar(rows: Vec<Vec<Option<Vec<u8>>>>, cols: usize) -> (String, Vec<u32>, Vec<u8>) {
+fn rows_to_columnar(
+    rows: Vec<Vec<Option<bytes::Bytes>>>,
+    cols: usize,
+) -> (String, Vec<u32>, Vec<u8>) {
     let row_count = rows.len();
     let cell_count = row_count * cols;
     let total_bytes: usize = rows
@@ -410,9 +413,13 @@ fn encode_query_with_formats(
     buf
 }
 
-fn rows_to_buffers(rows: Vec<Vec<Option<Vec<u8>>>>) -> Vec<Vec<Option<Buffer>>> {
+fn rows_to_buffers(rows: Vec<Vec<Option<bytes::Bytes>>>) -> Vec<Vec<Option<Buffer>>> {
     rows.into_iter()
-        .map(|row| row.into_iter().map(|c| c.map(Buffer::from)).collect())
+        .map(|row| {
+            row.into_iter()
+                .map(|c| c.map(|b| Buffer::from(b.to_vec())))
+                .collect()
+        })
         .collect()
 }
 
@@ -1188,14 +1195,17 @@ mod tests {
 
     #[test]
     fn bytes_to_string_valid_utf8() {
-        assert_eq!(bytes_to_string(b"hello".to_vec()), "hello");
-        assert_eq!(bytes_to_string("résumé".as_bytes().to_vec()), "résumé");
-        assert_eq!(bytes_to_string(vec![]), "");
+        assert_eq!(bytes_to_string(bytes::Bytes::from_static(b"hello")), "hello");
+        assert_eq!(
+            bytes_to_string(bytes::Bytes::copy_from_slice("résumé".as_bytes())),
+            "résumé"
+        );
+        assert_eq!(bytes_to_string(bytes::Bytes::new()), "");
     }
 
     #[test]
     fn bytes_to_string_invalid_utf8_falls_back_lossy() {
-        let decoded = bytes_to_string(vec![0x68, 0x69, 0xff, 0xfe]);
+        let decoded = bytes_to_string(bytes::Bytes::from(vec![0x68u8, 0x69, 0xff, 0xfe]));
         assert!(decoded.starts_with("hi"));
         assert!(decoded.contains('\u{FFFD}'));
     }
@@ -1203,8 +1213,8 @@ mod tests {
     #[test]
     fn rows_to_strings_maps_cells_and_preserves_nulls() {
         let rows = vec![
-            vec![Some(b"a".to_vec()), None],
-            vec![None, Some(b"b".to_vec())],
+            vec![Some(bytes::Bytes::from_static(b"a")), None],
+            vec![None, Some(bytes::Bytes::from_static(b"b"))],
         ];
         let out = rows_to_strings(rows);
         assert_eq!(out[0][0].as_deref(), Some("a"));
@@ -1216,8 +1226,14 @@ mod tests {
     #[test]
     fn rows_to_columnar_data_and_offsets() {
         let rows = vec![
-            vec![Some(b"ab".to_vec()), Some(b"cde".to_vec())],
-            vec![Some(b"".to_vec()), Some(b"f".to_vec())],
+            vec![
+                Some(bytes::Bytes::from_static(b"ab")),
+                Some(bytes::Bytes::from_static(b"cde")),
+            ],
+            vec![
+                Some(bytes::Bytes::from_static(b"")),
+                Some(bytes::Bytes::from_static(b"f")),
+            ],
         ];
         let (data, offsets, nulls) = rows_to_columnar(rows, 2);
         assert_eq!(data, "abcdef");
@@ -1228,8 +1244,8 @@ mod tests {
     #[test]
     fn rows_to_columnar_null_bitmap_positions() {
         let rows = vec![
-            vec![None, Some(b"x".to_vec())], // cell 0 null, cell 1 set
-            vec![Some(b"y".to_vec()), None], // cell 2 set, cell 3 null
+            vec![None, Some(bytes::Bytes::from_static(b"x"))], // cell 0 null, cell 1 set
+            vec![Some(bytes::Bytes::from_static(b"y")), None], // cell 2 set, cell 3 null
         ];
         let (data, offsets, nulls) = rows_to_columnar(rows, 2);
         assert_eq!(data, "xy");
@@ -1244,7 +1260,9 @@ mod tests {
     #[test]
     fn rows_to_columnar_bitmap_second_byte() {
         // 10 cells, some null: make sure the bitmap spans 2 bytes correctly.
-        let mut row: Vec<Option<Vec<u8>>> = (0..10).map(|_| Some(b"x".to_vec())).collect();
+        let mut row: Vec<Option<bytes::Bytes>> = (0..10)
+            .map(|_| Some(bytes::Bytes::from_static(b"x")))
+            .collect();
         row[8] = None; // bit 0 of byte 1
         row[9] = None; // bit 1 of byte 1
         let (_, offsets, nulls) = rows_to_columnar(vec![row], 10);
@@ -1264,7 +1282,7 @@ mod tests {
 
     #[test]
     fn rows_to_columnar_handles_invalid_utf8_cells() {
-        let rows = vec![vec![Some(vec![0x68, 0xff])]];
+        let rows = vec![vec![Some(bytes::Bytes::from(vec![0x68u8, 0xff]))]];
         let (data, offsets, nulls) = rows_to_columnar(rows, 1);
         assert!(data.starts_with("h"));
         assert_eq!(offsets, vec![0, 2]);
@@ -1323,8 +1341,8 @@ mod tests {
     #[test]
     fn rows_to_buffers_preserves_cells_and_nulls() {
         let rows = vec![
-            vec![Some(b"abc".to_vec()), None],
-            vec![None, Some(b"".to_vec())],
+            vec![Some(bytes::Bytes::from_static(b"abc")), None],
+            vec![None, Some(bytes::Bytes::from_static(b""))],
         ];
         let out = rows_to_buffers(rows);
         assert_eq!(out.len(), 2);
@@ -1338,7 +1356,7 @@ mod tests {
     fn pipeline_response_to_query_result_rows() {
         let resp = PipelineResponse::Rows {
             fields: vec![mkfield("n", 23, FormatCode::Text)],
-            rows: vec![vec![Some(b"42".to_vec())], vec![None]],
+            rows: vec![vec![Some(bytes::Bytes::from_static(b"42"))], vec![None]],
             command_tag: "SELECT 2".into(),
         };
         let qr = pipeline_response_to_query_result(resp);
@@ -1366,8 +1384,11 @@ mod tests {
                 mkfield("b", 25, FormatCode::Text),
             ],
             rows: vec![
-                vec![Some(b"1".to_vec()), Some(b"hi".to_vec())],
-                vec![None, Some(b"bye".to_vec())],
+                vec![
+                    Some(bytes::Bytes::from_static(b"1")),
+                    Some(bytes::Bytes::from_static(b"hi")),
+                ],
+                vec![None, Some(bytes::Bytes::from_static(b"bye"))],
             ],
             command_tag: "SELECT 2".into(),
         };

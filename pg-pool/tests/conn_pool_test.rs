@@ -1278,7 +1278,7 @@ where
 async fn send_query(
     guard: &mut PoolGuard<WirePoolable>,
     sql: &str,
-) -> (Vec<Vec<Option<Vec<u8>>>>, String) {
+) -> (Vec<Vec<Option<bytes::Bytes>>>, String) {
     use bytes::BytesMut;
     use pg_wired::protocol::types::FrontendMsg;
 
@@ -1289,7 +1289,10 @@ async fn send_query(
     conn.collect_rows().await.unwrap()
 }
 
-async fn send_query_raw(conn: &mut WireConn, sql: &str) -> (Vec<Vec<Option<Vec<u8>>>>, String) {
+async fn send_query_raw(
+    conn: &mut WireConn,
+    sql: &str,
+) -> (Vec<Vec<Option<bytes::Bytes>>>, String) {
     use bytes::BytesMut;
     use pg_wired::protocol::types::FrontendMsg;
 
@@ -1302,7 +1305,7 @@ async fn send_query_raw(conn: &mut WireConn, sql: &str) -> (Vec<Vec<Option<Vec<u
 async fn send_query_try(
     guard: &mut PoolGuard<WirePoolable>,
     sql: &str,
-) -> Result<(Vec<Vec<Option<Vec<u8>>>>, String), PgWireError> {
+) -> Result<(Vec<Vec<Option<bytes::Bytes>>>, String), PgWireError> {
     use bytes::BytesMut;
     use pg_wired::protocol::types::FrontendMsg;
 
@@ -1313,6 +1316,6 @@ async fn send_query_try(
     conn.collect_rows().await
 }
 
-fn col_str(col: &Option<Vec<u8>>) -> String {
-    String::from_utf8(col.as_ref().unwrap().clone()).unwrap()
+fn col_str(col: &Option<bytes::Bytes>) -> String {
+    std::str::from_utf8(col.as_ref().unwrap()).unwrap().to_owned()
 }

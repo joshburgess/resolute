@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 
 use crate::connection::WireConn;
 use crate::error::PgWireError;
@@ -39,7 +39,7 @@ impl PgPipeline {
         }
     }
 
-    /// Execute a parameterized query, returning rows as `Vec<Vec<Option<Vec<u8>>>>`.
+    /// Execute a parameterized query, returning rows as `Vec<Vec<Option<Bytes>>>`.
     /// Uses binary format for parameters and results.
     /// On cache miss: Parse+Bind+Execute+Sync in ONE write.
     /// On cache hit: Bind+Execute+Sync in ONE write.
@@ -48,7 +48,7 @@ impl PgPipeline {
         sql: &str,
         params: &[Option<&[u8]>],
         param_oids: &[u32],
-    ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
+    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
         let (stmt_name, needs_parse) = self.lookup_or_alloc(sql);
         let stmt_name_bytes = stmt_name.as_bytes().to_vec();
 
@@ -113,7 +113,7 @@ impl PgPipeline {
     pub async fn simple_query_rows(
         &mut self,
         sql: &str,
-    ) -> Result<(Vec<Vec<Option<Vec<u8>>>>, String), PgWireError> {
+    ) -> Result<(Vec<Vec<Option<Bytes>>>, String), PgWireError> {
         self.send_buf.clear();
         frontend::encode_message(&FrontendMsg::Query(sql.as_bytes()), &mut self.send_buf);
         self.conn.send_raw(&self.send_buf).await?;
@@ -131,7 +131,7 @@ impl PgPipeline {
         query_sql: &str,
         params: &[Option<&[u8]>],
         param_oids: &[u32],
-    ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
+    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
         let (stmt_name, needs_parse) = self.lookup_or_alloc(query_sql);
         let stmt_name_bytes = stmt_name.as_bytes().to_vec();
 
@@ -201,7 +201,7 @@ impl PgPipeline {
         query_sql: &str,
         params: &[Option<&[u8]>],
         param_oids: &[u32],
-    ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
+    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
         let (stmt_name, needs_parse) = self.lookup_or_alloc(query_sql);
         let stmt_name_bytes = stmt_name.as_bytes().to_vec();
 

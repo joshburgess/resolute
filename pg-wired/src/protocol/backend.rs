@@ -1,4 +1,4 @@
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 
 use super::types::*;
 
@@ -34,7 +34,10 @@ pub fn parse_message(buf: &mut BytesMut) -> Result<Option<BackendMsg>, String> {
     // Consume the length (4 bytes), leaving the body.
     buf.advance(4);
     let body_len = len - 4;
-    let body = buf.split_to(body_len);
+    // Freeze to `Bytes` so DataRow can hand each column a zero-copy slice
+    // refcounted into the same backing allocation. Other parsers see `&[u8]`
+    // via `Deref` and don't care.
+    let body = buf.split_to(body_len).freeze();
 
     match tag {
         b'R' => parse_auth(&body),
@@ -147,9 +150,10 @@ fn parse_command_complete(body: &[u8]) -> Result<Option<BackendMsg>, String> {
 }
 
 /// Parse DataRow: [int16 num_cols] [int32 len, bytes data]...
-/// This is the hot path — bounds checks are explicit for safety while
-/// keeping allocations minimal.
-fn parse_data_row(body: &[u8]) -> Result<Option<BackendMsg>, String> {
+/// This is the hot path. Each column becomes a zero-copy `Bytes` slice
+/// refcounted into the message body buffer instead of a freshly-allocated
+/// `Vec<u8>`, so a 10 000-row result avoids 10 000 cell allocations.
+fn parse_data_row(body: &Bytes) -> Result<Option<BackendMsg>, String> {
     if body.len() < 2 {
         return Err("DataRow: body too short for column count".into());
     }
@@ -185,7 +189,7 @@ fn parse_data_row(body: &[u8]) -> Result<Option<BackendMsg>, String> {
                     body.len()
                 ));
             }
-            columns.push(Some(body[offset..offset + len].to_vec()));
+            columns.push(Some(body.slice(offset..offset + len)));
             offset += len;
         }
     }

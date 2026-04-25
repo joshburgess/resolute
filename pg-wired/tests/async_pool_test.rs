@@ -680,8 +680,8 @@ async fn test_pool_concurrent_queries_during_reconnection() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn col_str(col: &Option<Vec<u8>>) -> String {
-    String::from_utf8(col.as_ref().unwrap().clone()).unwrap()
+fn col_str(col: &Option<bytes::Bytes>) -> String {
+    std::str::from_utf8(col.as_ref().unwrap()).unwrap().to_owned()
 }
 
 async fn kill_backend(conn: &mut WireConn, pid: i32) {

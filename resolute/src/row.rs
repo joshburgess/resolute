@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use bytes::Bytes;
+
 use crate::decode::{Decode, DecodeText};
 use crate::error::TypedError;
 
@@ -30,7 +32,7 @@ impl RowSchema {
 pub struct Row {
     pub(crate) schema: Arc<RowSchema>,
     /// Raw column data (None = SQL NULL).
-    pub(crate) data: Vec<Option<Vec<u8>>>,
+    pub(crate) data: Vec<Option<Bytes>>,
 }
 
 impl Row {

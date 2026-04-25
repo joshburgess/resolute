@@ -123,16 +123,16 @@ Benchmarked against sqlx 0.8 on the same queries, same PostgreSQL instance. Numb
 | 4 connections, 16 concurrent `SELECT 1` tasks | 705 µs | 840 µs | 1.19x |
 | 1 connection, 8 concurrent tasks (coalescing test) | 762 µs | 997 µs | 1.31x |
 | 8 connections, 64 concurrent tasks (oversubscribed) | 2.31 ms | 2.76 ms | 1.20x |
-| `SELECT count(*) FROM generate_series(1, 100k)` (server-bound) | 5.54 ms | 5.82 ms | 1.05x (parity) |
-| 10 000 single-column rows (large result decode) | 947 µs | 1.89 ms | 2.00x |
-| 1 000 rows × 10 mixed-type columns (wide-row decode) | 985 µs | 1.02 ms | 1.04x |
+| `SELECT count(*) FROM generate_series(1, 100k)` (server-bound) | 5.27 ms | 5.43 ms | 1.03x (parity) |
+| 10 000 single-column rows (large result decode) | 847 µs | 1.79 ms | 2.12x |
+| 1 000 rows × 10 mixed-type columns (wide-row decode) | 902 µs | 901 µs | 1.00x (parity) |
 
 A few notes on what to take from this:
 
 - **Resolute's biggest wins are on small, frequent queries** where round-trip overhead and the encode path dominate. That's the `SELECT 1`-shape table above.
 - **Concurrency wins are real but more modest.** At 1.2x to 1.3x. Postgres serializes work per connection regardless of driver, so once a workload is fan-out-heavy, the gap compresses.
 - **Server-bound queries are essentially at parity.** When Postgres is doing real work (heavy aggregations, scans), driver overhead is noise. Pick whichever driver you prefer; wall-clock difference falls within run-to-run variance.
-- **Large result decode is now a clean resolute win.** 2x on the 10 000-row case. Wide rows are roughly at parity, narrowly in resolute's favor.
+- **Large result decode is a clean resolute win.** Better than 2x on the 10 000-row case. Wide rows land at parity.
 
 Run benchmarks: `cargo bench -p resolute`
 

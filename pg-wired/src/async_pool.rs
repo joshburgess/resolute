@@ -7,6 +7,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use tokio::sync::RwLock;
 
 use crate::async_conn::AsyncConn;
@@ -187,7 +188,7 @@ impl AsyncPool {
         query_sql: &str,
         params: &[Option<&[u8]>],
         param_oids: &[u32],
-    ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
+    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
         self.get_async()
             .await
             .exec_transaction(setup_sql, query_sql, params, param_oids)
@@ -200,7 +201,7 @@ impl AsyncPool {
         sql: &str,
         params: &[Option<&[u8]>],
         param_oids: &[u32],
-    ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
+    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
         self.get_async()
             .await
             .exec_query(sql, params, param_oids)
@@ -216,7 +217,7 @@ impl AsyncPool {
         param_oids: &[u32],
         param_formats: &[crate::protocol::types::FormatCode],
         result_formats: &[crate::protocol::types::FormatCode],
-    ) -> Result<Vec<Vec<Option<Vec<u8>>>>, PgWireError> {
+    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
         self.get_async()
             .await
             .exec_query_with_formats(sql, params, param_oids, param_formats, result_formats)

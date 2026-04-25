@@ -210,19 +210,19 @@ fn describe_live(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), Stri
                         let oid: u32 = row
                             .first()
                             .and_then(|v| v.as_ref())
-                            .and_then(|b| String::from_utf8(b.clone()).ok())
+                            .and_then(|b| std::str::from_utf8(b).ok())
                             .and_then(|s| s.parse().ok())
                             .unwrap_or(0);
                         let col: i16 = row
                             .get(1)
                             .and_then(|v| v.as_ref())
-                            .and_then(|b| String::from_utf8(b.clone()).ok())
+                            .and_then(|b| std::str::from_utf8(b).ok())
                             .and_then(|s| s.parse().ok())
                             .unwrap_or(0);
                         let notnull: bool = row
                             .get(2)
                             .and_then(|v| v.as_ref())
-                            .map(|b| b == b"t")
+                            .map(|b| b.as_ref() == b"t".as_ref())
                             .unwrap_or(false);
 
                         // Find the matching column and mark it non-nullable.

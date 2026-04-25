@@ -231,13 +231,14 @@ async fn revert_inner(
     let version: i64 = row
         .first()
         .and_then(|b| b.as_ref())
-        .and_then(|b| String::from_utf8(b.clone()).ok())
+        .and_then(|b| std::str::from_utf8(b).ok())
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| TypedError::Config("failed to parse migration version".into()))?;
     let recorded_name: String = row
         .get(1)
         .and_then(|b| b.as_ref())
-        .and_then(|b| String::from_utf8(b.clone()).ok())
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .map(|s| s.to_owned())
         .unwrap_or_default();
 
     let migrations = scan_migrations(migrations_dir)?;
@@ -409,7 +410,7 @@ async fn read_applied_versions(pg: &mut PgPipeline) -> Result<Vec<i64>, TypedErr
         .filter_map(|r| {
             r.first()
                 .and_then(|v| v.as_ref())
-                .and_then(|b| String::from_utf8(b.clone()).ok())
+                .and_then(|b| std::str::from_utf8(b).ok())
                 .and_then(|s| s.parse().ok())
         })
         .collect())
@@ -427,17 +428,19 @@ async fn read_applied(pg: &mut PgPipeline) -> Result<Vec<AppliedMigration>, Type
             let v: i64 = r
                 .first()?
                 .as_ref()
-                .and_then(|b| String::from_utf8(b.clone()).ok())?
+                .and_then(|b| std::str::from_utf8(b).ok())?
                 .parse()
                 .ok()?;
             let n = r
                 .get(1)?
                 .as_ref()
-                .and_then(|b| String::from_utf8(b.clone()).ok())?;
+                .and_then(|b| std::str::from_utf8(b).ok())
+                .map(|s| s.to_owned())?;
             let t = r
                 .get(2)?
                 .as_ref()
-                .and_then(|b| String::from_utf8(b.clone()).ok())?;
+                .and_then(|b| std::str::from_utf8(b).ok())
+                .map(|s| s.to_owned())?;
             Some(AppliedMigration {
                 version: v,
                 name: n,
