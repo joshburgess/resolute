@@ -3640,6 +3640,164 @@ async fn test_copy_in_then_query() {
     assert_eq!(rows[0].get::<i32>(0).unwrap(), 2);
 }
 
+#[tokio::test]
+async fn test_copy_in_binary() {
+    let client = connect().await;
+    client
+        .simple_query("CREATE TEMP TABLE test_copy_in_bin (id int4, name text)")
+        .await
+        .unwrap();
+
+    // Build a binary COPY payload for three (int4, text) rows.
+    let mut buf: Vec<u8> = Vec::new();
+    // Signature.
+    buf.extend_from_slice(b"PGCOPY\n\xff\r\n\0");
+    // Flags (0) and header extension length (0).
+    buf.extend_from_slice(&0u32.to_be_bytes());
+    buf.extend_from_slice(&0u32.to_be_bytes());
+
+    let rows: &[(i32, &str)] = &[(1, "Alice"), (2, "Bob"), (3, "Carol")];
+    for (id, name) in rows {
+        // Column count.
+        buf.extend_from_slice(&2i16.to_be_bytes());
+        // int4: 4-byte length + 4-byte big-endian value.
+        buf.extend_from_slice(&4i32.to_be_bytes());
+        buf.extend_from_slice(&id.to_be_bytes());
+        // text: 4-byte length + raw UTF-8 bytes.
+        let bytes = name.as_bytes();
+        buf.extend_from_slice(&(bytes.len() as i32).to_be_bytes());
+        buf.extend_from_slice(bytes);
+    }
+    // Trailer.
+    buf.extend_from_slice(&(-1i16).to_be_bytes());
+
+    let count = client
+        .copy_in(
+            "COPY test_copy_in_bin (id, name) FROM STDIN WITH (FORMAT BINARY)",
+            &buf,
+        )
+        .await
+        .unwrap();
+    assert_eq!(count, 3);
+
+    let out = client
+        .query("SELECT id, name FROM test_copy_in_bin ORDER BY id", &[])
+        .await
+        .unwrap();
+    assert_eq!(out.len(), 3);
+    assert_eq!(out[0].get::<i32>(0).unwrap(), 1);
+    assert_eq!(out[0].get::<String>(1).unwrap(), "Alice");
+    assert_eq!(out[2].get::<i32>(0).unwrap(), 3);
+    assert_eq!(out[2].get::<String>(1).unwrap(), "Carol");
+}
+
+#[tokio::test]
+async fn test_copy_out_binary() {
+    let client = connect().await;
+    client
+        .simple_query("CREATE TEMP TABLE test_copy_out_bin (id int4, name text)")
+        .await
+        .unwrap();
+    client
+        .simple_query(
+            "INSERT INTO test_copy_out_bin VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')",
+        )
+        .await
+        .unwrap();
+
+    let bytes = client
+        .copy_out(
+            "COPY (SELECT id, name FROM test_copy_out_bin ORDER BY id) TO STDOUT WITH (FORMAT BINARY)",
+        )
+        .await
+        .unwrap();
+
+    // Signature must match.
+    assert!(
+        bytes.starts_with(b"PGCOPY\n\xff\r\n\0"),
+        "missing PGCOPY binary signature"
+    );
+
+    // Parse: signature (11) + flags (4) + header ext len (4).
+    let mut pos = 11;
+    let flags = u32::from_be_bytes(bytes[pos..pos + 4].try_into().unwrap());
+    pos += 4;
+    assert_eq!(flags, 0, "expected 0 flags");
+    let ext_len = u32::from_be_bytes(bytes[pos..pos + 4].try_into().unwrap());
+    pos += 4 + ext_len as usize;
+
+    // First row: 2 columns.
+    let ncols = i16::from_be_bytes(bytes[pos..pos + 2].try_into().unwrap());
+    pos += 2;
+    assert_eq!(ncols, 2);
+
+    // Column 0: int4 = 1.
+    let col0_len = i32::from_be_bytes(bytes[pos..pos + 4].try_into().unwrap());
+    pos += 4;
+    assert_eq!(col0_len, 4);
+    let id = i32::from_be_bytes(bytes[pos..pos + 4].try_into().unwrap());
+    pos += 4;
+    assert_eq!(id, 1);
+
+    // Column 1: text = "Alice".
+    let col1_len = i32::from_be_bytes(bytes[pos..pos + 4].try_into().unwrap());
+    pos += 4;
+    assert_eq!(col1_len, 5);
+    let name = std::str::from_utf8(&bytes[pos..pos + 5]).unwrap();
+    assert_eq!(name, "Alice");
+
+    // Trailer must appear at the end.
+    let trailer = i16::from_be_bytes(bytes[bytes.len() - 2..].try_into().unwrap());
+    assert_eq!(trailer, -1, "missing -1 trailer");
+}
+
+#[tokio::test]
+async fn test_copy_binary_roundtrip_with_null() {
+    let client = connect().await;
+    client
+        .simple_query("CREATE TEMP TABLE test_copy_bin_rt (id int4, name text)")
+        .await
+        .unwrap();
+
+    let mut buf: Vec<u8> = Vec::new();
+    buf.extend_from_slice(b"PGCOPY\n\xff\r\n\0");
+    buf.extend_from_slice(&0u32.to_be_bytes());
+    buf.extend_from_slice(&0u32.to_be_bytes());
+
+    // Row 1: (10, "x"). Row 2: (20, NULL).
+    buf.extend_from_slice(&2i16.to_be_bytes());
+    buf.extend_from_slice(&4i32.to_be_bytes());
+    buf.extend_from_slice(&10i32.to_be_bytes());
+    buf.extend_from_slice(&1i32.to_be_bytes());
+    buf.extend_from_slice(b"x");
+
+    buf.extend_from_slice(&2i16.to_be_bytes());
+    buf.extend_from_slice(&4i32.to_be_bytes());
+    buf.extend_from_slice(&20i32.to_be_bytes());
+    buf.extend_from_slice(&(-1i32).to_be_bytes()); // SQL NULL.
+
+    buf.extend_from_slice(&(-1i16).to_be_bytes());
+
+    let count = client
+        .copy_in(
+            "COPY test_copy_bin_rt (id, name) FROM STDIN WITH (FORMAT BINARY)",
+            &buf,
+        )
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+
+    let out = client
+        .query("SELECT id, name FROM test_copy_bin_rt ORDER BY id", &[])
+        .await
+        .unwrap();
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0].get::<i32>(0).unwrap(), 10);
+    assert_eq!(out[0].get::<String>(1).unwrap(), "x");
+    assert_eq!(out[1].get::<i32>(0).unwrap(), 20);
+    assert!(out[1].get_opt::<String>(1).unwrap().is_none());
+}
+
 // ---------------------------------------------------------------------------
 // Query cancellation
 // ---------------------------------------------------------------------------
@@ -3810,6 +3968,82 @@ async fn test_retry_policy_succeeds_immediately() {
         .await
         .unwrap();
     assert_eq!(rows[0].get::<i32>(0).unwrap(), 42);
+}
+
+#[tokio::test]
+async fn test_retry_policy_recovers_after_transient_errors() {
+    // Inject synthetic transient errors for the first two attempts, then run a
+    // real query on the third. Verifies the retry loop both retries and eventually
+    // returns the success value.
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+
+    let client = connect().await;
+    let attempts = Arc::new(AtomicU32::new(0));
+    let policy = resolute::retry::RetryPolicy::new(5, std::time::Duration::from_millis(1));
+
+    let attempts_inner = Arc::clone(&attempts);
+    let rows = policy
+        .execute(&client, move |db| {
+            let attempts = Arc::clone(&attempts_inner);
+            Box::pin(async move {
+                let prior = attempts.fetch_add(1, Ordering::SeqCst);
+                if prior < 2 {
+                    let mut pg_err = pg_wired::PgError::default();
+                    pg_err.severity = "ERROR".to_string();
+                    // 40001 (serialization_failure) is in is_transient_pg_code.
+                    pg_err.code = "40001".to_string();
+                    pg_err.message = "synthetic transient failure".to_string();
+                    Err(resolute::TypedError::Wire(Box::new(
+                        pg_wired::PgWireError::Pg(pg_err),
+                    )))
+                } else {
+                    db.query("SELECT 99::int4 AS n", &[]).await
+                }
+            })
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        3,
+        "expected 2 transient failures + 1 success",
+    );
+    assert_eq!(rows[0].get::<i32>(0).unwrap(), 99);
+}
+
+#[tokio::test]
+async fn test_retry_policy_exhausts_and_returns_last_error() {
+    // Inject more transient errors than max_retries allows. The policy should
+    // surface the final transient error rather than spinning forever.
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+
+    let client = connect().await;
+    let attempts = Arc::new(AtomicU32::new(0));
+    let policy = resolute::retry::RetryPolicy::new(2, std::time::Duration::from_millis(1));
+
+    let attempts_inner = Arc::clone(&attempts);
+    let result: Result<Vec<resolute::Row>, _> = policy
+        .execute(&client, move |_db| {
+            let attempts = Arc::clone(&attempts_inner);
+            Box::pin(async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                let mut pg_err = pg_wired::PgError::default();
+                pg_err.severity = "ERROR".to_string();
+                pg_err.code = "40P01".to_string(); // deadlock_detected
+                pg_err.message = "synthetic deadlock".to_string();
+                Err(resolute::TypedError::Wire(Box::new(
+                    pg_wired::PgWireError::Pg(pg_err),
+                )))
+            })
+        })
+        .await;
+
+    assert!(result.is_err());
+    // 1 initial attempt + 2 retries = 3 calls total.
+    assert_eq!(attempts.load(Ordering::SeqCst), 3);
 }
 
 #[tokio::test]
