@@ -35,6 +35,11 @@ webpki-roots = { version = "0.26", optional = true }
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 proptest = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "parse_microbench"
+harness = false
 
 [features]
 default = []

@@ -166,14 +166,13 @@ fn parse_data_row(body: Bytes) -> Result<Option<BackendMsg>, String> {
         return Err("DataRow: body too short for column count".into());
     }
     let body_slice = body.as_ref();
-    let body_len = body_slice.len();
     let num_cols = i16_to_usize(i16::from_be_bytes([body_slice[0], body_slice[1]]), "DataRow")?;
     let mut offset = 2usize;
 
     if num_cols <= CELL_INLINE_CAP {
         let mut data = [(0u32, 0i32); CELL_INLINE_CAP];
         for slot in data.iter_mut().take(num_cols) {
-            *slot = read_cell_entry(body_slice, &mut offset, body_len)?;
+            *slot = read_cell_entry(body_slice, &mut offset)?;
         }
         return Ok(Some(BackendMsg::DataRow(RawRow::from_inline_unchecked(
             body,
@@ -184,7 +183,7 @@ fn parse_data_row(body: Bytes) -> Result<Option<BackendMsg>, String> {
 
     let mut entries: Vec<(u32, i32)> = Vec::with_capacity(num_cols);
     for _ in 0..num_cols {
-        entries.push(read_cell_entry(body_slice, &mut offset, body_len)?);
+        entries.push(read_cell_entry(body_slice, &mut offset)?);
     }
     Ok(Some(BackendMsg::DataRow(RawRow::from_entries(
         body, &entries,
@@ -192,21 +191,19 @@ fn parse_data_row(body: Bytes) -> Result<Option<BackendMsg>, String> {
 }
 
 #[inline(always)]
-fn read_cell_entry(
-    body: &[u8],
-    offset: &mut usize,
-    body_len: usize,
-) -> Result<(u32, i32), String> {
+fn read_cell_entry(body: &[u8], offset: &mut usize) -> Result<(u32, i32), String> {
     let off = *offset;
-    if off + 4 > body_len {
+    let body_len = body.len();
+    let after_len = off
+        .checked_add(4)
+        .ok_or_else(|| "DataRow: offset overflow at column length".to_string())?;
+    if after_len > body_len {
         return Err(format!(
             "DataRow: truncated at length (offset {off}, body len {body_len})"
         ));
     }
-    // SAFETY: `off + 4 <= body_len == body.len()` checked above.
-    let len_bytes = unsafe { body.get_unchecked(off..off + 4) };
+    let len_bytes = &body[off..after_len];
     let len = i32::from_be_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]);
-    let after_len = off + 4;
     if len < 0 {
         if len == -1 {
             *offset = after_len;
@@ -215,12 +212,15 @@ fn read_cell_entry(
         return Err(format!("DataRow: invalid negative column length {len}"));
     }
     let ulen = len as usize;
-    if after_len + ulen > body_len {
+    let end = after_len
+        .checked_add(ulen)
+        .ok_or_else(|| "DataRow: offset overflow at column data".to_string())?;
+    if end > body_len {
         return Err(format!(
             "DataRow: truncated column data (need {ulen} bytes at offset {after_len}, body len {body_len})"
         ));
     }
-    *offset = after_len + ulen;
+    *offset = end;
     Ok((after_len as u32, len))
 }
 
@@ -536,6 +536,99 @@ mod tests {
         let mut buf = make_message(b'D', &body);
         let err = parse_message(&mut buf).unwrap_err();
         assert!(err.contains("invalid negative"), "got: {err}");
+    }
+
+    /// A row where the cell length exactly equals the remaining body length
+    /// (the boundary the bounds check was unsafe-elided around). Must succeed.
+    #[test]
+    fn test_parse_data_row_exact_boundary() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1i16.to_be_bytes()); // 1 column
+        body.extend_from_slice(&5i32.to_be_bytes()); // 5 bytes
+        body.extend_from_slice(b"hello"); // exactly 5 bytes, body ends here
+        let mut buf = make_message(b'D', &body);
+        let msg = parse_message(&mut buf).unwrap().unwrap();
+        if let BackendMsg::DataRow(row) = msg {
+            assert_eq!(row.cell(0), Some(b"hello".as_ref()));
+        } else {
+            panic!("expected DataRow");
+        }
+    }
+
+    /// A cell claiming exactly one more byte than the body has. Must error,
+    /// not panic, not read OOB.
+    #[test]
+    fn test_parse_data_row_one_past_boundary() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1i16.to_be_bytes()); // 1 column
+        body.extend_from_slice(&6i32.to_be_bytes()); // claims 6 bytes
+        body.extend_from_slice(b"hello"); // only 5
+        let mut buf = make_message(b'D', &body);
+        let err = parse_message(&mut buf).unwrap_err();
+        assert!(err.contains("truncated"), "got: {err}");
+    }
+
+    /// Zero-length cell. The 4-byte length header is read, then no data
+    /// bytes are consumed. Exercises the `len == 0` path of the unsafe-free
+    /// bounds check.
+    #[test]
+    fn test_parse_data_row_zero_length_cell() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&2i16.to_be_bytes()); // 2 columns
+        body.extend_from_slice(&0i32.to_be_bytes()); // empty cell
+        body.extend_from_slice(&3i32.to_be_bytes()); // 3 bytes
+        body.extend_from_slice(b"abc");
+        let mut buf = make_message(b'D', &body);
+        let msg = parse_message(&mut buf).unwrap().unwrap();
+        if let BackendMsg::DataRow(row) = msg {
+            assert_eq!(row.cell(0), Some(b"".as_ref()));
+            assert_eq!(row.cell(1), Some(b"abc".as_ref()));
+        } else {
+            panic!("expected DataRow");
+        }
+    }
+
+    /// Multiple cells whose lengths sum exactly to the body length.
+    #[test]
+    fn test_parse_data_row_multiple_cells_exact_fit() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&3i16.to_be_bytes()); // 3 columns
+        for s in [b"aa".as_ref(), b"bbb", b"cccc"] {
+            body.extend_from_slice(&(s.len() as i32).to_be_bytes());
+            body.extend_from_slice(s);
+        }
+        let mut buf = make_message(b'D', &body);
+        let msg = parse_message(&mut buf).unwrap().unwrap();
+        if let BackendMsg::DataRow(row) = msg {
+            assert_eq!(row.cell(0), Some(b"aa".as_ref()));
+            assert_eq!(row.cell(1), Some(b"bbb".as_ref()));
+            assert_eq!(row.cell(2), Some(b"cccc".as_ref()));
+        } else {
+            panic!("expected DataRow");
+        }
+    }
+
+    /// A length field of i32::MAX would overflow `after_len + ulen` on
+    /// 32-bit targets and stress the checked-add guard on 64-bit. Must
+    /// error cleanly, not panic.
+    #[test]
+    fn test_parse_data_row_huge_claimed_length() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1i16.to_be_bytes());
+        body.extend_from_slice(&i32::MAX.to_be_bytes()); // claims 2GB-1
+        body.extend_from_slice(b"x"); // body has 1 byte
+        // The outer parse_message rejects messages > MAX_MESSAGE_SIZE first,
+        // so this never reaches read_cell_entry. But if we feed the body
+        // directly via a hand-built buffer that bypasses that cap, the inner
+        // parser must still not panic. We test via the public path.
+        let mut buf = make_message(b'D', &body);
+        // Either the message-size check rejects it, or the per-cell bounds
+        // check rejects it. Both are acceptable; a panic is not.
+        let result = parse_message(&mut buf);
+        assert!(
+            result.is_err() || matches!(result, Ok(None)),
+            "expected error or incomplete, got {result:?}"
+        );
     }
 
     #[test]
