@@ -154,6 +154,109 @@ jobs:
       - run: cargo build -p pg-wired --features tls
       - run: cargo test -p pg-wired --features tls --lib
 
+  test-tls-runtime:
+    name: test (TLS runtime against TLS-enabled postgres)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate self-signed server cert
+        run: |
+          mkdir -p tls-fixture
+          openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 \
+            -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            -keyout tls-fixture/server.key \
+            -out  tls-fixture/server.crt
+          openssl x509 -in tls-fixture/server.crt \
+            -outform DER -out tls-fixture/server.crt.der
+          # Postgres in the alpine image runs as uid 70 and refuses to start
+          # if the key file is group/world readable.
+          sudo chown 70:70 tls-fixture/server.key tls-fixture/server.crt
+          sudo chmod 600 tls-fixture/server.key
+          sudo chmod 644 tls-fixture/server.crt
+
+      - name: Write Postgres TLS config
+        run: |
+          cat > tls-fixture/postgresql.conf <<'EOF'
+          listen_addresses = '*'
+          ssl = on
+          ssl_cert_file = '/etc/postgres-tls/server.crt'
+          ssl_key_file  = '/etc/postgres-tls/server.key'
+          password_encryption = 'scram-sha-256'
+          EOF
+          cat > tls-fixture/pg_hba.conf <<'EOF'
+          # local socket access (used by docker-entrypoint init)
+          local all all trust
+          # Reject plain TCP. Force TLS for all remote connections.
+          hostnossl all all 0.0.0.0/0 reject
+          hostnossl all all ::/0      reject
+          hostssl   all all 0.0.0.0/0 scram-sha-256
+          hostssl   all all ::/0      scram-sha-256
+          EOF
+          sudo chown 70:70 tls-fixture/postgresql.conf tls-fixture/pg_hba.conf
+
+      - name: Start TLS Postgres on 54323
+        run: |
+          docker run -d --name pg-tls \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=postgres \
+            -p 54323:5432 \
+            -v "$PWD/tls-fixture/server.crt:/etc/postgres-tls/server.crt:ro" \
+            -v "$PWD/tls-fixture/server.key:/etc/postgres-tls/server.key:ro" \
+            -v "$PWD/tls-fixture/postgresql.conf:/etc/postgresql/postgresql.conf:ro" \
+            -v "$PWD/tls-fixture/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro" \
+            postgres:17-alpine \
+            -c config_file=/etc/postgresql/postgresql.conf \
+            -c hba_file=/etc/postgresql/pg_hba.conf
+          for _ in $(seq 1 30); do
+            if docker exec pg-tls pg_isready -U postgres -h 127.0.0.1; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec pg-tls pg_isready -U postgres -h 127.0.0.1
+
+      - name: Start plaintext Postgres on 54322 (for the negative test)
+        run: |
+          docker run -d --name pg-plain \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=postgres \
+            -p 54322:5432 \
+            postgres:17-alpine
+          for _ in $(seq 1 30); do
+            if docker exec pg-plain pg_isready -U postgres -h 127.0.0.1; then
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Create test databases and apply fixtures
+        run: |
+          PGPASSWORD=postgres PGSSLMODE=require psql \
+            -h 127.0.0.1 -p 54323 -U postgres -d postgres \
+            -c "CREATE DATABASE postgrest_test;"
+          PGPASSWORD=postgres PGSSLMODE=require psql \
+            -h 127.0.0.1 -p 54323 -U postgres -d postgrest_test \
+            -f tests/fixtures/schema.sql
+          PGPASSWORD=postgres psql \
+            -h 127.0.0.1 -p 54322 -U postgres -d postgres \
+            -c "CREATE DATABASE postgrest_test;"
+          PGPASSWORD=postgres psql \
+            -h 127.0.0.1 -p 54322 -U postgres -d postgrest_test \
+            -f tests/fixtures/schema.sql
+
+      - name: Run TLS runtime integration test
+        env:
+          RESOLUTE_TLS_TEST_ADDR: 127.0.0.1:54323
+          RESOLUTE_TLS_TEST_CA_DER: ${{ github.workspace }}/tls-fixture/server.crt.der
+          RESOLUTE_TEST_ADDR: 127.0.0.1:54322
+        run: cargo test -p pg-wired --features tls --test tls_test -- --nocapture
+
   test-md5-auth:
     name: test (md5 password auth)
     runs-on: ubuntu-latest

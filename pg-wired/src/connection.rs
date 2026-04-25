@@ -141,7 +141,92 @@ impl WireConn {
     }
 
     /// Connect with startup parameters and an explicit TLS mode.
+    ///
+    /// Uses the system root trust store (`webpki-roots`) for certificate
+    /// verification. To override the trust store, supply a client
+    /// certificate, or otherwise customize TLS, use
+    /// [`Self::connect_with_tls_config`].
     pub async fn connect_with_options(
+        addr: &str,
+        user: &str,
+        password: &str,
+        database: &str,
+        startup_params: &[(&str, &str)],
+        tls_mode: TlsMode,
+    ) -> Result<Self, PgWireError> {
+        #[cfg(feature = "tls")]
+        {
+            Self::connect_with_tls_config(
+                addr,
+                user,
+                password,
+                database,
+                startup_params,
+                tls_mode,
+                &crate::tls::TlsConfig::default(),
+            )
+            .await
+        }
+        #[cfg(not(feature = "tls"))]
+        {
+            Self::connect_inner(addr, user, password, database, startup_params, tls_mode).await
+        }
+    }
+
+    /// Connect with startup parameters, an explicit TLS mode, and a custom
+    /// TLS configuration (custom trust roots and/or a client certificate).
+    ///
+    /// Only available when the `tls` feature is enabled.
+    #[cfg(feature = "tls")]
+    pub async fn connect_with_tls_config(
+        addr: &str,
+        user: &str,
+        password: &str,
+        database: &str,
+        startup_params: &[(&str, &str)],
+        tls_mode: TlsMode,
+        tls_config: &crate::tls::TlsConfig,
+    ) -> Result<Self, PgWireError> {
+        Self::connect_inner(
+            addr,
+            user,
+            password,
+            database,
+            startup_params,
+            tls_mode,
+            tls_config,
+        )
+        .await
+    }
+
+    #[cfg(feature = "tls")]
+    async fn connect_inner(
+        addr: &str,
+        user: &str,
+        password: &str,
+        database: &str,
+        startup_params: &[(&str, &str)],
+        tls_mode: TlsMode,
+        tls_config: &crate::tls::TlsConfig,
+    ) -> Result<Self, PgWireError> {
+        let stream = TcpStream::connect(addr).await?;
+        stream.set_nodelay(true)?;
+
+        let socket = socket2::SockRef::from(&stream);
+        let keepalive = socket2::TcpKeepalive::new()
+            .with_time(std::time::Duration::from_secs(60))
+            .with_interval(std::time::Duration::from_secs(15));
+        let _ = socket.set_tcp_keepalive(&keepalive);
+
+        let hostname = parse_hostname(addr);
+        let stream =
+            crate::tls::negotiate_tls_with_config(stream, &hostname, tls_config, tls_mode).await?;
+
+        Self::finish_startup(stream, user, password, database, startup_params).await
+    }
+
+    #[cfg(not(feature = "tls"))]
+    async fn connect_inner(
         addr: &str,
         user: &str,
         password: &str,
@@ -152,35 +237,29 @@ impl WireConn {
         let stream = TcpStream::connect(addr).await?;
         stream.set_nodelay(true)?;
 
-        // Enable TCP keepalive to detect dead connections behind firewalls/LBs.
         let socket = socket2::SockRef::from(&stream);
         let keepalive = socket2::TcpKeepalive::new()
             .with_time(std::time::Duration::from_secs(60))
             .with_interval(std::time::Duration::from_secs(15));
         let _ = socket.set_tcp_keepalive(&keepalive);
 
-        // TLS negotiation (if feature enabled).
-        #[cfg(feature = "tls")]
-        let stream = {
-            let hostname = parse_hostname(addr);
-            crate::tls::negotiate_tls_with_config(
-                stream,
-                &hostname,
-                &crate::tls::TlsConfig::default(),
-                tls_mode,
-            )
-            .await?
-        };
-        #[cfg(not(feature = "tls"))]
-        let stream = {
-            if tls_mode == TlsMode::Require {
-                return Err(PgWireError::Protocol(
-                    "sslmode=require but pg-wired was built without the `tls` feature".into(),
-                ));
-            }
-            MaybeTlsStream::Plain(stream)
-        };
+        if tls_mode == TlsMode::Require {
+            return Err(PgWireError::Protocol(
+                "sslmode=require but pg-wired was built without the `tls` feature".into(),
+            ));
+        }
+        let stream = MaybeTlsStream::Plain(stream);
 
+        Self::finish_startup(stream, user, password, database, startup_params).await
+    }
+
+    async fn finish_startup(
+        stream: MaybeTlsStream,
+        user: &str,
+        password: &str,
+        database: &str,
+        startup_params: &[(&str, &str)],
+    ) -> Result<Self, PgWireError> {
         let mut conn = WireConn {
             stream,
             recv_buf: BytesMut::with_capacity(RECV_BUF_SIZE),

@@ -19,6 +19,8 @@ cargo test --workspace
 
 Tests, examples, and benches default to `127.0.0.1:54322`, role `postgres`, password `postgres`, database `postgrest_test`. Override via `RESOLUTE_TEST_ADDR`, `RESOLUTE_TEST_USER`, `RESOLUTE_TEST_PASSWORD`, `RESOLUTE_TEST_DB` if you want to point at a different cluster.
 
+The `pg-wired` TLS runtime test (`pg-wired/tests/tls_test.rs`) is skipped unless you point it at a TLS-enabled Postgres. CI does this automatically; for a local run, set `RESOLUTE_TLS_TEST_ADDR` to `host:port` and `RESOLUTE_TLS_TEST_CA_DER` to the path of the DER-encoded server CA cert, then run `cargo test -p pg-wired --features tls --test tls_test`.
+
 ## Workspace layout
 
 | Crate | Purpose |

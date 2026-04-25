@@ -87,12 +87,23 @@ impl MaybeTlsStream {
 }
 
 /// TLS configuration for PostgreSQL connections.
+///
+/// Construct one of these and pass it to
+/// [`crate::WireConn::connect_with_tls_config`] to override the default trust
+/// store (system root CAs from `webpki-roots`) or to authenticate with a
+/// client certificate.
+///
+/// All certificate and key bytes must be DER-encoded. PEM input is not
+/// accepted; convert it first (for example with `rustls_pemfile::certs`).
 #[cfg(feature = "tls")]
-#[derive(Default)]
-pub(crate) struct TlsConfig {
-    /// Custom root CA certificates. If empty, uses system root CAs.
+#[derive(Default, Clone)]
+#[non_exhaustive]
+pub struct TlsConfig {
+    /// Custom root CA certificates (DER). If empty, the system trust store is
+    /// used via `webpki-roots`.
     pub root_certs: Vec<Vec<u8>>,
-    /// Client certificate and private key for mTLS (optional).
+    /// Optional client certificate chain (DER) and private key (DER) for
+    /// mutual TLS.
     pub client_cert: Option<(Vec<Vec<u8>>, Vec<u8>)>,
 }
 

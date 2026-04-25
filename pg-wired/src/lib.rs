@@ -59,4 +59,6 @@ pub use connection::WireConn;
 pub use error::PgWireError;
 pub use pipeline::PgPipeline;
 pub use protocol::types::{FormatCode, Oid, PgError};
+#[cfg(feature = "tls")]
+pub use tls::TlsConfig;
 pub use tls::TlsMode;
