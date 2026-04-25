@@ -4,6 +4,16 @@ mod pg_composite;
 mod pg_domain;
 mod pg_enum;
 
+/// Consume the value (if any) of a meta entry whose path the caller does not
+/// recognize. Allows a per-helper `parse_nested_meta` pass to ignore keys that
+/// belong to other helpers without leaving an unparsed `= "..."` in the stream.
+pub(crate) fn consume_unknown_meta_value(meta: &syn::meta::ParseNestedMeta) -> syn::Result<()> {
+    if meta.input.peek(syn::Token![=]) {
+        let _ = meta.value()?.parse::<syn::Expr>()?;
+    }
+    Ok(())
+}
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, LitStr};

@@ -58,15 +58,15 @@ fn derive_inner(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         }
     }
 
-    if let Some(repr) = get_repr_int(&input.attrs) {
+    if let Some(repr) = get_repr_int(&input.attrs)? {
         derive_int_enum(&input, &repr)
     } else {
-        Ok(derive_string_enum(&input))
+        derive_string_enum(&input)
     }
 }
 
 /// Generate impls for string-based PostgreSQL enum types.
-fn derive_string_enum(input: &DeriveInput) -> proc_macro2::TokenStream {
+fn derive_string_enum(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -75,30 +75,30 @@ fn derive_string_enum(input: &DeriveInput) -> proc_macro2::TokenStream {
         _ => unreachable!(),
     };
 
-    let rename_all = get_container_rename_all(&input.attrs);
-    let (custom_oid, custom_array_oid) = get_custom_oids(&input.attrs);
+    let rename_all = get_container_rename_all(&input.attrs)?;
+    let (custom_oid, custom_array_oid) = get_custom_oids(&input.attrs)?;
 
     let encode_arms: Vec<_> = variants
         .iter()
         .map(|v| {
             let ident = &v.ident;
-            let label = get_variant_label(v, &rename_all);
-            quote! { #name::#ident => #label }
+            let label = get_variant_label(v, &rename_all)?;
+            Ok(quote! { #name::#ident => #label })
         })
-        .collect();
+        .collect::<syn::Result<Vec<_>>>()?;
 
     let decode_arms: Vec<_> = variants
         .iter()
         .map(|v| {
             let ident = &v.ident;
-            let label = get_variant_label(v, &rename_all);
-            quote! { #label => Ok(#name::#ident) }
+            let label = get_variant_label(v, &rename_all)?;
+            Ok(quote! { #label => Ok(#name::#ident) })
         })
-        .collect();
+        .collect::<syn::Result<Vec<_>>>()?;
 
     let name_str = name.to_string();
 
-    quote! {
+    Ok(quote! {
         impl #impl_generics resolute::Encode for #name #ty_generics #where_clause {
             fn type_oid(&self) -> resolute::TypeOid {
                 resolute::TypeOid::Unspecified
@@ -144,7 +144,7 @@ fn derive_string_enum(input: &DeriveInput) -> proc_macro2::TokenStream {
             const OID: u32 = #custom_oid;
             const ARRAY_OID: u32 = #custom_array_oid;
         }
-    }
+    })
 }
 
 /// Generate impls for integer-backed enums (`#[repr(i16/i32/i64)]`).
@@ -167,7 +167,7 @@ fn derive_int_enum(input: &DeriveInput, repr: &str) -> syn::Result<proc_macro2::
         "i64" => (20u32, 1016u32, 8usize),
         _ => unreachable!(),
     };
-    let (custom_oid, custom_array_oid) = get_custom_oids(&input.attrs);
+    let (custom_oid, custom_array_oid) = get_custom_oids(&input.attrs)?;
     let oid = if custom_oid != 0 {
         custom_oid
     } else {
@@ -277,96 +277,102 @@ fn derive_int_enum(input: &DeriveInput, repr: &str) -> syn::Result<proc_macro2::
 
 /// Parse optional `#[pg_type(oid = N)]` and `#[pg_type(array_oid = N)]`.
 /// Returns (oid, array_oid) with defaults of 0 if not specified.
-fn get_custom_oids(attrs: &[syn::Attribute]) -> (u32, u32) {
+fn get_custom_oids(attrs: &[syn::Attribute]) -> syn::Result<(u32, u32)> {
     let mut oid: u32 = 0;
     let mut array_oid: u32 = 0;
     for attr in attrs {
         if !attr.path().is_ident("pg_type") {
             continue;
         }
-        let _ = attr.parse_nested_meta(|meta| {
+        attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("oid") {
                 let value = meta.value()?;
                 let lit: syn::LitInt = value.parse()?;
-                oid = lit.base10_parse().unwrap_or(0);
+                oid = lit.base10_parse()?;
             } else if meta.path.is_ident("array_oid") {
                 let value = meta.value()?;
                 let lit: syn::LitInt = value.parse()?;
-                array_oid = lit.base10_parse().unwrap_or(0);
+                array_oid = lit.base10_parse()?;
+            } else {
+                crate::consume_unknown_meta_value(&meta)?;
             }
             Ok(())
-        });
+        })?;
     }
-    (oid, array_oid)
+    Ok((oid, array_oid))
 }
 
 /// Check for `#[repr(i16)]`, `#[repr(i32)]`, or `#[repr(i64)]`.
-fn get_repr_int(attrs: &[syn::Attribute]) -> Option<String> {
+fn get_repr_int(attrs: &[syn::Attribute]) -> syn::Result<Option<String>> {
     for attr in attrs {
         if !attr.path().is_ident("repr") {
             continue;
         }
         let mut repr_type = None;
-        let _ = attr.parse_nested_meta(|meta| {
+        attr.parse_nested_meta(|meta| {
             for candidate in &["i16", "i32", "i64"] {
                 if meta.path.is_ident(candidate) {
                     repr_type = Some(candidate.to_string());
                 }
             }
             Ok(())
-        });
+        })?;
         if let Some(r) = repr_type {
-            return Some(r);
+            return Ok(Some(r));
         }
     }
-    None
+    Ok(None)
 }
 
 // ---------------------------------------------------------------------------
 // Attribute helpers
 // ---------------------------------------------------------------------------
 
-fn get_container_rename_all(attrs: &[syn::Attribute]) -> String {
+fn get_container_rename_all(attrs: &[syn::Attribute]) -> syn::Result<String> {
     for attr in attrs {
         if !attr.path().is_ident("pg_type") {
             continue;
         }
         let mut value = None;
-        let _ = attr.parse_nested_meta(|meta| {
+        attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("rename_all") {
                 let v = meta.value()?;
                 let s: LitStr = v.parse()?;
                 value = Some(s.value());
+            } else {
+                crate::consume_unknown_meta_value(&meta)?;
             }
             Ok(())
-        });
+        })?;
         if let Some(v) = value {
-            return v;
+            return Ok(v);
         }
     }
-    "snake_case".to_string()
+    Ok("snake_case".to_string())
 }
 
-fn get_variant_label(variant: &syn::Variant, rename_all: &str) -> String {
+fn get_variant_label(variant: &syn::Variant, rename_all: &str) -> syn::Result<String> {
     // Check for per-variant #[pg_type(rename = "...")].
     for attr in &variant.attrs {
         if !attr.path().is_ident("pg_type") {
             continue;
         }
         let mut value = None;
-        let _ = attr.parse_nested_meta(|meta| {
+        attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("rename") {
                 let v = meta.value()?;
                 let s: LitStr = v.parse()?;
                 value = Some(s.value());
+            } else {
+                crate::consume_unknown_meta_value(&meta)?;
             }
             Ok(())
-        });
+        })?;
         if let Some(v) = value {
-            return v;
+            return Ok(v);
         }
     }
-    apply_rename_rule(&variant.ident.to_string(), rename_all)
+    Ok(apply_rename_rule(&variant.ident.to_string(), rename_all))
 }
 
 fn apply_rename_rule(name: &str, rule: &str) -> String {
