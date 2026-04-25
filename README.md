@@ -68,7 +68,7 @@ If that sounds like you, keep reading.
 
 **Query type overrides.** `query!(r#"SELECT id as "id: UserId" FROM users"#)` maps columns to custom Rust types in compile-time macros. Works with any type that implements `Decode`.
 
-**Binary format everywhere.** Parameters and results use PostgreSQL's binary wire format. No text parsing, no intermediate representations. Roughly 4-5x faster than sqlx on encode (most types), 2-3x faster on small-query latency, 2x faster on large-result decode, and 3-11x faster under concurrent load when using `SharedTypedPool` (multiplexed; the writer task fuses concurrent submissions into batched writes). The Performance section has the full breakdown.
+**Binary format everywhere.** Parameters and results use PostgreSQL's binary wire format. No text parsing, no intermediate representations. Roughly 4-5x faster than sqlx on encode (most types), 2-3x faster on small-query latency, 2-2.5x faster on large-result decode, 2-2.5x faster under concurrent load with `TypedPool` (exclusive), and 3-8x faster with `SharedTypedPool` (multiplexed; the writer task fuses concurrent submissions into batched writes). The Performance section has the full breakdown.
 
 **Statement caching.** `Parse` once per connection, `Bind+Execute` on reuse. LRU cache with 256 entries per connection.
 
@@ -120,21 +120,22 @@ Benchmarked against sqlx 0.8 on the same queries, same PostgreSQL instance. Numb
 
 Resolute ships two pool flavors: `TypedPool` (exclusive checkout, needed for transactions and other session-stateful work) and `SharedTypedPool` (multiplexed: many tasks share each connection's writer task, no semaphore, no waiter queue). The shared pool is the right choice for self-contained `SELECT` / DML workloads and produces the largest concurrency wins.
 
-| Scenario | resolute (exclusive) | resolute (shared) | sqlx | shared/sqlx |
-|----------|----------------------|-------------------|------|-------------|
-| 4 connections, 16 concurrent `SELECT 1` tasks | 1.33 ms | 398 µs | 1.28 ms | 3.21x |
-| 1 connection, 8 concurrent tasks (coalescing test) | 801 µs | 124 µs | 1.39 ms | 11.2x |
-| 8 connections, 64 concurrent tasks (oversubscribed) | 2.24 ms | 539 µs | 2.70 ms | 5.01x |
-| `SELECT count(*) FROM generate_series(1, 100k)` (server-bound) | 5.68 ms | n/a | 5.90 ms | 1.04x (parity) |
-| 10 000 single-column rows (large result decode) | 1.01 ms | n/a | 2.09 ms | 2.07x |
-| 1 000 rows × 10 mixed-type columns (wide-row decode) | 953 µs | n/a | 1.18 ms | 1.24x |
+| Scenario | resolute (exclusive) | resolute (shared) | sqlx | excl/sqlx | shared/sqlx |
+|----------|----------------------|-------------------|------|-----------|-------------|
+| 4 connections, 16 concurrent `SELECT 1` tasks | 355 µs | 237 µs | 798 µs | 2.25x | 3.37x |
+| 1 connection, 8 concurrent tasks (coalescing test) | 372 µs | 117 µs | 938 µs | 2.52x | 8.02x |
+| 8 connections, 64 concurrent tasks (oversubscribed) | 1.11 ms | 542 µs | 2.68 ms | 2.42x | 4.95x |
+| `SELECT count(*) FROM generate_series(1, 100k)` (server-bound) | 5.52 ms | n/a | 5.69 ms | 1.03x (parity) | n/a |
+| 10 000 single-column rows (large result decode) | 775 µs | n/a | 1.89 ms | 2.44x | n/a |
+| 1 000 rows × 10 mixed-type columns (wide-row decode) | 826 µs | n/a | 925 µs | 1.12x | n/a |
 
 A few notes on what to take from this:
 
-- **Use `SharedTypedPool` for concurrent SELECT / DML.** Each `AsyncConn` has a writer task that batches concurrent submissions into a single `write_all`, so 16 tasks on 4 conns become 4 batched writes instead of 16 round-trips contending on a semaphore. The single-connection coalescing test (8 tasks, 1 conn) shows this most clearly: 124 µs end-to-end for 8 round-trips that the writer fuses into one batch.
-- **Use `TypedPool` for session-stateful work.** Transactions, advisory locks, `SET LOCAL`, prepared-statement reuse keyed by name. The exclusive checkout is required for correctness here; the cost is the semaphore waiter queue under contention.
-- **Server-bound queries are at parity.** When Postgres is doing real work (heavy aggregations, scans), driver overhead is noise. Wall-clock difference falls within run-to-run variance.
-- **Large result decode and wide rows are clean resolute wins** (2.07x and 1.24x), driven by the binary wire format and zero-copy `Bytes`-backed cells.
+- **Both pool flavors beat sqlx by 2x+ on concurrent workloads.** `TypedPool` (exclusive checkout) skips `DISCARD ALL` on return when the session was not actually mutated, so the bonus round-trip that sqlx pays per checkout disappears for plain `SELECT` / DML. `SharedTypedPool` adds writer-task multiplexing on top of that: many tasks submit concurrently to the same connection and the writer fuses their messages into one `write_all`. The single-connection coalescing test (8 tasks, 1 conn) shows this most clearly: 117 µs for 8 round-trips fused into one batch.
+- **Use `TypedPool` for session-stateful work.** Transactions, advisory locks, `SET LOCAL`, prepared-statement reuse keyed by name. The exclusive checkout is required for correctness; `DISCARD ALL` runs only when the connection actually mutated session state.
+- **Use `SharedTypedPool` for self-contained concurrent SELECT / DML.** No semaphore, no waiter queue, batched writes through the writer task.
+- **Server-bound queries are at parity.** When Postgres is doing real work, driver overhead is noise.
+- **Large result decode and wide rows are resolute wins** (2.44x and 1.12x), driven by the binary wire format and zero-copy `Bytes`-backed cells.
 
 Run benchmarks: `cargo bench -p resolute`
 

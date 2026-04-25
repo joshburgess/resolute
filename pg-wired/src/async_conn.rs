@@ -93,6 +93,16 @@ pub struct AsyncConn {
     #[allow(dead_code)]
     notification_tx: mpsc::Sender<crate::protocol::types::BackendMsg>,
     notification_rx: std::sync::Mutex<Option<mpsc::Receiver<crate::protocol::types::BackendMsg>>>,
+    /// True if any operation since the last `take_state_mutated()` may have
+    /// left the session in a non-default state (open transaction, SET
+    /// without LOCAL, advisory lock, temp table, prepared cursor, etc.).
+    ///
+    /// Set explicitly by callers issuing such operations
+    /// (`mark_state_mutated`), and automatically by the reader task whenever
+    /// ReadyForQuery reports a non-idle transaction status. Callers that
+    /// only run self-contained Bind/Execute/Sync queries leave this `false`,
+    /// allowing pools to skip an expensive DISCARD ALL on return.
+    state_mutated: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl std::fmt::Debug for AsyncConn {
@@ -125,6 +135,29 @@ impl AsyncConn {
     pub fn cancel_token(&self) -> crate::cancel::CancelToken {
         crate::cancel::CancelToken::new(self.addr.clone(), self.backend_pid, self.backend_secret)
     }
+
+    /// Mark the connection as having mutated session state since the last
+    /// reset. Pools call `take_state_mutated()` on return to decide whether
+    /// to issue `DISCARD ALL`. Callers issuing `BEGIN`, `SET` (without
+    /// `LOCAL`), advisory locks, temp tables, etc., should call this before
+    /// submitting.
+    pub fn mark_state_mutated(&self) {
+        self.state_mutated
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Atomically read and clear the state-mutated flag. Returns the
+    /// previous value: `true` means the caller should issue a reset.
+    pub fn take_state_mutated(&self) -> bool {
+        self.state_mutated
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+    }
+
+    /// Read the state-mutated flag without clearing it.
+    pub fn is_state_mutated(&self) -> bool {
+        self.state_mutated
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
 }
 
 struct PendingResponse {
@@ -150,6 +183,7 @@ impl AsyncConn {
         let pending: Arc<Mutex<VecDeque<PendingResponse>>> = Arc::new(Mutex::new(VecDeque::new()));
         let pending_notify = Arc::new(tokio::sync::Notify::new());
         let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let state_mutated = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let (stream_read, stream_write) = tokio::io::split(conn.into_stream());
 
@@ -170,9 +204,10 @@ impl AsyncConn {
             let pending = Arc::clone(&pending);
             let pending_notify = Arc::clone(&pending_notify);
             let alive_clone = Arc::clone(&alive);
+            let state_mutated = Arc::clone(&state_mutated);
             let ntf_tx = notification_tx.clone();
             tokio::spawn(async move {
-                reader_task(stream_read, pending, pending_notify, ntf_tx).await;
+                reader_task(stream_read, pending, pending_notify, ntf_tx, state_mutated).await;
                 alive_clone.store(false, std::sync::atomic::Ordering::Relaxed);
                 tracing::warn!("pg-wired reader task exited");
             });
@@ -188,6 +223,7 @@ impl AsyncConn {
             addr,
             notification_tx,
             notification_rx: std::sync::Mutex::new(Some(notification_rx)),
+            state_mutated,
         }
     }
 
@@ -884,6 +920,7 @@ async fn reader_task(
     pending: Arc<Mutex<VecDeque<PendingResponse>>>,
     pending_notify: Arc<tokio::sync::Notify>,
     notification_tx: mpsc::Sender<BackendMsg>,
+    state_mutated: Arc<std::sync::atomic::AtomicBool>,
 ) {
     let mut recv_buf = BytesMut::with_capacity(32 * 1024);
 
@@ -903,19 +940,23 @@ async fn reader_task(
         // Collect the response based on the collector type.
         let result = match pr.collector {
             ResponseCollector::Rows => {
-                collect_rows(&mut stream, &mut recv_buf, &notification_tx).await
+                collect_rows(&mut stream, &mut recv_buf, &notification_tx, &state_mutated).await
             }
-            ResponseCollector::Drain => drain_until_ready(&mut stream, &mut recv_buf)
-                .await
-                .map(|_| PipelineResponse::Done),
+            ResponseCollector::Drain => {
+                drain_until_ready(&mut stream, &mut recv_buf, Some(&state_mutated))
+                    .await
+                    .map(|_| PipelineResponse::Done)
+            }
             ResponseCollector::Stream { header_tx, row_tx } => {
-                stream_rows(&mut stream, &mut recv_buf, header_tx, row_tx).await;
+                stream_rows(&mut stream, &mut recv_buf, header_tx, row_tx, &state_mutated).await;
                 Ok(PipelineResponse::Done)
             }
             ResponseCollector::CopyIn { .. } => {
-                collect_copy_in_response(&mut stream, &mut recv_buf).await
+                collect_copy_in_response(&mut stream, &mut recv_buf, &state_mutated).await
             }
-            ResponseCollector::CopyOut => collect_copy_out(&mut stream, &mut recv_buf).await,
+            ResponseCollector::CopyOut => {
+                collect_copy_out(&mut stream, &mut recv_buf, &state_mutated).await
+            }
         };
 
         // Send the response back to the caller.
@@ -944,10 +985,20 @@ async fn read_msg(
     }
 }
 
+/// If the ReadyForQuery status byte is anything other than `I` (idle),
+/// flag the connection as state-mutated. `T` (in transaction) and `E`
+/// (failed transaction) both leave session state that needs DISCARD ALL.
+fn note_rfq_status(status: u8, state_mutated: &std::sync::atomic::AtomicBool) {
+    if status != b'I' {
+        state_mutated.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
 async fn collect_rows(
     stream: &mut tokio::io::ReadHalf<crate::tls::MaybeTlsStream>,
     buf: &mut BytesMut,
     notification_tx: &mpsc::Sender<BackendMsg>,
+    state_mutated: &std::sync::atomic::AtomicBool,
 ) -> Result<PipelineResponse, PgWireError> {
     let mut rows = Vec::new();
     let mut fields = Vec::new();
@@ -958,7 +1009,8 @@ async fn collect_rows(
             BackendMsg::DataRow { columns } => rows.push(columns),
             BackendMsg::RowDescription { fields: f } => fields = f,
             BackendMsg::CommandComplete { tag } => command_tag = tag,
-            BackendMsg::ReadyForQuery { .. } => {
+            BackendMsg::ReadyForQuery { status } => {
+                note_rfq_status(status, state_mutated);
                 return Ok(PipelineResponse::Rows {
                     fields,
                     rows,
@@ -966,7 +1018,7 @@ async fn collect_rows(
                 });
             }
             BackendMsg::ErrorResponse { fields } => {
-                drain_until_ready(stream, buf).await?;
+                drain_until_ready(stream, buf, Some(state_mutated)).await?;
                 return Err(PgWireError::Pg(fields));
             }
             msg @ BackendMsg::NotificationResponse { .. } => {
@@ -988,10 +1040,14 @@ async fn collect_rows(
 async fn drain_until_ready(
     stream: &mut tokio::io::ReadHalf<crate::tls::MaybeTlsStream>,
     buf: &mut BytesMut,
+    state_mutated: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<(), PgWireError> {
     loop {
         let msg = read_msg(stream, buf).await?;
-        if matches!(msg, BackendMsg::ReadyForQuery { .. }) {
+        if let BackendMsg::ReadyForQuery { status } = msg {
+            if let Some(sm) = state_mutated {
+                note_rfq_status(status, sm);
+            }
             return Ok(());
         }
         if let BackendMsg::ErrorResponse { ref fields } = msg {
@@ -1006,6 +1062,7 @@ async fn stream_rows(
     buf: &mut BytesMut,
     header_tx: oneshot::Sender<Result<StreamHeader, PgWireError>>,
     row_tx: mpsc::Sender<Result<StreamedRow, PgWireError>>,
+    state_mutated: &std::sync::atomic::AtomicBool,
 ) {
     let mut header_tx = Some(header_tx);
     let mut fields = Vec::new();
@@ -1032,7 +1089,7 @@ async fn stream_rows(
                     }));
                 }
                 if row_tx.send(Ok(columns)).await.is_err() {
-                    let _ = drain_until_ready(stream, buf).await;
+                    let _ = drain_until_ready(stream, buf, Some(state_mutated)).await;
                     return;
                 }
             }
@@ -1043,7 +1100,8 @@ async fn stream_rows(
                     }));
                 }
             }
-            BackendMsg::ReadyForQuery { .. } => {
+            BackendMsg::ReadyForQuery { status } => {
+                note_rfq_status(status, state_mutated);
                 if let Some(htx) = header_tx.take() {
                     let _ = htx.send(Ok(StreamHeader {
                         fields: std::mem::take(&mut fields),
@@ -1057,7 +1115,7 @@ async fn stream_rows(
                 } else {
                     let _ = row_tx.send(Err(PgWireError::Pg(err))).await;
                 }
-                let _ = drain_until_ready(stream, buf).await;
+                let _ = drain_until_ready(stream, buf, Some(state_mutated)).await;
                 return;
             }
             BackendMsg::ParseComplete
@@ -1076,6 +1134,7 @@ async fn stream_rows(
 async fn collect_copy_in_response(
     stream: &mut tokio::io::ReadHalf<crate::tls::MaybeTlsStream>,
     buf: &mut BytesMut,
+    state_mutated: &std::sync::atomic::AtomicBool,
 ) -> Result<PipelineResponse, PgWireError> {
     let mut command_tag = String::new();
     loop {
@@ -1083,7 +1142,8 @@ async fn collect_copy_in_response(
         match msg {
             BackendMsg::CopyInResponse { .. } => {}
             BackendMsg::CommandComplete { tag } => command_tag = tag,
-            BackendMsg::ReadyForQuery { .. } => {
+            BackendMsg::ReadyForQuery { status } => {
+                note_rfq_status(status, state_mutated);
                 return Ok(PipelineResponse::Rows {
                     fields: Vec::new(),
                     rows: Vec::new(),
@@ -1091,7 +1151,7 @@ async fn collect_copy_in_response(
                 });
             }
             BackendMsg::ErrorResponse { fields } => {
-                drain_until_ready(stream, buf).await?;
+                drain_until_ready(stream, buf, Some(state_mutated)).await?;
                 return Err(PgWireError::Pg(fields));
             }
             _ => {}
@@ -1103,6 +1163,7 @@ async fn collect_copy_in_response(
 async fn collect_copy_out(
     stream: &mut tokio::io::ReadHalf<crate::tls::MaybeTlsStream>,
     buf: &mut BytesMut,
+    state_mutated: &std::sync::atomic::AtomicBool,
 ) -> Result<PipelineResponse, PgWireError> {
     let mut data_chunks: Vec<Vec<Option<Bytes>>> = Vec::new();
     let mut command_tag = String::new();
@@ -1115,7 +1176,8 @@ async fn collect_copy_out(
             }
             BackendMsg::CopyDone => {}
             BackendMsg::CommandComplete { tag } => command_tag = tag,
-            BackendMsg::ReadyForQuery { .. } => {
+            BackendMsg::ReadyForQuery { status } => {
+                note_rfq_status(status, state_mutated);
                 return Ok(PipelineResponse::Rows {
                     fields: Vec::new(),
                     rows: data_chunks,
@@ -1123,7 +1185,7 @@ async fn collect_copy_out(
                 });
             }
             BackendMsg::ErrorResponse { fields } => {
-                drain_until_ready(stream, buf).await?;
+                drain_until_ready(stream, buf, Some(state_mutated)).await?;
                 return Err(PgWireError::Pg(fields));
             }
             _ => {}

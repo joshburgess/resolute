@@ -33,11 +33,25 @@ impl Poolable for AsyncPoolable {
     }
 
     /// Reset connection state on return to pool.
-    /// Sends DISCARD ALL to clear transactions, SET variables, temp tables,
-    /// and prepared statements. If the reset fails, the connection is destroyed.
+    ///
+    /// Fast path: if no operation since the last reset has mutated session
+    /// state, skip the round-trip. The reader task automatically flags the
+    /// connection state-mutated whenever ReadyForQuery reports a non-idle
+    /// transaction status; callers that issue `SET` / advisory-lock / temp
+    /// table / `LISTEN` / etc. via simple-query call
+    /// [`AsyncConn::mark_state_mutated`] explicitly. The bulk of pooled
+    /// usage is self-contained Bind/Execute/Sync queries which never set
+    /// the flag, so the fast path is the common case.
+    ///
+    /// Slow path: send `DISCARD ALL` to clear transactions, SET variables,
+    /// temp tables, advisory locks, and prepared statements. If the reset
+    /// fails, the connection is destroyed.
     async fn reset(&self) -> bool {
         if !self.0.is_alive() {
             return false;
+        }
+        if !self.0.take_state_mutated() {
+            return true;
         }
         // DISCARD ALL: resets search_path, temp tables, prepared statements,
         // advisory locks, LISTEN channels, and aborts any open transaction.

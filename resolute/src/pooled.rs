@@ -148,12 +148,19 @@ impl PooledTypedClient {
     }
 
     /// Send a simple text query.
+    ///
+    /// Simple-query SQL is opaque to the driver, so we conservatively flag
+    /// the connection state-mutated. This forces a `DISCARD ALL` on
+    /// checkout return, which is the safe default for arbitrary user SQL
+    /// (could be `SET`, `LISTEN`, `BEGIN`, etc.).
     pub async fn simple_query(&self, sql: &str) -> Result<(), TypedError> {
+        self.guard.conn().0.mark_state_mutated();
         crate::query::Client::simple_query_on_conn(&self.guard.conn().0, sql).await
     }
 
     /// Bulk-load data via COPY FROM STDIN.
     pub async fn copy_in(&self, copy_sql: &str, data: &[u8]) -> Result<u64, TypedError> {
+        self.guard.conn().0.mark_state_mutated();
         self.guard
             .conn()
             .0
@@ -164,6 +171,7 @@ impl PooledTypedClient {
 
     /// Export data via COPY TO STDOUT.
     pub async fn copy_out(&self, copy_sql: &str) -> Result<Vec<u8>, TypedError> {
+        self.guard.conn().0.mark_state_mutated();
         self.guard
             .conn()
             .0
@@ -189,6 +197,10 @@ impl PooledTypedClient {
     ///
     /// Returns `TypedError::Wire` if the lock query fails.
     pub async fn advisory_lock(&self, key: i64) -> Result<(), TypedError> {
+        // Session-level locks survive across statements and require
+        // DISCARD ALL on return to release. Mark dirty so the pool
+        // resets the connection.
+        self.guard.conn().0.mark_state_mutated();
         self.execute("SELECT pg_advisory_lock($1)", &[&key]).await?;
         Ok(())
     }
@@ -200,6 +212,9 @@ impl PooledTypedClient {
     ///
     /// Returns `TypedError::Wire` if the lock query fails.
     pub async fn try_advisory_lock(&self, key: i64) -> Result<bool, TypedError> {
+        // Session-level lock survives across statements; flag dirty so the
+        // pool releases it via DISCARD ALL on return.
+        self.guard.conn().0.mark_state_mutated();
         let rows = self
             .query("SELECT pg_try_advisory_lock($1)", &[&key])
             .await?;
