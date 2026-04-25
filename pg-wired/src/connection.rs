@@ -1,11 +1,11 @@
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::error::PgWireError;
 use crate::protocol::backend;
 use crate::protocol::frontend;
-use crate::protocol::types::{BackendMsg, FrontendMsg};
+use crate::protocol::types::{BackendMsg, FrontendMsg, RawRow};
 use crate::scram::ScramClient;
 use crate::tls::{MaybeTlsStream, TlsMode};
 
@@ -302,18 +302,16 @@ impl WireConn {
 
     /// Receive messages until ReadyForQuery, collecting DataRows.
     /// Returns (rows, command_tag).
-    pub async fn collect_rows(
-        &mut self,
-    ) -> Result<(Vec<Vec<Option<Bytes>>>, String), PgWireError> {
+    pub async fn collect_rows(&mut self) -> Result<(Vec<RawRow>, String), PgWireError> {
         let mut rows = Vec::new();
         let mut tag = String::new();
 
         loop {
             let msg = self.recv_msg().await?;
             match msg {
-                BackendMsg::DataRow { columns } => {
-                    tracing::trace!("collect_rows: DataRow with {} cols", columns.len());
-                    rows.push(columns);
+                BackendMsg::DataRow(row) => {
+                    tracing::trace!("collect_rows: DataRow with {} cols", row.len());
+                    rows.push(row);
                 }
                 BackendMsg::CommandComplete { tag: t } => tag = t,
                 BackendMsg::ReadyForQuery { .. } => return Ok((rows, tag)),

@@ -36,7 +36,7 @@ async fn test_parameterized_query() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    let val = rows[0][0].as_ref().unwrap();
+    let val = rows[0].cell(0).unwrap();
     assert_eq!(std::str::from_utf8(val).unwrap(), "hello");
 }
 
@@ -62,7 +62,7 @@ async fn test_query_with_filter() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    let name = std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap();
+    let name = std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap();
     assert_eq!(name, "Alice");
 }
 
@@ -107,7 +107,7 @@ async fn test_pipeline_transaction() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    let json = std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap();
+    let json = std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap();
     assert!(json.contains("Alice"));
 }
 
@@ -124,7 +124,7 @@ async fn test_pipeline_transaction_with_jwt() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    let json = std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap();
+    let json = std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap();
     // test_user should see all articles (including drafts)
     assert!(json.contains("draft") || json.contains("Draft"));
 }
@@ -148,5 +148,5 @@ async fn test_null_parameter() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    assert!(rows[0][0].is_none()); // NULL result
+    assert!((rows[0].try_cell(0) == Some(None))); // NULL result
 }

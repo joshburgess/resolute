@@ -172,7 +172,7 @@ async fn test_checkout_connection_functional_select() {
     let mut g = pool.get().await.unwrap();
     let (rows, _tag) = send_query(&mut g, "SELECT 42 AS n").await;
     assert_eq!(rows.len(), 1);
-    assert_eq!(col_str(&rows[0][0]), "42");
+    assert_eq!(col_str(&rows[0], 0), "42");
 }
 
 #[tokio::test]
@@ -185,7 +185,7 @@ async fn test_checkout_connection_functional_after_return_and_reuse() {
     {
         let mut g = pool.get().await.unwrap();
         let (rows, _) = send_query(&mut g, "SELECT 'first' AS val").await;
-        assert_eq!(col_str(&rows[0][0]), "first");
+        assert_eq!(col_str(&rows[0], 0), "first");
     }
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -193,7 +193,7 @@ async fn test_checkout_connection_functional_after_return_and_reuse() {
     {
         let mut g = pool.get().await.unwrap();
         let (rows, _) = send_query(&mut g, "SELECT 'second' AS val").await;
-        assert_eq!(col_str(&rows[0][0]), "second");
+        assert_eq!(col_str(&rows[0], 0), "second");
     }
     assert_eq!(pool.metrics().total_created, 1, "connection was reused");
 }
@@ -213,7 +213,7 @@ async fn test_checkout_connection_functional_with_pipeline() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(col_str(&rows[0][0]), "test");
+    assert_eq!(col_str(&rows[0], 0), "test");
     assert_eq!(pool.metrics().total, 0, "take() removes from pool");
 }
 
@@ -1050,7 +1050,7 @@ async fn test_connection_invalid_after_pg_terminate() {
     // Get connection and find its PG PID.
     let mut g = pool.get().await.unwrap();
     let (rows, _) = send_query(&mut g, "SELECT pg_backend_pid()").await;
-    let pid = col_str(&rows[0][0]).parse::<i32>().unwrap();
+    let pid = col_str(&rows[0], 0).parse::<i32>().unwrap();
     drop(g);
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -1072,7 +1072,7 @@ async fn test_connection_invalid_after_pg_terminate() {
     // Fresh checkout creates a new working connection.
     let mut g2 = pool.get().await.unwrap();
     let (rows, _) = send_query(&mut g2, "SELECT 1").await;
-    assert_eq!(col_str(&rows[0][0]), "1");
+    assert_eq!(col_str(&rows[0], 0), "1");
     assert_eq!(
         pool.metrics().total_created,
         2,
@@ -1248,12 +1248,12 @@ async fn test_async_conn_no_cpu_spin_when_idle() {
 
     // Now execute a query — should work fine.
     let rows = conn.exec_query("SELECT 1 AS n", &[], &[]).await.unwrap();
-    assert_eq!(col_str(&rows[0][0]), "1");
+    assert_eq!(col_str(&rows[0], 0), "1");
 
     // And another after more idle time.
     tokio::time::sleep(Duration::from_millis(200)).await;
     let rows = conn.exec_query("SELECT 2 AS n", &[], &[]).await.unwrap();
-    assert_eq!(col_str(&rows[0][0]), "2");
+    assert_eq!(col_str(&rows[0], 0), "2");
 }
 
 // ---------------------------------------------------------------------------
@@ -1278,7 +1278,7 @@ where
 async fn send_query(
     guard: &mut PoolGuard<WirePoolable>,
     sql: &str,
-) -> (Vec<Vec<Option<bytes::Bytes>>>, String) {
+) -> (Vec<pg_wired::protocol::types::RawRow>, String) {
     use bytes::BytesMut;
     use pg_wired::protocol::types::FrontendMsg;
 
@@ -1292,7 +1292,7 @@ async fn send_query(
 async fn send_query_raw(
     conn: &mut WireConn,
     sql: &str,
-) -> (Vec<Vec<Option<bytes::Bytes>>>, String) {
+) -> (Vec<pg_wired::protocol::types::RawRow>, String) {
     use bytes::BytesMut;
     use pg_wired::protocol::types::FrontendMsg;
 
@@ -1305,7 +1305,7 @@ async fn send_query_raw(
 async fn send_query_try(
     guard: &mut PoolGuard<WirePoolable>,
     sql: &str,
-) -> Result<(Vec<Vec<Option<bytes::Bytes>>>, String), PgWireError> {
+) -> Result<(Vec<pg_wired::protocol::types::RawRow>, String), PgWireError> {
     use bytes::BytesMut;
     use pg_wired::protocol::types::FrontendMsg;
 
@@ -1316,6 +1316,8 @@ async fn send_query_try(
     conn.collect_rows().await
 }
 
-fn col_str(col: &Option<bytes::Bytes>) -> String {
-    std::str::from_utf8(col.as_ref().unwrap()).unwrap().to_owned()
+fn col_str(row: &pg_wired::protocol::types::RawRow, idx: usize) -> String {
+    std::str::from_utf8(row.cell(idx).unwrap())
+        .unwrap()
+        .to_owned()
 }

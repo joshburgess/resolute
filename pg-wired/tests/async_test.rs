@@ -19,7 +19,7 @@ async fn test_async_simple_query() {
     let rows = ac.exec_query("SELECT 1 AS n", &[], &[]).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(
-        std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap(),
+        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
         "1"
     );
 }
@@ -33,7 +33,7 @@ async fn test_async_parameterized() {
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(
-        std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap(),
+        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
         "hello"
     );
 }
@@ -61,7 +61,7 @@ async fn test_async_pipeline_transaction() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    let json = std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap();
+    let json = std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap();
     assert!(json.contains("Alice"));
 }
 
@@ -78,7 +78,7 @@ async fn test_async_pipeline_with_jwt() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    let json = std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap();
+    let json = std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap();
     assert!(json.contains("Draft"));
 }
 
@@ -104,7 +104,7 @@ async fn test_async_concurrent_queries() {
         handles.push(tokio::spawn(async move {
             let sql = format!("SELECT {} AS n", i);
             let rows = ac.exec_query(&sql, &[], &[]).await.unwrap();
-            let val = std::str::from_utf8(rows[0][0].as_ref().unwrap())
+            let val = std::str::from_utf8(rows[0].cell(0).unwrap())
                 .unwrap()
                 .parse::<i32>()
                 .unwrap();
@@ -135,7 +135,7 @@ async fn test_async_error_recovery() {
     let rows = ac.exec_query("SELECT 1 AS n", &[], &[]).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(
-        std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap(),
+        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
         "1"
     );
 }
@@ -154,7 +154,7 @@ async fn test_async_multiple_errors_then_recovery() {
         .await
         .unwrap();
     assert_eq!(
-        std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap(),
+        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
         "ok"
     );
 }
@@ -177,7 +177,7 @@ async fn test_async_transaction_error_recovery() {
     // Connection should recover.
     let rows = ac.exec_query("SELECT 42 AS n", &[], &[]).await.unwrap();
     assert_eq!(
-        std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap(),
+        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
         "42"
     );
 }
@@ -208,7 +208,7 @@ async fn test_async_null_result() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    assert!(rows[0][0].is_none());
+    assert!((rows[0].try_cell(0) == Some(None)));
 }
 
 #[tokio::test]
@@ -234,15 +234,15 @@ async fn test_async_multiple_columns() {
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(
-        std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap(),
+        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
         "a"
     );
     assert_eq!(
-        std::str::from_utf8(rows[0][1].as_ref().unwrap()).unwrap(),
+        std::str::from_utf8(rows[0].cell(1).unwrap()).unwrap(),
         "b"
     );
     assert_eq!(
-        std::str::from_utf8(rows[0][2].as_ref().unwrap()).unwrap(),
+        std::str::from_utf8(rows[0].cell(2).unwrap()).unwrap(),
         "c"
     );
 }
@@ -261,7 +261,7 @@ async fn test_async_statement_cache_eviction() {
     // After eviction, re-execute earlier queries — should still work (re-parsed).
     let rows = ac.exec_query("SELECT 0 AS n", &[], &[]).await.unwrap();
     assert_eq!(
-        std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap(),
+        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
         "0"
     );
 }
@@ -283,7 +283,7 @@ async fn test_async_sequential_transactions() {
             .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(
-            std::str::from_utf8(rows[0][0].as_ref().unwrap()).unwrap(),
+            std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
             i.to_string()
         );
     }
@@ -300,7 +300,7 @@ async fn test_async_high_concurrency() {
         handles.push(tokio::spawn(async move {
             let sql = format!("SELECT {i} AS n");
             let rows = ac.exec_query(&sql, &[], &[]).await.unwrap();
-            let val = std::str::from_utf8(rows[0][0].as_ref().unwrap())
+            let val = std::str::from_utf8(rows[0].cell(0).unwrap())
                 .unwrap()
                 .parse::<i32>()
                 .unwrap();

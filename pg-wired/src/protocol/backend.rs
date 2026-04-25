@@ -150,51 +150,72 @@ fn parse_command_complete(body: &[u8]) -> Result<Option<BackendMsg>, String> {
 }
 
 /// Parse DataRow: [int16 num_cols] [int32 len, bytes data]...
-/// This is the hot path. Each column becomes a zero-copy `Bytes` slice
-/// refcounted into the message body buffer instead of a freshly-allocated
-/// `Vec<u8>`, so a 10 000-row result avoids 10 000 cell allocations.
+/// Hot path. Cell `(offset, length)` pairs (length = -1 means NULL) are
+/// written into a small stack buffer when the row fits inline
+/// ([`CELL_INLINE_CAP`] cells), avoiding any heap allocation on the common
+/// path. Wider rows fall through to a single `Box<[(u32, i32)]>` per row.
 fn parse_data_row(body: &Bytes) -> Result<Option<BackendMsg>, String> {
     if body.len() < 2 {
         return Err("DataRow: body too short for column count".into());
     }
-    let num_cols = i16_to_usize(i16::from_be_bytes([body[0], body[1]]), "DataRow")?;
-    let mut columns = Vec::with_capacity(num_cols);
-    let mut offset = 2;
+    let body_slice = body.as_ref();
+    let body_len = body_slice.len();
+    let num_cols = i16_to_usize(i16::from_be_bytes([body_slice[0], body_slice[1]]), "DataRow")?;
+    let mut offset = 2usize;
 
-    for col_idx in 0..num_cols {
-        if offset + 4 > body.len() {
-            return Err(format!(
-                "DataRow: truncated at column {col_idx} length (offset {offset}, body len {})",
-                body.len()
-            ));
+    if num_cols <= CELL_INLINE_CAP {
+        let mut data = [(0u32, 0i32); CELL_INLINE_CAP];
+        for slot in data.iter_mut().take(num_cols) {
+            *slot = read_cell_entry(body_slice, &mut offset, body_len)?;
         }
-        let len = i32::from_be_bytes([
-            body[offset],
-            body[offset + 1],
-            body[offset + 2],
-            body[offset + 3],
-        ]);
-        offset += 4;
-        if len == -1 {
-            columns.push(None); // NULL
-        } else if len < 0 {
-            return Err(format!(
-                "DataRow: invalid negative column length {len} at column {col_idx}"
-            ));
-        } else {
-            let len = len as usize;
-            if offset + len > body.len() {
-                return Err(format!(
-                    "DataRow: truncated column {col_idx} data (need {len} bytes at offset {offset}, body len {})",
-                    body.len()
-                ));
-            }
-            columns.push(Some(body.slice(offset..offset + len)));
-            offset += len;
-        }
+        return Ok(Some(BackendMsg::DataRow(RawRow::from_inline_unchecked(
+            body.clone(),
+            data,
+            num_cols as u8,
+        ))));
     }
 
-    Ok(Some(BackendMsg::DataRow { columns }))
+    let mut entries: Vec<(u32, i32)> = Vec::with_capacity(num_cols);
+    for _ in 0..num_cols {
+        entries.push(read_cell_entry(body_slice, &mut offset, body_len)?);
+    }
+    Ok(Some(BackendMsg::DataRow(RawRow::from_entries(
+        body.clone(),
+        &entries,
+    ))))
+}
+
+#[inline(always)]
+fn read_cell_entry(
+    body: &[u8],
+    offset: &mut usize,
+    body_len: usize,
+) -> Result<(u32, i32), String> {
+    let off = *offset;
+    if off + 4 > body_len {
+        return Err(format!(
+            "DataRow: truncated at length (offset {off}, body len {body_len})"
+        ));
+    }
+    // SAFETY: `off + 4 <= body_len == body.len()` checked above.
+    let len_bytes = unsafe { body.get_unchecked(off..off + 4) };
+    let len = i32::from_be_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]);
+    let after_len = off + 4;
+    if len < 0 {
+        if len == -1 {
+            *offset = after_len;
+            return Ok((0, -1));
+        }
+        return Err(format!("DataRow: invalid negative column length {len}"));
+    }
+    let ulen = len as usize;
+    if after_len + ulen > body_len {
+        return Err(format!(
+            "DataRow: truncated column data (need {ulen} bytes at offset {after_len}, body len {body_len})"
+        ));
+    }
+    *offset = after_len + ulen;
+    Ok((after_len as u32, len))
 }
 
 fn parse_row_description(body: &[u8]) -> Result<Option<BackendMsg>, String> {
@@ -458,9 +479,9 @@ mod tests {
         body.extend_from_slice(b"hello");
         let mut buf = make_message(b'D', &body);
         let msg = parse_message(&mut buf).unwrap().unwrap();
-        if let BackendMsg::DataRow { columns } = msg {
-            assert_eq!(columns.len(), 1);
-            assert_eq!(columns[0].as_deref(), Some(b"hello".as_ref()));
+        if let BackendMsg::DataRow(row) = msg {
+            assert_eq!(row.len(), 1);
+            assert_eq!(row.cell(0), Some(b"hello".as_ref()));
         } else {
             panic!("expected DataRow");
         }
@@ -473,8 +494,8 @@ mod tests {
         body.extend_from_slice(&(-1i32).to_be_bytes()); // NULL
         let mut buf = make_message(b'D', &body);
         let msg = parse_message(&mut buf).unwrap().unwrap();
-        if let BackendMsg::DataRow { columns } = msg {
-            assert_eq!(columns[0], None);
+        if let BackendMsg::DataRow(row) = msg {
+            assert_eq!(row.try_cell(0), Some(None));
         } else {
             panic!("expected DataRow");
         }

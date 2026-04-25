@@ -8,7 +8,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
@@ -16,7 +16,7 @@ use crate::connection::WireConn;
 use crate::error::PgWireError;
 use crate::protocol::backend;
 use crate::protocol::frontend;
-use crate::protocol::types::{BackendMsg, FormatCode, FrontendMsg};
+use crate::protocol::types::{BackendMsg, FormatCode, FrontendMsg, RawRow};
 
 // ---------------------------------------------------------------------------
 // Request types
@@ -59,7 +59,7 @@ pub enum PipelineResponse {
         /// Column metadata from RowDescription (empty if no RowDescription received).
         fields: Vec<crate::protocol::types::FieldDescription>,
         /// Row data.
-        rows: Vec<Vec<Option<Bytes>>>,
+        rows: Vec<RawRow>,
         /// CommandComplete tag (e.g. "SELECT 3", "INSERT 0 1").
         command_tag: String,
     },
@@ -73,7 +73,7 @@ pub struct StreamHeader {
 }
 
 /// A single streamed row.
-pub type StreamedRow = Vec<Option<Bytes>>;
+pub type StreamedRow = RawRow;
 
 // ---------------------------------------------------------------------------
 // Async connection
@@ -365,11 +365,12 @@ impl AsyncConn {
         let resp = self.submit(buf, ResponseCollector::CopyOut).await?;
         match resp {
             PipelineResponse::Rows { rows, .. } => {
-                // For CopyOut, we reuse the Rows variant but rows contain raw copy data.
+                // For CopyOut, we reuse the Rows variant but each `RawRow` carries
+                // one cell which is the raw COPY data chunk (see `collect_copy_out`).
                 let mut result = Vec::new();
                 for row in rows {
-                    for data in row.into_iter().flatten() {
-                        result.extend_from_slice(&data);
+                    for data in row.iter().flatten() {
+                        result.extend_from_slice(data);
                     }
                 }
                 Ok(result)
@@ -405,7 +406,7 @@ impl AsyncConn {
         query_sql: &str,
         params: &[Option<&[u8]>],
         param_oids: &[u32],
-    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
+    ) -> Result<Vec<RawRow>, PgWireError> {
         let (stmt_name, needs_parse) = self.lookup_or_alloc(query_sql);
         self.pipeline_transaction(
             setup_sql,
@@ -426,7 +427,7 @@ impl AsyncConn {
         sql: &str,
         params: &[Option<&[u8]>],
         param_oids: &[u32],
-    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
+    ) -> Result<Vec<RawRow>, PgWireError> {
         let (stmt_name, needs_parse) = self.lookup_or_alloc(sql);
         match self
             .query(sql, params, param_oids, &stmt_name, needs_parse)
@@ -586,7 +587,7 @@ impl AsyncConn {
         param_oids: &[u32],
         stmt_name: &[u8],
         needs_parse: bool,
-    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
+    ) -> Result<Vec<RawRow>, PgWireError> {
         let mut buf = BytesMut::with_capacity(1024);
 
         // 1. Simple query for setup (BEGIN + SET ROLE + set_config).
@@ -698,7 +699,7 @@ impl AsyncConn {
         param_oids: &[u32],
         stmt_name: &[u8],
         needs_parse: bool,
-    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
+    ) -> Result<Vec<RawRow>, PgWireError> {
         self.query_with_formats(sql, params, param_oids, &[], &[], stmt_name, needs_parse)
             .await
     }
@@ -723,7 +724,7 @@ impl AsyncConn {
         result_formats: &[FormatCode],
         stmt_name: &[u8],
         needs_parse: bool,
-    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
+    ) -> Result<Vec<RawRow>, PgWireError> {
         let mut buf = BytesMut::with_capacity(512);
 
         // Default to all-text if caller passes empty slices.
@@ -789,7 +790,7 @@ impl AsyncConn {
         param_oids: &[u32],
         param_formats: &[FormatCode],
         result_formats: &[FormatCode],
-    ) -> Result<Vec<Vec<Option<Bytes>>>, PgWireError> {
+    ) -> Result<Vec<RawRow>, PgWireError> {
         let (stmt_name, needs_parse) = self.lookup_or_alloc(sql);
         match self
             .query_with_formats(
@@ -948,7 +949,14 @@ async fn reader_task(
                     .map(|_| PipelineResponse::Done)
             }
             ResponseCollector::Stream { header_tx, row_tx } => {
-                stream_rows(&mut stream, &mut recv_buf, header_tx, row_tx, &state_mutated).await;
+                stream_rows(
+                    &mut stream,
+                    &mut recv_buf,
+                    header_tx,
+                    row_tx,
+                    &state_mutated,
+                )
+                .await;
                 Ok(PipelineResponse::Done)
             }
             ResponseCollector::CopyIn { .. } => {
@@ -1006,7 +1014,7 @@ async fn collect_rows(
     loop {
         let msg = read_msg(stream, buf).await?;
         match msg {
-            BackendMsg::DataRow { columns } => rows.push(columns),
+            BackendMsg::DataRow(row) => rows.push(row),
             BackendMsg::RowDescription { fields: f } => fields = f,
             BackendMsg::CommandComplete { tag } => command_tag = tag,
             BackendMsg::ReadyForQuery { status } => {
@@ -1082,13 +1090,13 @@ async fn stream_rows(
             BackendMsg::RowDescription { fields: f } => {
                 fields = f;
             }
-            BackendMsg::DataRow { columns } => {
+            BackendMsg::DataRow(row) => {
                 if let Some(htx) = header_tx.take() {
                     let _ = htx.send(Ok(StreamHeader {
                         fields: fields.clone(),
                     }));
                 }
-                if row_tx.send(Ok(columns)).await.is_err() {
+                if row_tx.send(Ok(row)).await.is_err() {
                     let _ = drain_until_ready(stream, buf, Some(state_mutated)).await;
                     return;
                 }
@@ -1165,14 +1173,15 @@ async fn collect_copy_out(
     buf: &mut BytesMut,
     state_mutated: &std::sync::atomic::AtomicBool,
 ) -> Result<PipelineResponse, PgWireError> {
-    let mut data_chunks: Vec<Vec<Option<Bytes>>> = Vec::new();
+    let mut data_chunks: Vec<RawRow> = Vec::new();
     let mut command_tag = String::new();
     loop {
         let msg = read_msg(stream, buf).await?;
         match msg {
             BackendMsg::CopyOutResponse { .. } => {}
             BackendMsg::CopyData { data } => {
-                data_chunks.push(vec![Some(Bytes::from(data))]);
+                let body = bytes::Bytes::from(data);
+                data_chunks.push(RawRow::from_full_body(body));
             }
             BackendMsg::CopyDone => {}
             BackendMsg::CommandComplete { tag } => command_tag = tag,

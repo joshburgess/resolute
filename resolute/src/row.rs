@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
+use pg_wired::protocol::types::RawRow;
 
 use crate::decode::{Decode, DecodeText};
 use crate::error::TypedError;
@@ -31,19 +31,20 @@ impl RowSchema {
 #[derive(Debug, Clone)]
 pub struct Row {
     pub(crate) schema: Arc<RowSchema>,
-    /// Raw column data (None = SQL NULL).
-    pub(crate) data: Vec<Option<Bytes>>,
+    /// Raw column data shared with the wire-protocol body. `RawRow::cell`
+    /// returns `None` for SQL NULL.
+    pub(crate) data: RawRow,
 }
 
 impl Row {
     /// Get a column value by index (binary decode).
     pub fn get<T: Decode + DecodeText>(&self, idx: usize) -> Result<T, TypedError> {
-        let raw = self.data.get(idx).ok_or(TypedError::Decode {
+        let cell = self.data.try_cell(idx).ok_or(TypedError::Decode {
             column: idx,
             message: format!("column index {idx} out of range (have {})", self.data.len()),
         })?;
 
-        let bytes = raw.as_ref().ok_or(TypedError::UnexpectedNull(idx))?;
+        let bytes = cell.ok_or(TypedError::UnexpectedNull(idx))?;
 
         let format = self.schema.formats.get(idx).copied().unwrap_or(0);
         if format == 1 {
@@ -61,12 +62,12 @@ impl Row {
 
     /// Get a possibly-NULL column value by index.
     pub fn get_opt<T: Decode + DecodeText>(&self, idx: usize) -> Result<Option<T>, TypedError> {
-        let raw = self.data.get(idx).ok_or(TypedError::Decode {
+        let cell = self.data.try_cell(idx).ok_or(TypedError::Decode {
             column: idx,
             message: format!("column index {idx} out of range"),
         })?;
 
-        match raw.as_ref() {
+        match cell {
             None => Ok(None),
             Some(bytes) => {
                 let format = self.schema.formats.get(idx).copied().unwrap_or(0);
@@ -122,9 +123,9 @@ impl Row {
         self.data.is_empty()
     }
 
-    /// Get the raw bytes for a column (None = NULL).
+    /// Get the raw bytes for a column (None = NULL or out-of-range).
     pub fn raw(&self, idx: usize) -> Option<&[u8]> {
-        self.data.get(idx).and_then(|v| v.as_deref())
+        self.data.cell(idx)
     }
 
     /// Get the column name at an index.

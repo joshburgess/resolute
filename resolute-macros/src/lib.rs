@@ -208,21 +208,18 @@ fn describe_live(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), Stri
                 if let Ok((rows, _)) = conn.collect_rows().await {
                     for row in &rows {
                         let oid: u32 = row
-                            .first()
-                            .and_then(|v| v.as_ref())
+                            .cell(0)
                             .and_then(|b| std::str::from_utf8(b).ok())
                             .and_then(|s| s.parse().ok())
                             .unwrap_or(0);
                         let col: i16 = row
-                            .get(1)
-                            .and_then(|v| v.as_ref())
+                            .cell(1)
                             .and_then(|b| std::str::from_utf8(b).ok())
                             .and_then(|s| s.parse().ok())
                             .unwrap_or(0);
                         let notnull: bool = row
-                            .get(2)
-                            .and_then(|v| v.as_ref())
-                            .map(|b| b.as_ref() == b"t".as_ref())
+                            .cell(2)
+                            .map(|b| b == b"t".as_ref())
                             .unwrap_or(false);
 
                         // Find the matching column and mark it non-nullable.

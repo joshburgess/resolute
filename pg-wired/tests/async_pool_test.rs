@@ -52,7 +52,7 @@ async fn test_pool_exec_query_select_one() {
     let pool = AsyncPool::connect(ADDR, USER, PASS, DB, 2).await.unwrap();
     let rows = pool.exec_query("SELECT 1 AS n", &[], &[]).await.unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(col_str(&rows[0][0]), "1");
+    assert_eq!(col_str(&rows[0], 0), "1");
 }
 
 #[tokio::test]
@@ -67,7 +67,7 @@ async fn test_pool_exec_query_parameterized() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(col_str(&rows[0][0]), "hello_pool");
+    assert_eq!(col_str(&rows[0], 0), "hello_pool");
 }
 
 #[tokio::test]
@@ -88,7 +88,7 @@ async fn test_pool_exec_query_null_param() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    assert!(rows[0][0].is_none());
+    assert_eq!(rows[0].try_cell(0), Some(None));
 }
 
 #[tokio::test]
@@ -122,7 +122,7 @@ async fn test_pool_exec_transaction_basic() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    let json = col_str(&rows[0][0]);
+    let json = col_str(&rows[0], 0);
     assert!(json.contains("Alice"));
 }
 
@@ -139,7 +139,7 @@ async fn test_pool_exec_transaction_with_jwt() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    let json = col_str(&rows[0][0]);
+    let json = col_str(&rows[0], 0);
     assert!(json.contains("Draft"));
 }
 
@@ -156,7 +156,7 @@ async fn test_pool_exec_transaction_with_params() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(col_str(&rows[0][0]), "Alice");
+    assert_eq!(col_str(&rows[0], 0), "Alice");
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +173,7 @@ async fn test_pool_round_robin_dispatch() {
             .exec_query(&format!("SELECT {i} AS n"), &[], &[])
             .await
             .unwrap();
-        assert_eq!(col_str(&rows[0][0]), i.to_string());
+        assert_eq!(col_str(&rows[0], 0), i.to_string());
     }
 }
 
@@ -203,7 +203,7 @@ async fn test_pool_concurrent_queries() {
                 .exec_query(&format!("SELECT {i} AS n"), &[], &[])
                 .await
                 .unwrap();
-            let val = col_str(&rows[0][0]).parse::<i32>().unwrap();
+            let val = col_str(&rows[0], 0).parse::<i32>().unwrap();
             assert_eq!(val, i);
         }));
     }
@@ -230,7 +230,7 @@ async fn test_pool_concurrent_transactions() {
                 )
                 .await
                 .unwrap();
-            let val = col_str(&rows[0][0]).parse::<i32>().unwrap();
+            let val = col_str(&rows[0], 0).parse::<i32>().unwrap();
             assert_eq!(val, i);
         }));
     }
@@ -253,7 +253,7 @@ async fn test_pool_high_concurrency_stress() {
                 .exec_query(&format!("SELECT {i} AS n"), &[], &[])
                 .await
                 .unwrap();
-            let val = col_str(&rows[0][0]).parse::<i32>().unwrap();
+            let val = col_str(&rows[0], 0).parse::<i32>().unwrap();
             assert_eq!(val, i);
         }));
     }
@@ -281,7 +281,7 @@ async fn test_pool_error_recovery() {
 
     // Pool should still work after error.
     let rows = pool.exec_query("SELECT 1 AS n", &[], &[]).await.unwrap();
-    assert_eq!(col_str(&rows[0][0]), "1");
+    assert_eq!(col_str(&rows[0], 0), "1");
 }
 
 #[tokio::test]
@@ -301,7 +301,7 @@ async fn test_pool_transaction_error_recovery() {
 
     // Should recover.
     let rows = pool.exec_query("SELECT 42 AS n", &[], &[]).await.unwrap();
-    assert_eq!(col_str(&rows[0][0]), "42");
+    assert_eq!(col_str(&rows[0], 0), "42");
 }
 
 #[tokio::test]
@@ -320,7 +320,7 @@ async fn test_pool_multiple_errors_then_recovery() {
         .exec_query("SELECT 'ok' AS status", &[], &[])
         .await
         .unwrap();
-    assert_eq!(col_str(&rows[0][0]), "ok");
+    assert_eq!(col_str(&rows[0], 0), "ok");
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +336,7 @@ async fn test_pool_detects_dead_connection() {
         .exec_query("SELECT pg_backend_pid()", &[], &[])
         .await
         .unwrap();
-    let pid = col_str(&rows[0][0]).parse::<i32>().unwrap();
+    let pid = col_str(&rows[0], 0).parse::<i32>().unwrap();
 
     // Kill that backend from outside.
     let mut killer = WireConn::connect(ADDR, USER, PASS, DB).await.unwrap();
@@ -352,7 +352,7 @@ async fn test_pool_detects_dead_connection() {
     // Queries should still work via the surviving connection or after reconnect.
     // Health monitor runs every 5s, but we can try immediately — get_async skips dead.
     let rows = pool.exec_query("SELECT 1 AS n", &[], &[]).await.unwrap();
-    assert_eq!(col_str(&rows[0][0]), "1");
+    assert_eq!(col_str(&rows[0], 0), "1");
 }
 
 #[tokio::test]
@@ -365,7 +365,7 @@ async fn test_pool_reconnection_via_health_monitor() {
         .exec_query("SELECT pg_backend_pid()", &[], &[])
         .await
         .unwrap();
-    let pid = col_str(&rows[0][0]).parse::<i32>().unwrap();
+    let pid = col_str(&rows[0], 0).parse::<i32>().unwrap();
 
     let mut killer = WireConn::connect(ADDR, USER, PASS, DB).await.unwrap();
     kill_backend(&mut killer, pid).await;
@@ -401,7 +401,7 @@ async fn test_pool_reconnection_via_health_monitor() {
     // After reconnection, all queries should succeed.
     for _ in 0..6 {
         let rows = pool.exec_query("SELECT 1 AS n", &[], &[]).await.unwrap();
-        assert_eq!(col_str(&rows[0][0]), "1");
+        assert_eq!(col_str(&rows[0], 0), "1");
     }
 }
 
@@ -416,7 +416,7 @@ async fn test_pool_skips_dead_connections_in_round_robin() {
             .exec_query("SELECT pg_backend_pid()", &[], &[])
             .await
             .unwrap();
-        let pid = col_str(&rows[0][0]).parse::<i32>().unwrap();
+        let pid = col_str(&rows[0], 0).parse::<i32>().unwrap();
         if !pids.contains(&pid) {
             pids.push(pid);
         }
@@ -444,7 +444,7 @@ async fn test_pool_skips_dead_connections_in_round_robin() {
     let mut successes = 0;
     for i in 0..10 {
         if let Ok(rows) = pool.exec_query(&format!("SELECT {i} AS n"), &[], &[]).await {
-            assert_eq!(col_str(&rows[0][0]), i.to_string());
+            assert_eq!(col_str(&rows[0], 0), i.to_string());
             successes += 1;
         }
     }
@@ -467,7 +467,7 @@ async fn test_pool_statement_cache_per_connection() {
     // Same SQL executed repeatedly should use cached statements.
     for _ in 0..10 {
         let rows = pool.exec_query("SELECT 42 AS n", &[], &[]).await.unwrap();
-        assert_eq!(col_str(&rows[0][0]), "42");
+        assert_eq!(col_str(&rows[0], 0), "42");
     }
 }
 
@@ -490,7 +490,7 @@ async fn test_pool_mixed_queries_and_transactions() {
                     .exec_query(&format!("SELECT {i} AS n"), &[], &[])
                     .await
                     .unwrap();
-                assert_eq!(col_str(&rows[0][0]), i.to_string());
+                assert_eq!(col_str(&rows[0], 0), i.to_string());
             }));
         } else {
             handles.push(tokio::spawn(async move {
@@ -503,7 +503,7 @@ async fn test_pool_mixed_queries_and_transactions() {
                     )
                     .await
                     .unwrap();
-                assert_eq!(col_str(&rows[0][0]), i.to_string());
+                assert_eq!(col_str(&rows[0], 0), i.to_string());
             }));
         }
     }
@@ -526,7 +526,7 @@ async fn test_pool_single_connection_serial_queries() {
             .exec_query(&format!("SELECT {i} AS n"), &[], &[])
             .await
             .unwrap();
-        assert_eq!(col_str(&rows[0][0]), i.to_string());
+        assert_eq!(col_str(&rows[0], 0), i.to_string());
     }
 }
 
@@ -543,7 +543,7 @@ async fn test_pool_single_connection_concurrent_queries() {
                 .exec_query(&format!("SELECT {i} AS n"), &[], &[])
                 .await
                 .unwrap();
-            assert_eq!(col_str(&rows[0][0]), i.to_string());
+            assert_eq!(col_str(&rows[0], 0), i.to_string());
         }));
     }
 
@@ -561,8 +561,8 @@ async fn test_pool_large_result_set() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1000);
-    assert_eq!(col_str(&rows[0][0]), "1");
-    assert_eq!(col_str(&rows[999][0]), "1000");
+    assert_eq!(col_str(&rows[0], 0), "1");
+    assert_eq!(col_str(&rows[999], 0), "1000");
 }
 
 #[tokio::test]
@@ -578,9 +578,9 @@ async fn test_pool_multiple_columns() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(col_str(&rows[0][0]), "a");
-    assert_eq!(col_str(&rows[0][1]), "b");
-    assert_eq!(col_str(&rows[0][2]), "c");
+    assert_eq!(col_str(&rows[0], 0), "a");
+    assert_eq!(col_str(&rows[0], 1), "b");
+    assert_eq!(col_str(&rows[0], 2), "c");
 }
 
 // ---------------------------------------------------------------------------
@@ -598,7 +598,7 @@ async fn test_pool_all_connections_dead_recovers() {
             .exec_query("SELECT pg_backend_pid()", &[], &[])
             .await
             .unwrap();
-        let pid = col_str(&rows[0][0]).parse::<i32>().unwrap();
+        let pid = col_str(&rows[0], 0).parse::<i32>().unwrap();
         if !pids.contains(&pid) {
             pids.push(pid);
         }
@@ -632,7 +632,7 @@ async fn test_pool_all_connections_dead_recovers() {
 
     // Verify queries work again.
     let rows = pool.exec_query("SELECT 1 AS n", &[], &[]).await.unwrap();
-    assert_eq!(col_str(&rows[0][0]), "1");
+    assert_eq!(col_str(&rows[0], 0), "1");
 }
 
 // ---------------------------------------------------------------------------
@@ -648,7 +648,7 @@ async fn test_pool_concurrent_queries_during_reconnection() {
         .exec_query("SELECT pg_backend_pid()", &[], &[])
         .await
         .unwrap();
-    let pid = col_str(&rows[0][0]).parse::<i32>().unwrap();
+    let pid = col_str(&rows[0], 0).parse::<i32>().unwrap();
     let mut killer = WireConn::connect(ADDR, USER, PASS, DB).await.unwrap();
     kill_backend(&mut killer, pid).await;
 
@@ -680,8 +680,10 @@ async fn test_pool_concurrent_queries_during_reconnection() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn col_str(col: &Option<bytes::Bytes>) -> String {
-    std::str::from_utf8(col.as_ref().unwrap()).unwrap().to_owned()
+fn col_str(row: &pg_wired::protocol::types::RawRow, idx: usize) -> String {
+    std::str::from_utf8(row.cell(idx).unwrap())
+        .unwrap()
+        .to_owned()
 }
 
 async fn kill_backend(conn: &mut WireConn, pid: i32) {

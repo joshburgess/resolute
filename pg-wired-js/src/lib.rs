@@ -114,26 +114,18 @@ fn fields_to_info(fields: Vec<FieldDescription>) -> Vec<FieldInfo> {
 
 /// Decode text-format cells to owned `String`s. Invalid UTF-8 becomes
 /// lossy-replaced; pg-wired's result bytes are text-format so this is safe.
-fn rows_to_strings(rows: Vec<Vec<Option<bytes::Bytes>>>) -> Vec<Vec<Option<String>>> {
-    rows.into_iter()
-        .map(|row| {
-            row.into_iter()
-                .map(|cell| cell.map(bytes_to_string))
-                .collect()
-        })
-        .collect()
+fn rows_to_strings(rows: Vec<pg_wired::protocol::types::RawRow>) -> Vec<Vec<Option<String>>> {
+    rows.into_iter().map(row_to_strings).collect()
 }
 
 fn row_to_strings(row: StreamedRow) -> Vec<Option<String>> {
-    row.into_iter()
-        .map(|cell| cell.map(bytes_to_string))
-        .collect()
+    row.iter().map(|cell| cell.map(bytes_to_string)).collect()
 }
 
-fn bytes_to_string(bytes: bytes::Bytes) -> String {
-    match std::str::from_utf8(&bytes) {
+fn bytes_to_string(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
         Ok(s) => s.to_owned(),
-        Err(_) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(_) => String::from_utf8_lossy(bytes).into_owned(),
     }
 }
 
@@ -141,7 +133,7 @@ fn bytes_to_string(bytes: bytes::Bytes) -> String {
 /// triple. Offsets include a trailing terminator so each cell is
 /// `data[offsets[i]..offsets[i+1]]`.
 fn rows_to_columnar(
-    rows: Vec<Vec<Option<bytes::Bytes>>>,
+    rows: Vec<pg_wired::protocol::types::RawRow>,
     cols: usize,
 ) -> (String, Vec<u32>, Vec<u8>) {
     let row_count = rows.len();
@@ -149,7 +141,7 @@ fn rows_to_columnar(
     let total_bytes: usize = rows
         .iter()
         .flat_map(|r| r.iter())
-        .filter_map(|c| c.as_ref().map(|v| v.len()))
+        .filter_map(|c| c.map(|v| v.len()))
         .sum();
     let mut data_bytes = Vec::<u8>::with_capacity(total_bytes);
     let mut offsets = Vec::<u32>::with_capacity(cell_count + 1);
@@ -158,10 +150,10 @@ fn rows_to_columnar(
     let mut cursor: u32 = 0;
     let mut idx: usize = 0;
     for row in rows {
-        for cell in row {
+        for cell in row.iter() {
             match cell {
                 Some(bytes) => {
-                    data_bytes.extend_from_slice(&bytes);
+                    data_bytes.extend_from_slice(bytes);
                     cursor = cursor.saturating_add(bytes.len() as u32);
                 }
                 None => {
@@ -413,10 +405,10 @@ fn encode_query_with_formats(
     buf
 }
 
-fn rows_to_buffers(rows: Vec<Vec<Option<bytes::Bytes>>>) -> Vec<Vec<Option<Buffer>>> {
+fn rows_to_buffers(rows: Vec<pg_wired::protocol::types::RawRow>) -> Vec<Vec<Option<Buffer>>> {
     rows.into_iter()
         .map(|row| {
-            row.into_iter()
+            row.iter()
                 .map(|c| c.map(|b| Buffer::from(b.to_vec())))
                 .collect()
         })
@@ -1170,6 +1162,23 @@ mod tests {
         }
     }
 
+    /// Build a [`RawRow`] from per-cell byte slices for tests; `None` means SQL NULL.
+    fn mkrow(cells: &[Option<&[u8]>]) -> pg_wired::protocol::types::RawRow {
+        let mut body = bytes::BytesMut::new();
+        let mut entries: Vec<(u32, i32)> = Vec::with_capacity(cells.len());
+        for cell in cells {
+            entries.push(match cell {
+                Some(b) => {
+                    let off = body.len() as u32;
+                    body.extend_from_slice(b);
+                    (off, b.len() as i32)
+                }
+                None => (0u32, -1i32),
+            });
+        }
+        pg_wired::protocol::types::RawRow::from_entries(body.freeze(), &entries)
+    }
+
     #[test]
     fn parse_sslmode_variants() {
         assert_eq!(parse_sslmode(None).unwrap(), TlsMode::Prefer);
@@ -1195,17 +1204,14 @@ mod tests {
 
     #[test]
     fn bytes_to_string_valid_utf8() {
-        assert_eq!(bytes_to_string(bytes::Bytes::from_static(b"hello")), "hello");
-        assert_eq!(
-            bytes_to_string(bytes::Bytes::copy_from_slice("résumé".as_bytes())),
-            "résumé"
-        );
-        assert_eq!(bytes_to_string(bytes::Bytes::new()), "");
+        assert_eq!(bytes_to_string(b"hello"), "hello");
+        assert_eq!(bytes_to_string("résumé".as_bytes()), "résumé");
+        assert_eq!(bytes_to_string(b""), "");
     }
 
     #[test]
     fn bytes_to_string_invalid_utf8_falls_back_lossy() {
-        let decoded = bytes_to_string(bytes::Bytes::from(vec![0x68u8, 0x69, 0xff, 0xfe]));
+        let decoded = bytes_to_string(&[0x68u8, 0x69, 0xff, 0xfe]);
         assert!(decoded.starts_with("hi"));
         assert!(decoded.contains('\u{FFFD}'));
     }
@@ -1213,8 +1219,8 @@ mod tests {
     #[test]
     fn rows_to_strings_maps_cells_and_preserves_nulls() {
         let rows = vec![
-            vec![Some(bytes::Bytes::from_static(b"a")), None],
-            vec![None, Some(bytes::Bytes::from_static(b"b"))],
+            mkrow(&[Some(b"a"), None]),
+            mkrow(&[None, Some(b"b")]),
         ];
         let out = rows_to_strings(rows);
         assert_eq!(out[0][0].as_deref(), Some("a"));
@@ -1226,14 +1232,8 @@ mod tests {
     #[test]
     fn rows_to_columnar_data_and_offsets() {
         let rows = vec![
-            vec![
-                Some(bytes::Bytes::from_static(b"ab")),
-                Some(bytes::Bytes::from_static(b"cde")),
-            ],
-            vec![
-                Some(bytes::Bytes::from_static(b"")),
-                Some(bytes::Bytes::from_static(b"f")),
-            ],
+            mkrow(&[Some(b"ab"), Some(b"cde")]),
+            mkrow(&[Some(b""), Some(b"f")]),
         ];
         let (data, offsets, nulls) = rows_to_columnar(rows, 2);
         assert_eq!(data, "abcdef");
@@ -1244,8 +1244,8 @@ mod tests {
     #[test]
     fn rows_to_columnar_null_bitmap_positions() {
         let rows = vec![
-            vec![None, Some(bytes::Bytes::from_static(b"x"))], // cell 0 null, cell 1 set
-            vec![Some(bytes::Bytes::from_static(b"y")), None], // cell 2 set, cell 3 null
+            mkrow(&[None, Some(b"x")]), // cell 0 null, cell 1 set
+            mkrow(&[Some(b"y"), None]), // cell 2 set, cell 3 null
         ];
         let (data, offsets, nulls) = rows_to_columnar(rows, 2);
         assert_eq!(data, "xy");
@@ -1260,12 +1260,10 @@ mod tests {
     #[test]
     fn rows_to_columnar_bitmap_second_byte() {
         // 10 cells, some null: make sure the bitmap spans 2 bytes correctly.
-        let mut row: Vec<Option<bytes::Bytes>> = (0..10)
-            .map(|_| Some(bytes::Bytes::from_static(b"x")))
-            .collect();
-        row[8] = None; // bit 0 of byte 1
-        row[9] = None; // bit 1 of byte 1
-        let (_, offsets, nulls) = rows_to_columnar(vec![row], 10);
+        let mut cells: Vec<Option<&[u8]>> = (0..10).map(|_| Some(&b"x"[..])).collect();
+        cells[8] = None; // bit 0 of byte 1
+        cells[9] = None; // bit 1 of byte 1
+        let (_, offsets, nulls) = rows_to_columnar(vec![mkrow(&cells)], 10);
         assert_eq!(offsets.len(), 11);
         assert_eq!(nulls.len(), 2); // ceil(10/8)
         assert_eq!(nulls[0], 0);
@@ -1282,7 +1280,7 @@ mod tests {
 
     #[test]
     fn rows_to_columnar_handles_invalid_utf8_cells() {
-        let rows = vec![vec![Some(bytes::Bytes::from(vec![0x68u8, 0xff]))]];
+        let rows = vec![mkrow(&[Some(&[0x68u8, 0xff])])];
         let (data, offsets, nulls) = rows_to_columnar(rows, 1);
         assert!(data.starts_with("h"));
         assert_eq!(offsets, vec![0, 2]);
@@ -1341,8 +1339,8 @@ mod tests {
     #[test]
     fn rows_to_buffers_preserves_cells_and_nulls() {
         let rows = vec![
-            vec![Some(bytes::Bytes::from_static(b"abc")), None],
-            vec![None, Some(bytes::Bytes::from_static(b""))],
+            mkrow(&[Some(b"abc"), None]),
+            mkrow(&[None, Some(b"")]),
         ];
         let out = rows_to_buffers(rows);
         assert_eq!(out.len(), 2);
@@ -1356,7 +1354,7 @@ mod tests {
     fn pipeline_response_to_query_result_rows() {
         let resp = PipelineResponse::Rows {
             fields: vec![mkfield("n", 23, FormatCode::Text)],
-            rows: vec![vec![Some(bytes::Bytes::from_static(b"42"))], vec![None]],
+            rows: vec![mkrow(&[Some(b"42")]), mkrow(&[None])],
             command_tag: "SELECT 2".into(),
         };
         let qr = pipeline_response_to_query_result(resp);
@@ -1384,11 +1382,8 @@ mod tests {
                 mkfield("b", 25, FormatCode::Text),
             ],
             rows: vec![
-                vec![
-                    Some(bytes::Bytes::from_static(b"1")),
-                    Some(bytes::Bytes::from_static(b"hi")),
-                ],
-                vec![None, Some(bytes::Bytes::from_static(b"bye"))],
+                mkrow(&[Some(b"1"), Some(b"hi")]),
+                mkrow(&[None, Some(b"bye")]),
             ],
             command_tag: "SELECT 2".into(),
         };
