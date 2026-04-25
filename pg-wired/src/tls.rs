@@ -170,6 +170,20 @@ pub(crate) async fn negotiate_tls_with_config(
                 }
             }
 
+            // Use the `ring` provider that the `tls` feature enables. We pass
+            // it explicitly via `builder_with_provider` to avoid relying on
+            // the process-level default, which a host application may not
+            // have installed.
+            let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+            let builder = rustls::ClientConfig::builder_with_provider(provider)
+                .with_safe_default_protocol_versions()
+                .map_err(|e| {
+                    crate::error::PgWireError::Protocol(format!(
+                        "TLS protocol version setup failed: {e}"
+                    ))
+                })?
+                .with_root_certificates(root_store);
+
             let tls_config = if let Some((ref cert_chain, ref key_der)) = config.client_cert {
                 // mTLS: client certificate authentication.
                 let certs: Vec<rustls_pki_types::CertificateDer<'static>> = cert_chain
@@ -182,18 +196,13 @@ pub(crate) async fn negotiate_tls_with_config(
                             "invalid client private key: {e}"
                         ))
                     })?;
-                rustls::ClientConfig::builder()
-                    .with_root_certificates(root_store)
-                    .with_client_auth_cert(certs, key)
-                    .map_err(|e| {
-                        crate::error::PgWireError::Protocol(format!(
-                            "TLS client auth config error: {e}"
-                        ))
-                    })?
+                builder.with_client_auth_cert(certs, key).map_err(|e| {
+                    crate::error::PgWireError::Protocol(format!(
+                        "TLS client auth config error: {e}"
+                    ))
+                })?
             } else {
-                rustls::ClientConfig::builder()
-                    .with_root_certificates(root_store)
-                    .with_no_client_auth()
+                builder.with_no_client_auth()
             };
 
             let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(tls_config));
