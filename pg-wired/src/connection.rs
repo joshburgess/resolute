@@ -1,3 +1,7 @@
+//! Synchronous-style PostgreSQL connection driving the v3 wire protocol on
+//! a single owned [`tokio::net::TcpStream`]. Use [`crate::AsyncConn`] for the
+//! shared, multi-task connection wrapper most callers want.
+
 use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;

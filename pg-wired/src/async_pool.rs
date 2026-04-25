@@ -22,10 +22,15 @@ use crate::tls::TlsMode;
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct ConnConfig {
+    /// Server address as `host:port` (e.g., `"127.0.0.1:5432"`).
     pub addr: String,
+    /// PostgreSQL role to authenticate as.
     pub user: String,
+    /// Password for the role; ignored when the server requests trust auth.
     pub password: String,
+    /// Database name to attach to after authentication.
     pub database: String,
+    /// TLS preference (plain, prefer, require, verify-ca, verify-full).
     pub tls_mode: TlsMode,
 }
 

@@ -1,3 +1,7 @@
+//! Pipelined query execution: fuse `Parse`/`Bind`/`Execute`/`Sync` for
+//! multiple statements into one `write()` and one `flush()`. Reuses prepared
+//! statements via an LRU statement cache.
+
 use std::collections::HashMap;
 
 use bytes::BytesMut;
@@ -29,6 +33,8 @@ impl std::fmt::Debug for PgPipeline {
 }
 
 impl PgPipeline {
+    /// Wrap a connected [`WireConn`] in a pipelining helper.
+    /// Statement cache size defaults to 256 entries.
     pub fn new(conn: WireConn) -> Self {
         Self {
             conn,

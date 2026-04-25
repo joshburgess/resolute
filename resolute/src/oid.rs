@@ -10,50 +10,91 @@
 pub enum TypeOid {
     /// OID 0: let the server infer the type from context.
     Unspecified = 0,
+    /// `bool` (1 byte).
     Bool = 16,
+    /// `bytea` (variable-length byte array).
     Bytea = 17,
+    /// `int8` / `bigint` (8-byte signed integer).
     Int8 = 20,
+    /// `int2` / `smallint` (2-byte signed integer).
     Int2 = 21,
+    /// `int4` / `integer` (4-byte signed integer).
     Int4 = 23,
+    /// `text` (variable-length UTF-8 string, no length limit).
     Text = 25,
+    /// `oid` (4-byte unsigned object identifier).
     Oid = 26,
+    /// `float4` / `real` (4-byte floating point).
     Float4 = 700,
+    /// `float8` / `double precision` (8-byte floating point).
     Float8 = 701,
+    /// `varchar(n)` (variable-length UTF-8 string with optional length cap).
     Varchar = 1043,
+    /// `char` (1-byte fixed-length character).
     Char = 18,
+    /// `name` (63-byte identifier, used in catalog tables).
     Name = 19,
+    /// `timestamp` (8-byte timestamp without timezone).
     Timestamp = 1114,
+    /// `timestamptz` (8-byte timestamp with timezone).
     Timestamptz = 1184,
+    /// `date` (4-byte calendar date).
     Date = 1082,
+    /// `time` (8-byte time of day).
     Time = 1083,
+    /// `interval` (16-byte duration).
     Interval = 1186,
+    /// `uuid` (16-byte UUID).
     Uuid = 2950,
+    /// `json` (text-format JSON).
     Json = 114,
+    /// `jsonb` (binary-format JSON, recommended for new schemas).
     Jsonb = 3802,
+    /// `inet` (IPv4 or IPv6 host or network address).
     Inet = 869,
+    /// `cidr` (IPv4 or IPv6 network address).
     Cidr = 650,
+    /// `numeric` / `decimal` (arbitrary-precision exact decimal).
     Numeric = 1700,
     // Array types
+    /// `bool[]`.
     BoolArray = 1000,
+    /// `bytea[]`.
     ByteaArray = 1001,
+    /// `int2[]`.
     Int2Array = 1005,
+    /// `int4[]`.
     Int4Array = 1007,
+    /// `text[]`.
     TextArray = 1009,
+    /// `varchar[]`.
     VarcharArray = 1015,
+    /// `int8[]`.
     Int8Array = 1016,
+    /// `float4[]`.
     Float4Array = 1021,
+    /// `float8[]`.
     Float8Array = 1022,
+    /// `inet[]`.
     InetArray = 1041,
+    /// `timestamp[]`.
     TimestampArray = 1115,
+    /// `date[]`.
     DateArray = 1182,
+    /// `time[]`.
     TimeArray = 1183,
+    /// `timestamptz[]`.
     TimestamptzArray = 1185,
+    /// `numeric[]`.
     NumericArray = 1231,
+    /// `uuid[]`.
     UuidArray = 2951,
+    /// `jsonb[]`.
     JsonbArray = 3807,
 }
 
 impl TypeOid {
+    /// Convert this variant to its raw `pg_type.oid` value.
     pub fn as_u32(self) -> u32 {
         self as u32
     }

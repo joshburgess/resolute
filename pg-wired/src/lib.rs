@@ -39,6 +39,8 @@
 //! [`resolute`]: https://docs.rs/resolute
 //! [`tokio`]: https://docs.rs/tokio
 
+#![deny(missing_docs)]
+
 pub mod async_conn;
 pub mod async_pool;
 pub mod cancel;

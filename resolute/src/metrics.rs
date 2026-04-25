@@ -60,12 +60,20 @@ pub fn record_pool_timeout() {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct QueryMetrics {
+    /// Total successful `query` / `query_as` / `query_scalar` calls.
     pub query_count: u64,
+    /// Total `query` calls that returned an error.
     pub query_error_count: u64,
+    /// Cumulative microseconds spent in `query` calls (success or failure).
+    /// Divide by `query_count + query_error_count` for a mean.
     pub query_duration_us_sum: u64,
+    /// Total successful `execute` calls.
     pub execute_count: u64,
+    /// Total `execute` calls that returned an error.
     pub execute_error_count: u64,
+    /// Total successful pool checkouts.
     pub pool_checkout_count: u64,
+    /// Pool checkouts that timed out before a connection became available.
     pub pool_timeout_count: u64,
 }
 

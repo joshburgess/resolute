@@ -19,6 +19,8 @@
 //! let pool = ConnPool::<WirePoolable>::new(config, LifecycleHooks::default()).await?;
 //! ```
 
+#![deny(missing_docs)]
+
 #[cfg(feature = "wire")]
 pub mod async_wire;
 mod pool;

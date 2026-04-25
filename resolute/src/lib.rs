@@ -131,6 +131,8 @@
 //! - Statement caching: Parse once, Bind+Execute on reuse
 //! - Generic array encode/decode for all types via `Vec<T>`
 
+#![deny(missing_docs)]
+
 pub mod admin;
 mod checked;
 mod decode;

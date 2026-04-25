@@ -4,9 +4,12 @@
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct TypeInfo {
+    /// Object identifier from `pg_type`.
     pub oid: u32,
+    /// Postgres type name (e.g., `"int4"`, `"text"`).
     pub name: &'static str,
-    pub size: i16, // -1 = variable length
+    /// Wire-format size in bytes, or `-1` for variable-length types.
+    pub size: i16,
 }
 
 /// Look up type info by OID.

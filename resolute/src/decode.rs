@@ -530,6 +530,7 @@ impl_array_decode!(serde_json::Value);
 
 /// Decode from PostgreSQL text format (for backwards compat and mixed-mode queries).
 pub trait DecodeText: Sized {
+    /// Parse a value of `Self` from a PostgreSQL text-format representation.
     fn decode_text(s: &str) -> Result<Self, TypedError>;
 }
 

@@ -226,13 +226,21 @@ impl<C> Default for LifecycleHooks<C> {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct PoolMetrics {
+    /// Total number of connections currently held by the pool (idle + in-use).
     pub total: usize,
+    /// Number of connections currently parked on the idle stack and ready to hand out.
     pub idle: usize,
+    /// Number of connections currently checked out via [`PoolGuard`].
     pub in_use: usize,
+    /// Number of tasks currently parked waiting for a connection.
     pub waiters: usize,
+    /// Cumulative count of successful checkouts since the pool was created.
     pub total_checkouts: u64,
+    /// Cumulative count of new connections opened by the pool.
     pub total_created: u64,
+    /// Cumulative count of connections destroyed (closed, evicted, or failed validation).
     pub total_destroyed: u64,
+    /// Cumulative count of `get()` calls that timed out before acquiring a connection.
     pub total_timeouts: u64,
 }
 
@@ -697,12 +705,14 @@ impl<C: Poolable + std::fmt::Debug> std::fmt::Debug for PoolGuard<C> {
 }
 
 impl<C: Poolable> PoolGuard<C> {
+    /// Borrow the wrapped connection. Panics if [`PoolGuard::take`] was already called.
     pub fn conn(&self) -> &C {
         self.conn
             .as_ref()
             .expect("PoolGuard: connection already taken via take()")
     }
 
+    /// Mutably borrow the wrapped connection. Panics if [`PoolGuard::take`] was already called.
     pub fn conn_mut(&mut self) -> &mut C {
         self.conn
             .as_mut()

@@ -21,9 +21,13 @@ use crate::error::TypedError;
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Migration {
+    /// Numeric version parsed from the filename prefix (e.g., `20240115__init.up.sql` -> `20240115`).
     pub version: i64,
+    /// Human-readable name parsed from the filename (e.g., `init`).
     pub name: String,
+    /// Full path to the up-migration SQL file.
     pub up_path: PathBuf,
+    /// Full path to the down-migration SQL file.
     pub down_path: PathBuf,
 }
 
@@ -31,7 +35,9 @@ pub struct Migration {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct AppliedMigration {
+    /// Numeric version recorded in the tracking table.
     pub version: i64,
+    /// Human-readable name recorded in the tracking table.
     pub name: String,
     /// ISO-8601 timestamp text, as returned by PostgreSQL's `timestamptz::text` cast.
     pub applied_at: String,

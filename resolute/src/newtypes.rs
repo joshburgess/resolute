@@ -198,10 +198,12 @@ impl std::fmt::Display for PgTimestamp {
 }
 
 impl PgTimestamp {
+    /// Returns `true` if this timestamp is `infinity` or `-infinity`.
     pub fn is_infinity(&self) -> bool {
         matches!(self, Self::Infinity | Self::NegInfinity)
     }
 
+    /// Returns `true` if this timestamp is a finite value (not infinity).
     pub fn is_finite(&self) -> bool {
         matches!(self, Self::Value(_))
     }
@@ -234,10 +236,12 @@ impl std::fmt::Display for PgDate {
 }
 
 impl PgDate {
+    /// Returns `true` if this date is `infinity` or `-infinity`.
     pub fn is_infinity(&self) -> bool {
         matches!(self, Self::Infinity | Self::NegInfinity)
     }
 
+    /// Returns `true` if this date is a finite value (not infinity).
     pub fn is_finite(&self) -> bool {
         matches!(self, Self::Value(_))
     }

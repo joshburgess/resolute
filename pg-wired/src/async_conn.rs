@@ -40,7 +40,9 @@ pub enum ResponseCollector {
     Drain,
     /// Stream rows one at a time via channels. Sends header first, then individual rows.
     Stream {
+        /// One-shot channel for the row description (sent once before any rows).
         header_tx: oneshot::Sender<Result<StreamHeader, PgWireError>>,
+        /// Bounded channel for individual rows; closed on completion or error.
         row_tx: mpsc::Sender<Result<StreamedRow, PgWireError>>,
     },
     /// COPY IN: after receiving CopyInResponse, send the provided data then CopyDone.
@@ -55,6 +57,7 @@ pub enum ResponseCollector {
 /// Response from a pipeline request.
 #[non_exhaustive]
 pub enum PipelineResponse {
+    /// A query that produced a row set (`SELECT`, `RETURNING`, etc.).
     Rows {
         /// Column metadata from RowDescription (empty if no RowDescription received).
         fields: Vec<crate::protocol::types::FieldDescription>,
@@ -63,12 +66,15 @@ pub enum PipelineResponse {
         /// CommandComplete tag (e.g. "SELECT 3", "INSERT 0 1").
         command_tag: String,
     },
+    /// A statement that produced no row set (e.g., `BEGIN`, `SET ROLE`,
+    /// non-RETURNING DML).
     Done,
 }
 
 /// Metadata sent at the start of a streaming response.
 #[derive(Debug, Clone)]
 pub struct StreamHeader {
+    /// Column descriptions (name, OID, format) for the streamed result set.
     pub fields: Vec<crate::protocol::types::FieldDescription>,
 }
 
