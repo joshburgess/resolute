@@ -54,7 +54,10 @@ pub fn parse_message(buf: &mut BytesMut) -> Result<Option<BackendMsg>, String> {
         b'3' => Ok(Some(BackendMsg::CloseComplete)),
         b'n' => Ok(Some(BackendMsg::NoData)),
         b'C' => parse_command_complete(&body),
-        b'D' => parse_data_row(&body),
+        // DataRow takes the body by value so it can move it into the RawRow
+        // without bumping the underlying Arc. Every other branch only
+        // borrows.
+        b'D' => parse_data_row(body),
         b'T' => parse_row_description(&body),
         b'E' => parse_error_or_notice(&body).map(|e| Some(BackendMsg::ErrorResponse { fields: e })),
         b'N' => {
@@ -154,7 +157,11 @@ fn parse_command_complete(body: &[u8]) -> Result<Option<BackendMsg>, String> {
 /// written into a small stack buffer when the row fits inline
 /// ([`CELL_INLINE_CAP`] cells), avoiding any heap allocation on the common
 /// path. Wider rows fall through to a single `Box<[(u32, i32)]>` per row.
-fn parse_data_row(body: &Bytes) -> Result<Option<BackendMsg>, String> {
+///
+/// Takes `body` by value and moves it into the `RawRow`, avoiding the
+/// per-row Bytes::clone (atomic Arc bump) that a borrowed signature
+/// would force.
+fn parse_data_row(body: Bytes) -> Result<Option<BackendMsg>, String> {
     if body.len() < 2 {
         return Err("DataRow: body too short for column count".into());
     }
@@ -169,7 +176,7 @@ fn parse_data_row(body: &Bytes) -> Result<Option<BackendMsg>, String> {
             *slot = read_cell_entry(body_slice, &mut offset, body_len)?;
         }
         return Ok(Some(BackendMsg::DataRow(RawRow::from_inline_unchecked(
-            body.clone(),
+            body,
             data,
             num_cols as u8,
         ))));
@@ -180,8 +187,7 @@ fn parse_data_row(body: &Bytes) -> Result<Option<BackendMsg>, String> {
         entries.push(read_cell_entry(body_slice, &mut offset, body_len)?);
     }
     Ok(Some(BackendMsg::DataRow(RawRow::from_entries(
-        body.clone(),
-        &entries,
+        body, &entries,
     ))))
 }
 
