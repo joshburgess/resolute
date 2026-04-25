@@ -44,6 +44,8 @@
 pub mod async_conn;
 pub mod async_pool;
 pub mod cancel;
+#[cfg(feature = "tls")]
+mod cert_hash;
 pub mod connection;
 pub mod error;
 pub mod pipeline;

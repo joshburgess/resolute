@@ -86,8 +86,7 @@ impl WireConn {
             if mechanisms.iter().any(|m| m == "SCRAM-SHA-256-PLUS") {
                 if let Some(certs) = tls.get_ref().1.peer_certificates() {
                     if let Some(cert) = certs.first() {
-                        use sha2::{Digest, Sha256};
-                        let hash = Sha256::digest(cert.as_ref()).to_vec();
+                        let hash = crate::cert_hash::cert_signature_hash(cert.as_ref());
                         return Ok((
                             crate::scram::ChannelBinding::TlsServerEndPoint(hash),
                             b"SCRAM-SHA-256-PLUS",
