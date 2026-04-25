@@ -38,9 +38,8 @@ impl TypedPool {
     ///
     /// # Errors
     ///
-    /// Returns `PoolError` if the initial minimum-size connections cannot be
-    /// established. The underlying connection failure (`PgWireError`) is
-    /// wrapped in `PoolError::Inner`.
+    /// Returns `PoolError::Connect(PgWireError)` if the initial minimum-size
+    /// connections cannot be established.
     pub async fn new(
         config: ConnPoolConfig,
         hooks: LifecycleHooks<AsyncPoolable>,
@@ -61,14 +60,12 @@ impl TypedPool {
         database: &str,
         max_size: usize,
     ) -> Result<Self, PoolError<pg_wired::PgWireError>> {
-        let config = ConnPoolConfig {
-            addr: addr.to_string(),
-            user: user.to_string(),
-            password: password.to_string(),
-            database: database.to_string(),
-            max_size,
-            ..Default::default()
-        };
+        let mut config = ConnPoolConfig::default();
+        config.addr = addr.to_string();
+        config.user = user.to_string();
+        config.password = password.to_string();
+        config.database = database.to_string();
+        config.max_size = max_size;
         Self::new(config, LifecycleHooks::default()).await
     }
 
@@ -80,10 +77,12 @@ impl TypedPool {
     ///
     /// # Errors
     ///
-    /// Returns `TypedError::Pool` wrapping `PoolError::AcquireTimeout` if the
-    /// pool is at `max_size` and no connection becomes available before the
-    /// configured `connect_timeout`, or `PoolError::Inner(PgWireError)` if a
-    /// new connection was needed and couldn't be established.
+    /// Returns `TypedError::Pool` wrapping `PoolError::Timeout` if the pool is
+    /// at `max_size` and no connection becomes available before the configured
+    /// `checkout_timeout`, `PoolError::Connect(PgWireError)` if a new
+    /// connection was needed but couldn't be established, or
+    /// `PoolError::Draining` / `PoolError::Closed` if the pool is shutting
+    /// down.
     pub async fn get(&self) -> Result<PooledTypedClient, TypedError> {
         tracing::debug!("pool checkout");
         crate::metrics::record_pool_checkout();
@@ -178,6 +177,73 @@ impl PooledTypedClient {
         self.guard.conn().0.is_alive()
     }
 
+    /// Get a `CancelToken` that can be used to cancel an in-flight query on
+    /// this connection from another task.
+    pub fn cancel_token(&self) -> pg_wired::CancelToken {
+        self.guard.conn().0.cancel_token()
+    }
+
+    /// Acquire a session-level advisory lock. Blocks until the lock is granted.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Wire` if the lock query fails.
+    pub async fn advisory_lock(&self, key: i64) -> Result<(), TypedError> {
+        self.execute("SELECT pg_advisory_lock($1)", &[&key]).await?;
+        Ok(())
+    }
+
+    /// Try to acquire a session-level advisory lock without blocking. Returns
+    /// `true` if the lock was acquired, `false` otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Wire` if the lock query fails.
+    pub async fn try_advisory_lock(&self, key: i64) -> Result<bool, TypedError> {
+        let rows = self
+            .query("SELECT pg_try_advisory_lock($1)", &[&key])
+            .await?;
+        rows[0].get::<bool>(0)
+    }
+
+    /// Release a session-level advisory lock previously acquired with
+    /// [`advisory_lock`](Self::advisory_lock). Returns `true` if a lock was
+    /// released, `false` if no matching lock was held.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Wire` if the unlock query fails.
+    pub async fn advisory_unlock(&self, key: i64) -> Result<bool, TypedError> {
+        let rows = self
+            .query("SELECT pg_advisory_unlock($1)", &[&key])
+            .await?;
+        rows[0].get::<bool>(0)
+    }
+
+    /// Acquire a transaction-scoped advisory lock. Released automatically at
+    /// transaction end.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Wire` if the lock query fails.
+    pub async fn advisory_xact_lock(&self, key: i64) -> Result<(), TypedError> {
+        self.execute("SELECT pg_advisory_xact_lock($1)", &[&key])
+            .await?;
+        Ok(())
+    }
+
+    /// Try to acquire a transaction-scoped advisory lock without blocking.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TypedError::Wire` if the lock query fails.
+    pub async fn try_advisory_xact_lock(&self, key: i64) -> Result<bool, TypedError> {
+        let rows = self
+            .query("SELECT pg_try_advisory_xact_lock($1)", &[&key])
+            .await?;
+        rows[0].get::<bool>(0)
+    }
+
     /// Begin a transaction on the pooled connection.
     ///
     /// The returned `PooledTransaction` borrows from this client, so the
@@ -237,6 +303,11 @@ impl<'a> std::fmt::Debug for PooledTransaction<'a> {
 }
 
 impl<'a> PooledTransaction<'a> {
+    /// Access the underlying [`PooledTypedClient`] this transaction is running on.
+    pub fn client(&self) -> &'a PooledTypedClient {
+        self.client
+    }
+
     /// Execute a query within the transaction.
     pub async fn query(&self, sql: &str, params: &[&dyn SqlParam]) -> Result<Vec<Row>, TypedError> {
         self.client.query(sql, params).await

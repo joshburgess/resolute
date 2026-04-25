@@ -377,6 +377,131 @@ impl Executor for crate::pooled::PooledTypedClient {
     }
 }
 
+#[allow(clippy::manual_async_fn)]
+impl Executor for crate::reconnect::ReconnectingClient {
+    fn query<'a>(
+        &'a self,
+        sql: &'a str,
+        params: &'a [&'a dyn SqlParam],
+    ) -> impl Future<Output = Result<Vec<Row>, TypedError>> + Send + 'a {
+        crate::reconnect::ReconnectingClient::query(self, sql, params)
+    }
+
+    fn execute<'a>(
+        &'a self,
+        sql: &'a str,
+        params: &'a [&'a dyn SqlParam],
+    ) -> impl Future<Output = Result<u64, TypedError>> + Send + 'a {
+        crate::reconnect::ReconnectingClient::execute(self, sql, params)
+    }
+
+    fn copy_in<'a>(
+        &'a self,
+        copy_sql: &'a str,
+        data: &'a [u8],
+    ) -> impl Future<Output = Result<u64, TypedError>> + Send + 'a {
+        async move { self.client().copy_in(copy_sql, data).await }
+    }
+
+    fn copy_out<'a>(
+        &'a self,
+        copy_sql: &'a str,
+    ) -> impl Future<Output = Result<Vec<u8>, TypedError>> + Send + 'a {
+        async move { self.client().copy_out(copy_sql).await }
+    }
+
+    fn atomic<'a, T: Send + 'a>(
+        &'a self,
+        f: impl FnOnce(&'a Self) -> Pin<Box<dyn Future<Output = Result<T, TypedError>> + Send + 'a>>
+            + Send
+            + 'a,
+    ) -> impl Future<Output = Result<T, TypedError>> + Send + 'a {
+        async move {
+            let client = self.client();
+            client.simple_query("BEGIN").await?;
+            match f(self).await {
+                Ok(val) => {
+                    client.simple_query("COMMIT").await?;
+                    Ok(val)
+                }
+                Err(e) => {
+                    if let Err(rb_err) = client.simple_query("ROLLBACK").await {
+                        tracing::error!(error = %rb_err, "transaction rollback failed");
+                    }
+                    Err(e)
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::manual_async_fn)]
+impl Executor for crate::pooled::PooledTransaction<'_> {
+    fn query<'a>(
+        &'a self,
+        sql: &'a str,
+        params: &'a [&'a dyn SqlParam],
+    ) -> impl Future<Output = Result<Vec<Row>, TypedError>> + Send + 'a {
+        crate::pooled::PooledTransaction::query(self, sql, params)
+    }
+
+    fn execute<'a>(
+        &'a self,
+        sql: &'a str,
+        params: &'a [&'a dyn SqlParam],
+    ) -> impl Future<Output = Result<u64, TypedError>> + Send + 'a {
+        crate::pooled::PooledTransaction::execute(self, sql, params)
+    }
+
+    fn copy_in<'a>(
+        &'a self,
+        copy_sql: &'a str,
+        data: &'a [u8],
+    ) -> impl Future<Output = Result<u64, TypedError>> + Send + 'a {
+        async move { self.client().copy_in(copy_sql, data).await }
+    }
+
+    fn copy_out<'a>(
+        &'a self,
+        copy_sql: &'a str,
+    ) -> impl Future<Output = Result<Vec<u8>, TypedError>> + Send + 'a {
+        async move { self.client().copy_out(copy_sql).await }
+    }
+
+    fn atomic<'a, T: Send + 'a>(
+        &'a self,
+        f: impl FnOnce(&'a Self) -> Pin<Box<dyn Future<Output = Result<T, TypedError>> + Send + 'a>>
+            + Send
+            + 'a,
+    ) -> impl Future<Output = Result<T, TypedError>> + Send + 'a {
+        async move {
+            let id = SAVEPOINT_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let sp = format!("resolute_sp_{id}");
+            self.client()
+                .simple_query(&format!("SAVEPOINT {sp}"))
+                .await?;
+            match f(self).await {
+                Ok(val) => {
+                    self.client()
+                        .simple_query(&format!("RELEASE SAVEPOINT {sp}"))
+                        .await?;
+                    Ok(val)
+                }
+                Err(e) => {
+                    if let Err(rb_err) = self
+                        .client()
+                        .simple_query(&format!("ROLLBACK TO SAVEPOINT {sp}"))
+                        .await
+                    {
+                        tracing::error!(error = %rb_err, savepoint = %sp, "savepoint rollback failed");
+                    }
+                    Err(e)
+                }
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Closure-based transaction API
 // ---------------------------------------------------------------------------
