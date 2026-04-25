@@ -48,7 +48,7 @@ Resolute is for you if:
 - You have used sqlx and like its workflow and general selling points: compile-time checked queries against a live database, offline cache for CI, derive-driven `FromRow`. You do not want to give any of that up.
 - You only target PostgreSQL. You are not looking for a cross-database abstraction and you do not want the lowest-common-denominator API that comes with one. You would rather have first-class support for PostgreSQL features (LISTEN/NOTIFY, advisory locks, COPY, composites, domains, ranges, integer-backed enums) than portability to MySQL or SQLite.
 - You want a more flexible, more convenient API than sqlx offers: named parameters that survive dollar-quoting and casts, an `Executor` trait that takes `&self` so generic helpers compose, an `atomic()` method that dispatches `BEGIN` or `SAVEPOINT` based on the receiver so transactional helpers nest without knowing the caller's context, and richer `FromRow` attributes. See "Why Resolute" below for the full list.
-- You care about performance on small, frequent queries. Resolute implements the wire protocol, pool, and typed surface from scratch rather than layering over tokio-postgres, and it uses the binary wire format throughout. Benchmarks against the same PostgreSQL instance show roughly 4 to 5 times faster parameter encoding and 2 to 3 times faster end-to-end latency on small queries. Under concurrent load the gap compresses to 1.2 to 1.5 times. On server-bound queries (heavy aggregations, scans) the two drivers are at parity. On large result sets sqlx is currently faster than resolute, by 8 to 28 percent in the benchmarks below; that is being worked on. See the "Performance" section for the full picture.
+- You care about performance on small, frequent queries. Resolute implements the wire protocol, pool, and typed surface from scratch rather than layering over tokio-postgres, and it uses the binary wire format throughout. Benchmarks against the same PostgreSQL instance show roughly 4 to 5 times faster parameter encoding and 2 to 3 times faster end-to-end latency on small queries. Under concurrent load the gap compresses to 1.2 to 1.3 times. On large result sets resolute is up to 2 times faster. On server-bound queries (heavy aggregations, scans) the two drivers are at parity. See the "Performance" section for the full picture.
 
 If that sounds like you, keep reading.
 
@@ -68,7 +68,7 @@ If that sounds like you, keep reading.
 
 **Query type overrides.** `query!(r#"SELECT id as "id: UserId" FROM users"#)` maps columns to custom Rust types in compile-time macros. Works with any type that implements `Decode`.
 
-**Binary format everywhere.** Parameters and results use PostgreSQL's binary wire format. No text parsing, no intermediate representations. Roughly 4-5x faster than sqlx on encode (most types), 2-3x faster on small-query latency; under concurrent load the gap is closer to 1.2-1.5x. The Performance section breaks down where the wins are and where work remains.
+**Binary format everywhere.** Parameters and results use PostgreSQL's binary wire format. No text parsing, no intermediate representations. Roughly 4-5x faster than sqlx on encode (most types), 2-3x faster on small-query latency, up to 2x faster on large-result decode; under concurrent load the gap is closer to 1.2-1.3x. The Performance section has the full breakdown.
 
 **Statement caching.** `Parse` once per connection, `Bind+Execute` on reuse. LRU cache with 256 entries per connection.
 
@@ -118,21 +118,21 @@ Benchmarked against sqlx 0.8 on the same queries, same PostgreSQL instance. Numb
 
 **Concurrent load and result-heavy queries:**
 
-| Scenario | resolute | sqlx | Result |
-|----------|----------|------|--------|
-| 4 connections, 16 concurrent `SELECT 1` tasks | 701 µs | 823 µs | 1.17x |
-| 1 connection, 8 concurrent tasks (coalescing test) | 764 µs | 1146 µs | 1.50x |
-| 8 connections, 64 concurrent tasks (oversubscribed) | 2.28 ms | 2.74 ms | 1.20x |
-| `SELECT count(*) FROM generate_series(1, 100k)` (server-bound) | 5.69 ms | 5.71 ms | parity |
-| 10 000 single-column rows (large result decode) | 1.99 ms | 1.85 ms | sqlx 1.08x faster |
-| 1 000 rows × 10 mixed-type columns (wide-row decode) | 1.17 ms | 0.91 ms | sqlx 1.28x faster |
+| Scenario | resolute | sqlx | Speedup |
+|----------|----------|------|---------|
+| 4 connections, 16 concurrent `SELECT 1` tasks | 705 µs | 840 µs | 1.19x |
+| 1 connection, 8 concurrent tasks (coalescing test) | 762 µs | 997 µs | 1.31x |
+| 8 connections, 64 concurrent tasks (oversubscribed) | 2.31 ms | 2.76 ms | 1.20x |
+| `SELECT count(*) FROM generate_series(1, 100k)` (server-bound) | 5.54 ms | 5.82 ms | 1.05x (parity) |
+| 10 000 single-column rows (large result decode) | 947 µs | 1.89 ms | 2.00x |
+| 1 000 rows × 10 mixed-type columns (wide-row decode) | 985 µs | 1.02 ms | 1.04x |
 
 A few notes on what to take from this:
 
 - **Resolute's biggest wins are on small, frequent queries** where round-trip overhead and the encode path dominate. That's the `SELECT 1`-shape table above.
-- **Concurrency wins are real but more modest.** At 1.2x to 1.5x. Postgres serializes work per connection regardless of driver, so once a workload is fan-out-heavy, the gap compresses.
-- **Server-bound queries are at parity.** When Postgres is doing real work (heavy aggregations, scans), driver overhead is noise. Use whichever driver you prefer; the wall-clock difference is in the variance.
-- **sqlx is currently faster on large result sets.** Pulling thousands of rows is decode-bound, and resolute's row-materialization path has more per-row overhead than sqlx's. This is a known gap in v0.1.0 and on the optimization list. If your workload routinely returns large result sets, that is worth knowing up front.
+- **Concurrency wins are real but more modest.** At 1.2x to 1.3x. Postgres serializes work per connection regardless of driver, so once a workload is fan-out-heavy, the gap compresses.
+- **Server-bound queries are essentially at parity.** When Postgres is doing real work (heavy aggregations, scans), driver overhead is noise. Pick whichever driver you prefer; wall-clock difference falls within run-to-run variance.
+- **Large result decode is now a clean resolute win.** 2x on the 10 000-row case. Wide rows are roughly at parity, narrowly in resolute's favor.
 
 Run benchmarks: `cargo bench -p resolute`
 

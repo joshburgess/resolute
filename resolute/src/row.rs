@@ -1,17 +1,34 @@
 //! Typed row abstraction over raw wire protocol DataRow.
 
+use std::sync::Arc;
+
 use crate::decode::{Decode, DecodeText};
 use crate::error::TypedError;
+
+/// Per-result-set schema (column names, type OIDs, formats). Shared across
+/// every `Row` in a result via `Arc` so we pay the metadata allocations once
+/// per query rather than once per row.
+#[derive(Debug)]
+pub(crate) struct RowSchema {
+    pub(crate) columns: Vec<String>,
+    pub(crate) type_oids: Vec<u32>,
+    pub(crate) formats: Vec<i16>,
+}
+
+impl RowSchema {
+    pub(crate) fn empty() -> Self {
+        Self {
+            columns: Vec::new(),
+            type_oids: Vec::new(),
+            formats: Vec::new(),
+        }
+    }
+}
 
 /// A row from a query result with typed column access.
 #[derive(Debug, Clone)]
 pub struct Row {
-    /// Column names (from RowDescription).
-    pub(crate) columns: Vec<String>,
-    /// Column type OIDs (from RowDescription).
-    pub(crate) type_oids: Vec<u32>,
-    /// Column format codes (text=0 or binary=1).
-    pub(crate) formats: Vec<i16>,
+    pub(crate) schema: Arc<RowSchema>,
     /// Raw column data (None = SQL NULL).
     pub(crate) data: Vec<Option<Vec<u8>>>,
 }
@@ -26,7 +43,7 @@ impl Row {
 
         let bytes = raw.as_ref().ok_or(TypedError::UnexpectedNull(idx))?;
 
-        let format = self.formats.get(idx).copied().unwrap_or(0);
+        let format = self.schema.formats.get(idx).copied().unwrap_or(0);
         if format == 1 {
             // Binary format.
             T::decode(bytes)
@@ -50,7 +67,7 @@ impl Row {
         match raw.as_ref() {
             None => Ok(None),
             Some(bytes) => {
-                let format = self.formats.get(idx).copied().unwrap_or(0);
+                let format = self.schema.formats.get(idx).copied().unwrap_or(0);
                 if format == 1 {
                     Ok(Some(T::decode(bytes)?))
                 } else {
@@ -81,12 +98,13 @@ impl Row {
 
     /// Check whether a column with the given name exists.
     pub fn has_column(&self, name: &str) -> bool {
-        self.columns.iter().any(|c| c == name)
+        self.schema.columns.iter().any(|c| c == name)
     }
 
     /// Look up column index by name.
     fn column_index(&self, name: &str) -> Result<usize, TypedError> {
-        self.columns
+        self.schema
+            .columns
             .iter()
             .position(|c| c == name)
             .ok_or_else(|| TypedError::ColumnNotFound(name.to_string()))
@@ -109,12 +127,12 @@ impl Row {
 
     /// Get the column name at an index.
     pub fn column_name(&self, idx: usize) -> Option<&str> {
-        self.columns.get(idx).map(|s| s.as_str())
+        self.schema.columns.get(idx).map(|s| s.as_str())
     }
 
     /// Get the type OID for a column.
     pub fn column_type_oid(&self, idx: usize) -> Option<u32> {
-        self.type_oids.get(idx).copied()
+        self.schema.type_oids.get(idx).copied()
     }
 }
 

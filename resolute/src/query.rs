@@ -15,7 +15,8 @@ use pg_wired::{AsyncConn, PipelineResponse, ResponseCollector, WireConn};
 
 use crate::encode::SqlParam;
 use crate::error::TypedError;
-use crate::row::Row;
+use crate::row::{Row, RowSchema};
+use std::sync::Arc;
 
 /// Transaction isolation level for `begin_with()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -360,31 +361,12 @@ impl Client {
                 rows: raw_rows,
                 command_tag: _,
             } => {
-                // Build column metadata from RowDescription if available.
-                let has_desc = !fields.is_empty();
-                let columns: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
-                let type_oids: Vec<u32> = fields.iter().map(|f| f.type_oid).collect();
-                // If no RowDescription, default to binary (we requested it in Bind).
-                let formats: Vec<i16> = if has_desc {
-                    fields.iter().map(|f| f.format as i16).collect()
-                } else {
-                    Vec::new() // Will use binary default per-row below.
-                };
-
+                let schema = Arc::new(build_row_schema(&fields, raw_rows.first()));
                 let rows = raw_rows
                     .into_iter()
-                    .map(|data| {
-                        let row_formats = if formats.is_empty() {
-                            vec![1i16; data.len()] // Binary format (we requested it).
-                        } else {
-                            formats.clone()
-                        };
-                        Row {
-                            columns: columns.clone(),
-                            type_oids: type_oids.clone(),
-                            formats: row_formats,
-                            data,
-                        }
+                    .map(|data| Row {
+                        schema: Arc::clone(&schema),
+                        data,
                     })
                     .collect();
                 Ok(rows)
@@ -594,15 +576,13 @@ impl Client {
             .submit_stream(buf, Self::DEFAULT_STREAM_BUFFER)
             .await?;
 
-        let columns: Vec<String> = header.fields.iter().map(|f| f.name.clone()).collect();
-        let type_oids: Vec<u32> = header.fields.iter().map(|f| f.type_oid).collect();
-        let formats: Vec<i16> = header.fields.iter().map(|f| f.format as i16).collect();
+        let has_desc = !header.fields.is_empty();
+        let schema = Arc::new(build_row_schema(&header.fields, None));
 
         Ok(RowStream {
             row_rx,
-            columns,
-            type_oids,
-            formats,
+            schema,
+            has_desc,
         })
     }
 
@@ -1112,23 +1092,12 @@ impl<'a> Pipeline<'a> {
                     if rows.is_empty() && !command_tag.is_empty() {
                         results.push(PipelineResult::Execute(parse_row_count(&command_tag)));
                     } else {
-                        let columns: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
-                        let type_oids: Vec<u32> = fields.iter().map(|f| f.type_oid).collect();
-                        let formats: Vec<i16> = fields.iter().map(|f| f.format as i16).collect();
+                        let schema = Arc::new(build_row_schema(&fields, rows.first()));
                         let typed_rows = rows
                             .into_iter()
-                            .map(|data| {
-                                let row_formats = if formats.is_empty() {
-                                    vec![1i16; data.len()]
-                                } else {
-                                    formats.clone()
-                                };
-                                Row {
-                                    columns: columns.clone(),
-                                    type_oids: type_oids.clone(),
-                                    formats: row_formats,
-                                    data,
-                                }
+                            .map(|data| Row {
+                                schema: Arc::clone(&schema),
+                                data,
                             })
                             .collect();
                         results.push(PipelineResult::Rows(typed_rows));
@@ -1168,9 +1137,11 @@ impl Client {
 #[derive(Debug)]
 pub struct RowStream {
     row_rx: mpsc::Receiver<Result<Vec<Option<Vec<u8>>>, pg_wired::PgWireError>>,
-    columns: Vec<String>,
-    type_oids: Vec<u32>,
-    formats: Vec<i16>,
+    schema: Arc<RowSchema>,
+    /// True if the schema came from a real RowDescription. If false, the
+    /// stream fills `formats` from the first row's column count on the fly
+    /// (binary, since we requested binary in Bind).
+    has_desc: bool,
 }
 
 impl tokio_stream::Stream for RowStream {
@@ -1179,15 +1150,14 @@ impl tokio_stream::Stream for RowStream {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.row_rx.poll_recv(cx) {
             Poll::Ready(Some(Ok(data))) => {
-                let row_formats = if self.formats.is_empty() {
-                    vec![1i16; data.len()]
-                } else {
-                    self.formats.clone()
-                };
+                if !self.has_desc && self.schema.formats.len() != data.len() {
+                    let mut s = RowSchema::empty();
+                    s.formats = vec![1i16; data.len()];
+                    self.schema = Arc::new(s);
+                    self.has_desc = true;
+                }
                 let row = Row {
-                    columns: self.columns.clone(),
-                    type_oids: self.type_oids.clone(),
-                    formats: row_formats,
+                    schema: Arc::clone(&self.schema),
                     data,
                 };
                 Poll::Ready(Some(Ok(row)))
@@ -1196,6 +1166,29 @@ impl tokio_stream::Stream for RowStream {
             Poll::Ready(None) => Poll::Ready(None), // stream complete
             Poll::Pending => Poll::Pending,
         }
+    }
+}
+
+/// Build a `RowSchema` once per result set. Pulls names / OIDs / formats from
+/// the `RowDescription` if present; otherwise falls back to "binary, sized to
+/// the first row" since we always request binary in `Bind`.
+fn build_row_schema(
+    fields: &[pg_wired::protocol::types::FieldDescription],
+    first_row: Option<&Vec<Option<Vec<u8>>>>,
+) -> RowSchema {
+    if !fields.is_empty() {
+        RowSchema {
+            columns: fields.iter().map(|f| f.name.clone()).collect(),
+            type_oids: fields.iter().map(|f| f.type_oid).collect(),
+            formats: fields.iter().map(|f| f.format as i16).collect(),
+        }
+    } else if let Some(row) = first_row {
+        // No RowDescription: synthesize binary formats sized to the row.
+        let mut s = RowSchema::empty();
+        s.formats = vec![1i16; row.len()];
+        s
+    } else {
+        RowSchema::empty()
     }
 }
 
