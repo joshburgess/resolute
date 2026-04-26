@@ -103,15 +103,20 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54322/postgrest_test
         run: cargo build --workspace --all-targets
 
+      # pg-wired-js is excluded: its lib unittest binary fails to start on
+      # Linux with `symbol lookup error: undefined symbol:
+      # napi_call_threadsafe_function`. napi symbols are only resolved when
+      # loaded inside a JS host (Node/Bun/Deno). Tests for that crate live
+      # in the JS test runner.
       - name: Unit + integration tests
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54322/postgrest_test
-        run: cargo test --workspace --all-targets -- --nocapture
+        run: cargo test --workspace --exclude pg-wired-js --all-targets -- --nocapture
 
       - name: Doc tests
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54322/postgrest_test
-        run: cargo test --workspace --doc
+        run: cargo test --workspace --exclude pg-wired-js --doc
 
   doc:
     name: doc (warnings as errors)
@@ -130,9 +135,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      # Ignored advisories (each documented in .cargo/audit.toml):
+      #   RUSTSEC-2023-0071: rsa Marvin attack. Transitive via sqlx-postgres
+      #     (dev-dep only, used in benches against a local DB; no remote
+      #     attacker can observe timing). No upstream patch available.
+      #   RUSTSEC-2026-0097: rand unsoundness with custom logger. Triggers
+      #     only when a logger calls rand::rng() inside log output; resolute
+      #     does not register a custom logger, and dev-deps that pull rand
+      #     don't either.
+      - name: Run cargo audit
+        run: cargo audit
 
   msrv:
     name: msrv (1.85)

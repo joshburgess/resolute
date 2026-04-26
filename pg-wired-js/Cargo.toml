@@ -7,13 +7,6 @@ publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
-# napi symbols are only resolvable when loaded inside a JS host (Node, Bun,
-# Deno). The Rust unittest binary links against napi but has no runtime to
-# satisfy the symbols, so on Linux it fails to start with `symbol lookup
-# error: undefined symbol: napi_call_threadsafe_function`. Tests for this
-# crate live in the JS test runner (see scripts/), not `cargo test`.
-test = false
-doctest = false
 
 [dependencies]
 pg-wired = { workspace = true, features = ["tls"] }

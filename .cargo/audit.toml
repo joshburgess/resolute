@@ -1,0 +1,16 @@
+# cargo-audit configuration. See https://docs.rs/cargo-audit/
+
+[advisories]
+ignore = [
+    # rsa: Marvin attack timing sidechannel. No upstream patch available.
+    # Transitive via sqlx-postgres, which is a dev-dep only (used in
+    # benchmarks against a local Postgres). The attack requires an attacker
+    # who can observe network timing of TLS-encrypted RSA operations; our
+    # benches run against 127.0.0.1.
+    "RUSTSEC-2023-0071",
+
+    # rand: Unsoundness when a custom logger calls rand::rng() inside log
+    # output. Resolute does not register a custom logger, and the rand
+    # dev-dep callers don't either.
+    "RUSTSEC-2026-0097",
+]
