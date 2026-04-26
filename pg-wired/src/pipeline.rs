@@ -117,10 +117,8 @@ impl PgPipeline {
         loop {
             match self.conn.recv_msg().await? {
                 BackendMsg::ReadyForQuery { .. } => break,
-                BackendMsg::ErrorResponse { fields } => {
-                    if first_error.is_none() {
-                        first_error = Some(fields);
-                    }
+                BackendMsg::ErrorResponse { fields } if first_error.is_none() => {
+                    first_error = Some(fields);
                 }
                 _ => {}
             }

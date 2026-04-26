@@ -110,11 +110,10 @@ pub fn snapshot() -> QueryMetrics {
 /// ```
 pub fn gather() -> String {
     let m = snapshot();
-    let avg_us = if m.query_count > 0 {
-        m.query_duration_us_sum / m.query_count
-    } else {
-        0
-    };
+    let avg_us = m
+        .query_duration_us_sum
+        .checked_div(m.query_count)
+        .unwrap_or(0);
     format!(
         "# HELP resolute_queries_total Total queries executed.\n\
          # TYPE resolute_queries_total counter\n\

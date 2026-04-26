@@ -1079,6 +1079,7 @@ async fn collect_rows(
             }
             msg @ BackendMsg::NotificationResponse { .. } => {
                 // Forward notification instead of dropping.
+                #[allow(clippy::collapsible_match)]
                 if notification_tx.try_send(msg).is_err() {
                     dropped_notifications.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     tracing::warn!("notification channel full, dropping notification");
@@ -1178,6 +1179,7 @@ async fn stream_rows(
                 return;
             }
             msg @ BackendMsg::NotificationResponse { .. } => {
+                #[allow(clippy::collapsible_match)]
                 if notification_tx.try_send(msg).is_err() {
                     dropped_notifications.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     tracing::warn!("notification channel full, dropping notification");
