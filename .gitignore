@@ -1,5 +1,4 @@
 /target
-Cargo.lock
 /.bench-results
 # sqlx's offline cache. Resolute uses `.resolute/` instead; sqlx is only a
 # bench-side runtime dependency and never produces this directory itself,

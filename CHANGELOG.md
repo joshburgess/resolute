@@ -85,7 +85,7 @@ status / info / validate / seed), and `database` (create / drop).
 
 ### Notes
 
-- MSRV: Rust 1.75.
+- MSRV: Rust 1.85.
 - License: MIT or Apache-2.0 (dual).
 - Published crates: `pg-wired`, `pg-pool`, `resolute`, `resolute-derive`,
   `resolute-macros`, `resolute-cli`. The `pg-wired-js` crate in the

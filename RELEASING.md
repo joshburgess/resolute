@@ -35,8 +35,8 @@ cargo test --workspace --all-targets
 cargo test --workspace --doc
 
 # MSRV check (matches CI).
-rustup toolchain install 1.75 --profile minimal
-cargo +1.75 check --workspace --all-targets
+rustup toolchain install 1.85 --profile minimal
+cargo +1.85 check --workspace --locked --lib --bins
 
 # Audit (matches CI).
 cargo audit

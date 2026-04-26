@@ -135,14 +135,18 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   msrv:
-    name: msrv (1.75)
+    name: msrv (1.85)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.75
+      - uses: dtolnay/rust-toolchain@1.85
       - uses: Swatinem/rust-cache@v2
+      # MSRV applies to library + binary consumers, not to dev-dependencies
+      # used only by our own tests/benches. We deliberately skip --all-targets
+      # so dev-dep drift (newer crates that require post-1.85 toolchains)
+      # doesn't break our public MSRV promise.
       - name: Check workspace builds on declared MSRV
-        run: cargo check --workspace --all-targets
+        run: cargo check --workspace --locked --lib --bins
 
   test-tls-feature:
     name: test (pg-wired tls feature)

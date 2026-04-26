@@ -165,7 +165,7 @@ pg-wired has an optional `tls` feature for rustls-based TLS connections.
 
 ## Minimum Supported Rust Version
 
-Resolute builds on stable Rust 1.75 and newer. Bumping the MSRV is considered a minor-version change.
+Resolute builds on stable Rust 1.85 and newer. Bumping the MSRV is considered a minor-version change.
 
 ## License
 
