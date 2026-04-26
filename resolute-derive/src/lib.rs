@@ -363,9 +363,12 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
         #(#fn_attrs)*
         #[tokio::test]
         #fn_vis async fn #fn_name() {
-            let __addr = std::env::var("PG_TEST_ADDR").unwrap_or_else(|_| "127.0.0.1:54322".into());
-            let __user = std::env::var("PG_TEST_USER").unwrap_or_else(|_| "postgres".into());
-            let __pass = std::env::var("PG_TEST_PASS").unwrap_or_else(|_| "postgres".into());
+            // Read RESOLUTE_TEST_{ADDR,USER,PASSWORD} via the test-db helper
+            // so the macro matches `TestDb::create` and the documented env
+            // var names. Defaults: 127.0.0.1:54322 / postgres / postgres.
+            let __addr = resolute::test_db::test_addr().to_string();
+            let __user = resolute::test_db::test_user().to_string();
+            let __pass = resolute::test_db::test_password().to_string();
 
             #create_db
 
