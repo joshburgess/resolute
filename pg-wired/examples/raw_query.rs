@@ -48,7 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 2. Simple unparameterized query. exec_query returns RawRow values whose
     // cells are raw bytes in the format requested (text by default). Decoding
     // is the caller's responsibility at this layer.
-    let rows = conn.exec_query("SELECT 1 AS n, 'hello' AS s", &[], &[]).await?;
+    let rows = conn
+        .exec_query("SELECT 1 AS n, 'hello' AS s", &[], &[])
+        .await?;
     let n = std::str::from_utf8(rows[0].cell(0).unwrap())?;
     let s = std::str::from_utf8(rows[0].cell(1).unwrap())?;
     println!("simple query: n = {n}, s = {s}");

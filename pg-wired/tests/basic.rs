@@ -7,7 +7,9 @@ mod test_env;
 use test_env::{addr, db, pass, user};
 
 async fn connect() -> PgPipeline {
-    let conn = WireConn::connect(addr(), user(), pass(), db()).await.unwrap();
+    let conn = WireConn::connect(addr(), user(), pass(), db())
+        .await
+        .unwrap();
     PgPipeline::new(conn)
 }
 

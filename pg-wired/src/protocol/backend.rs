@@ -166,7 +166,10 @@ fn parse_data_row(body: Bytes) -> Result<Option<BackendMsg>, String> {
         return Err("DataRow: body too short for column count".into());
     }
     let body_slice = body.as_ref();
-    let num_cols = i16_to_usize(i16::from_be_bytes([body_slice[0], body_slice[1]]), "DataRow")?;
+    let num_cols = i16_to_usize(
+        i16::from_be_bytes([body_slice[0], body_slice[1]]),
+        "DataRow",
+    )?;
     let mut offset = 2usize;
 
     if num_cols <= CELL_INLINE_CAP {
@@ -617,10 +620,10 @@ mod tests {
         body.extend_from_slice(&1i16.to_be_bytes());
         body.extend_from_slice(&i32::MAX.to_be_bytes()); // claims 2GB-1
         body.extend_from_slice(b"x"); // body has 1 byte
-        // The outer parse_message rejects messages > MAX_MESSAGE_SIZE first,
-        // so this never reaches read_cell_entry. But if we feed the body
-        // directly via a hand-built buffer that bypasses that cap, the inner
-        // parser must still not panic. We test via the public path.
+                                      // The outer parse_message rejects messages > MAX_MESSAGE_SIZE first,
+                                      // so this never reaches read_cell_entry. But if we feed the body
+                                      // directly via a hand-built buffer that bypasses that cap, the inner
+                                      // parser must still not panic. We test via the public path.
         let mut buf = make_message(b'D', &body);
         // Either the message-size check rejects it, or the per-cell bounds
         // check rejects it. Both are acceptable; a panic is not.

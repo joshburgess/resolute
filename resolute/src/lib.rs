@@ -202,7 +202,6 @@ pub use query::{
 };
 pub use query_builder::{sql, QueryBuilder};
 pub use range::PgRange;
-pub use shared_pool::{SharedTypedClient, SharedTypedPool};
 /// Attribute macro for database-backed tests. Auto-creates a temp DB,
 /// runs migrations, injects a `Client`, and drops the DB on completion.
 pub use resolute_derive::test;
@@ -229,4 +228,5 @@ pub use resolute_macros::query_scalar;
 /// Skip compile-time checking (no DATABASE_URL or cache needed).
 pub use resolute_macros::query_unchecked;
 pub use row::{FromRow, Row};
+pub use shared_pool::{SharedTypedClient, SharedTypedPool};
 pub use types::TypeInfo;

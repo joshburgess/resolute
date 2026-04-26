@@ -7,7 +7,9 @@ mod test_env;
 use test_env::{addr, db, pass, user};
 
 async fn connect() -> AsyncConn {
-    let conn = WireConn::connect(addr(), user(), pass(), db()).await.unwrap();
+    let conn = WireConn::connect(addr(), user(), pass(), db())
+        .await
+        .unwrap();
     AsyncConn::new(conn)
 }
 
@@ -16,10 +18,7 @@ async fn test_async_simple_query() {
     let ac = connect().await;
     let rows = ac.exec_query("SELECT 1 AS n", &[], &[]).await.unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(
-        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
-        "1"
-    );
+    assert_eq!(std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(), "1");
 }
 
 #[tokio::test]
@@ -132,10 +131,7 @@ async fn test_async_error_recovery() {
     // Connection should still work after error.
     let rows = ac.exec_query("SELECT 1 AS n", &[], &[]).await.unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(
-        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
-        "1"
-    );
+    assert_eq!(std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(), "1");
 }
 
 #[tokio::test]
@@ -151,10 +147,7 @@ async fn test_async_multiple_errors_then_recovery() {
         .exec_query("SELECT 'ok' AS status", &[], &[])
         .await
         .unwrap();
-    assert_eq!(
-        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
-        "ok"
-    );
+    assert_eq!(std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(), "ok");
 }
 
 #[tokio::test]
@@ -174,10 +167,7 @@ async fn test_async_transaction_error_recovery() {
 
     // Connection should recover.
     let rows = ac.exec_query("SELECT 42 AS n", &[], &[]).await.unwrap();
-    assert_eq!(
-        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
-        "42"
-    );
+    assert_eq!(std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(), "42");
 }
 
 // ---------------------------------------------------------------------------
@@ -231,18 +221,9 @@ async fn test_async_multiple_columns() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(
-        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
-        "a"
-    );
-    assert_eq!(
-        std::str::from_utf8(rows[0].cell(1).unwrap()).unwrap(),
-        "b"
-    );
-    assert_eq!(
-        std::str::from_utf8(rows[0].cell(2).unwrap()).unwrap(),
-        "c"
-    );
+    assert_eq!(std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(), "a");
+    assert_eq!(std::str::from_utf8(rows[0].cell(1).unwrap()).unwrap(), "b");
+    assert_eq!(std::str::from_utf8(rows[0].cell(2).unwrap()).unwrap(), "c");
 }
 
 #[tokio::test]
@@ -258,10 +239,7 @@ async fn test_async_statement_cache_eviction() {
 
     // After eviction, re-execute earlier queries — should still work (re-parsed).
     let rows = ac.exec_query("SELECT 0 AS n", &[], &[]).await.unwrap();
-    assert_eq!(
-        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
-        "0"
-    );
+    assert_eq!(std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(), "0");
 }
 
 #[tokio::test]

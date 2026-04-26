@@ -2009,7 +2009,9 @@ async fn test_database_create_and_connect() {
     let db_name = "resolute_test_db_lifecycle";
 
     // Use a maintenance connection.
-    let maint = Client::connect(addr(), user(), pass(), "postgres").await.unwrap();
+    let maint = Client::connect(addr(), user(), pass(), "postgres")
+        .await
+        .unwrap();
 
     // Clean up from prior runs.
     let _ = maint
@@ -2023,7 +2025,9 @@ async fn test_database_create_and_connect() {
         .unwrap();
 
     // Verify we can connect and query.
-    let test_client = Client::connect(addr(), user(), pass(), db_name).await.unwrap();
+    let test_client = Client::connect(addr(), user(), pass(), db_name)
+        .await
+        .unwrap();
     let rows = test_client.query("SELECT 1::int4 AS n", &[]).await.unwrap();
     assert_eq!(rows[0].get::<i32>(0).unwrap(), 1);
     drop(test_client);
@@ -3699,9 +3703,7 @@ async fn test_copy_out_binary() {
         .await
         .unwrap();
     client
-        .simple_query(
-            "INSERT INTO test_copy_out_bin VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')",
-        )
+        .simple_query("INSERT INTO test_copy_out_bin VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')")
         .await
         .unwrap();
 
@@ -4525,7 +4527,9 @@ async fn test_atomic_rollback_on_error() {
 #[tokio::test]
 async fn test_pg_listener_listen_notify() {
     use resolute::PgListener;
-    let mut listener = PgListener::connect(addr(), user(), pass(), db()).await.unwrap();
+    let mut listener = PgListener::connect(addr(), user(), pass(), db())
+        .await
+        .unwrap();
     listener.listen("test_channel_1").await.unwrap();
 
     // Send a notification from a separate connection.
@@ -4548,7 +4552,9 @@ async fn test_pg_listener_listen_notify() {
 #[tokio::test]
 async fn test_pg_listener_unlisten() {
     use resolute::PgListener;
-    let mut listener = PgListener::connect(addr(), user(), pass(), db()).await.unwrap();
+    let mut listener = PgListener::connect(addr(), user(), pass(), db())
+        .await
+        .unwrap();
     listener.listen("test_channel_2").await.unwrap();
     assert_eq!(listener.channels().len(), 1);
     listener.unlisten("test_channel_2").await.unwrap();
@@ -4563,7 +4569,9 @@ async fn test_pg_listener_reconnects_and_re_listens() {
     // Unique channel so this test can't race with other listener tests.
     let channel = format!("test_reconnect_{}", std::process::id());
 
-    let mut listener = PgListener::connect(addr(), user(), pass(), db()).await.unwrap();
+    let mut listener = PgListener::connect(addr(), user(), pass(), db())
+        .await
+        .unwrap();
     listener.listen(&channel).await.unwrap();
     let original_pid = listener.backend_pid();
 

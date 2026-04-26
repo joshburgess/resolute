@@ -263,10 +263,7 @@ fn test_migrate_help() {
         stdout.contains("validate"),
         "migrate help should mention validate"
     );
-    assert!(
-        stdout.contains("info"),
-        "migrate help should mention info"
-    );
+    assert!(stdout.contains("info"), "migrate help should mention info");
 }
 
 // ---------------------------------------------------------------------------

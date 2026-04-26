@@ -53,7 +53,9 @@ async fn tls_connect_with_custom_ca_succeeds() {
     );
 
     let mut pg = PgPipeline::new(conn);
-    pg.simple_query("SELECT 1").await.expect("SELECT 1 over TLS");
+    pg.simple_query("SELECT 1")
+        .await
+        .expect("SELECT 1 over TLS");
 }
 
 #[tokio::test]

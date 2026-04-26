@@ -1214,10 +1214,7 @@ mod tests {
 
     #[test]
     fn rows_to_strings_maps_cells_and_preserves_nulls() {
-        let rows = vec![
-            mkrow(&[Some(b"a"), None]),
-            mkrow(&[None, Some(b"b")]),
-        ];
+        let rows = vec![mkrow(&[Some(b"a"), None]), mkrow(&[None, Some(b"b")])];
         let out = rows_to_strings(rows);
         assert_eq!(out[0][0].as_deref(), Some("a"));
         assert!(out[0][1].is_none());
@@ -1334,10 +1331,7 @@ mod tests {
 
     #[test]
     fn rows_to_buffers_preserves_cells_and_nulls() {
-        let rows = vec![
-            mkrow(&[Some(b"abc"), None]),
-            mkrow(&[None, Some(b"")]),
-        ];
+        let rows = vec![mkrow(&[Some(b"abc"), None]), mkrow(&[None, Some(b"")])];
         let out = rows_to_buffers(rows);
         assert_eq!(out.len(), 2);
         assert_eq!(out[0][0].as_ref().unwrap().as_ref(), b"abc");

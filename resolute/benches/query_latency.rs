@@ -32,7 +32,9 @@ fn bench_select_1(c: &mut Criterion) {
     let rt = rt();
 
     // resolute
-    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
+    let pt_client = rt
+        .block_on(Client::connect(addr(), user(), pass(), db()))
+        .unwrap();
     group.bench_function("resolute", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -69,7 +71,9 @@ fn bench_select_param(c: &mut Criterion) {
     let mut group = c.benchmark_group("select_param_i32");
     let rt = rt();
 
-    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
+    let pt_client = rt
+        .block_on(Client::connect(addr(), user(), pass(), db()))
+        .unwrap();
     group.bench_function("resolute", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -109,7 +113,9 @@ fn bench_select_3col(c: &mut Criterion) {
     let mut group = c.benchmark_group("select_3col");
     let rt = rt();
 
-    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
+    let pt_client = rt
+        .block_on(Client::connect(addr(), user(), pass(), db()))
+        .unwrap();
     group.bench_function("resolute", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -158,7 +164,9 @@ fn bench_select_100_rows(c: &mut Criterion) {
     let mut group = c.benchmark_group("select_100_rows");
     let rt = rt();
 
-    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
+    let pt_client = rt
+        .block_on(Client::connect(addr(), user(), pass(), db()))
+        .unwrap();
     group.bench_function("resolute", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -197,7 +205,9 @@ fn bench_insert_delete(c: &mut Criterion) {
     let mut group = c.benchmark_group("insert_delete_cycle");
     let rt = rt();
 
-    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
+    let pt_client = rt
+        .block_on(Client::connect(addr(), user(), pass(), db()))
+        .unwrap();
     rt.block_on(
         pt_client
             .simple_query("CREATE TABLE IF NOT EXISTS bench_cycle (id int PRIMARY KEY, val text)"),
@@ -256,7 +266,9 @@ fn bench_cache_hit(c: &mut Criterion) {
     let mut group = c.benchmark_group("cache_hit");
     let rt = rt();
 
-    let pt_client = rt.block_on(Client::connect(addr(), user(), pass(), db())).unwrap();
+    let pt_client = rt
+        .block_on(Client::connect(addr(), user(), pass(), db()))
+        .unwrap();
     rt.block_on(pt_client.query("SELECT $1::int4 AS n", &[&1i32]))
         .unwrap();
 

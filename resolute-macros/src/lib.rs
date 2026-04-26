@@ -217,10 +217,8 @@ fn describe_live(sql: &str) -> Result<(Vec<u32>, Vec<cache::CachedColumn>), Stri
                             .and_then(|b| std::str::from_utf8(b).ok())
                             .and_then(|s| s.parse().ok())
                             .unwrap_or(0);
-                        let notnull: bool = row
-                            .cell(2)
-                            .map(|b| b == b"t".as_ref())
-                            .unwrap_or(false);
+                        let notnull: bool =
+                            row.cell(2).map(|b| b == b"t".as_ref()).unwrap_or(false);
 
                         // Find the matching column and mark it non-nullable.
                         for &(idx, t_oid, t_col) in &table_cols {

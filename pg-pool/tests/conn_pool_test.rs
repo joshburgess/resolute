@@ -1053,7 +1053,9 @@ async fn test_connection_invalid_after_pg_terminate() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Kill the PG backend from a separate connection.
-    let mut killer = WireConn::connect(addr(), user(), pass(), db()).await.unwrap();
+    let mut killer = WireConn::connect(addr(), user(), pass(), db())
+        .await
+        .unwrap();
     let _ = send_query_raw(&mut killer, &format!("SELECT pg_terminate_backend({pid})")).await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
