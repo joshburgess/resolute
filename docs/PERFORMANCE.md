@@ -28,7 +28,7 @@ The latency benches expect PostgreSQL listening on port 54322 (the default in th
 
 The encode benches are symmetric between resolute and sqlx for message handling but asymmetric for buffer reuse: resolute pre-allocates a `BytesMut::with_capacity(N)` and calls `buf.clear()` per iteration, reusing the capacity. sqlx allocates a fresh `PgArgumentBuffer::default()` per iteration. This asymmetry reflects the realistic production path on both sides:
 
-- resolute's writer task owns a single long-lived `BytesMut` (see `async_conn.rs:746`) and never allocates on hot calls.
+- resolute's writer task owns a single long-lived `BytesMut` (see `async_conn.rs:877`) and never allocates on hot calls.
 - sqlx's `PgArguments` is built per query and re-allocated each time.
 
 The latency benches use a single Tokio current-thread runtime, a single resolute `Client`, and a sqlx `PgPool` with `max_connections(1)`. The sqlx cache-hit bench warms the pool with one prior call before measuring, matching the state resolute reaches on its second call.
@@ -66,7 +66,7 @@ No intermediate `Vec<u8>`, no format-string machinery, no runtime type lookup. T
 
 ## Statement cache: what changes on hit vs miss
 
-The cache lives on `AsyncConn` ([`pg-wired/src/async_conn.rs:94`](../pg-wired/src/async_conn.rs)) as `std::sync::Mutex<HashMap<String, (String, u64)>>`, capped at 256 entries with pseudo-LRU eviction (by insertion order). Each cached entry maps a SQL string to a server-side prepared statement name.
+The cache lives on `AsyncConn` ([`pg-wired/src/async_conn.rs:91`](../pg-wired/src/async_conn.rs)) as `std::sync::Mutex<HashMap<String, (String, u64)>>`, capped at 256 entries with pseudo-LRU eviction (by insertion order). Each cached entry maps a SQL string to a server-side prepared statement name.
 
 **Cache miss** sends 4 frontend messages: `Parse`, `Bind`, `Execute`, `Sync`. The backend replies with `ParseComplete`, `BindComplete`, `DataRow*`, `CommandComplete`, `ReadyForQuery`. The server must parse, analyze, plan, and cache the statement before it can bind and execute.
 
@@ -76,11 +76,11 @@ For small queries the planner cost is a meaningful fraction of query latency. Fo
 
 ### Stale statement recovery
 
-`exec_query` ([`pg-wired/src/async_conn.rs:374`](../pg-wired/src/async_conn.rs)) catches SQLSTATE `26000` (invalid_sql_statement_name) and `0A000` (feature_not_supported), invalidates the cache entry, and retries once with `Parse` included. This handles the case where the server dropped the cached statement (typically via `DISCARD ALL` issued by pooling logic), without surfacing the transient error to the caller.
+`exec_query` ([`pg-wired/src/async_conn.rs:462`](../pg-wired/src/async_conn.rs)) catches SQLSTATE `26000` (invalid_sql_statement_name) and `0A000` (feature_not_supported), invalidates the cache entry, and retries once with `Parse` included. This handles the case where the server dropped the cached statement (typically via `DISCARD ALL` issued by pooling logic), without surfacing the transient error to the caller.
 
 ## TCP write coalescing
 
-The writer task in [`pg-wired/src/async_conn.rs:740`](../pg-wired/src/async_conn.rs) is designed to produce **one `write()` syscall per batch of concurrent submissions**:
+The writer task in [`pg-wired/src/async_conn.rs:871`](../pg-wired/src/async_conn.rs) is designed to produce **one `write()` syscall per batch of concurrent submissions**:
 
 ```rust
 loop {
@@ -119,7 +119,7 @@ The tradeoff is that a single stuck query (say, `pg_sleep(600)`) blocks the head
 
 ## Lock-free paths in the pool
 
-pg-pool uses atomics wherever a lock is not strictly necessary ([`pg-pool/src/pool.rs:221`](../pg-pool/src/pool.rs)):
+pg-pool uses atomics wherever a lock is not strictly necessary ([`pg-pool/src/pool.rs:286`](../pg-pool/src/pool.rs)):
 
 | Atomic | Purpose |
 |---|---|
@@ -138,7 +138,7 @@ Only two async mutexes are held: one around the idle `VecDeque<IdleConn>` and on
 
 ## Pool round-robin dispatch
 
-`AsyncPool::get` ([`pg-wired/src/async_pool.rs:96`](../pg-wired/src/async_pool.rs)) uses a single `counter.fetch_add(1, Relaxed) % len` to pick a connection slot:
+`AsyncPool::get_async` ([`pg-wired/src/async_pool.rs:127`](../pg-wired/src/async_pool.rs)) uses a single `counter.fetch_add(1, Relaxed) % len` to pick a connection slot:
 
 ```rust
 let idx = self.counter.fetch_add(1, Ordering::Relaxed) % self.slots.len();
@@ -152,14 +152,14 @@ Buffers are pre-sized based on measured working-set patterns:
 
 | Buffer | Size | File |
 |---|---|---|
-| Writer send buffer | 8 KiB (grows on demand) | `pg-wired/src/async_conn.rs:746` |
-| Reader receive buffer | 32 KiB | `pg-wired/src/async_conn.rs:831` |
-| WireConn raw receive | 32 KiB | `pg-wired/src/connection.rs:23` |
-| PgPipeline send buffer | 4 KiB | `pg-wired/src/pipeline.rs:28` |
-| Per-query encode buffer | 512 bytes | `pg-wired/src/async_conn.rs:634` |
+| Writer send buffer | 8 KiB (grows on demand) | `pg-wired/src/async_conn.rs:877` |
+| Reader receive buffer | 32 KiB | `pg-wired/src/async_conn.rs:964` |
+| WireConn raw receive | 32 KiB | `pg-wired/src/connection.rs:73` |
+| PgPipeline send buffer | 4 KiB | `pg-wired/src/pipeline.rs:44` |
+| Per-query encode buffer | 512 bytes | `pg-wired/src/async_conn.rs:765` |
 | Idle slot deque | pre-sized to `max_size` | `pg-pool/src/pool.rs` |
 
-`parse_data_row` ([`pg-wired/src/protocol/backend.rs`](../pg-wired/src/protocol/backend.rs)) is the hottest path on the decode side. Its comment ("the hot path, bounds checks are explicit for safety while keeping allocations minimal") accompanies a `Vec::with_capacity(num_cols)` that precludes column-by-column reallocations. The same pattern repeats in `parse_row_description` and `parse_parameter_description`.
+`parse_data_row` ([`pg-wired/src/protocol/backend.rs:164`](../pg-wired/src/protocol/backend.rs)) is the hottest path on the decode side. Up to `CELL_INLINE_CAP` columns it parses cell offsets into a stack array, avoiding any heap allocation; beyond that threshold it falls back to a `Vec::with_capacity(num_cols)` that precludes column-by-column reallocations. The same `with_capacity` pattern repeats in `parse_row_description` and `parse_parameter_description`.
 
 There is no custom global allocator. No `SmallVec`. No `#[global_allocator]` override. The discipline is entirely at the level of capacity hints and buffer reuse, which is portable across allocator choices.
 

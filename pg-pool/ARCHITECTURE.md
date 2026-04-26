@@ -7,7 +7,7 @@ pg-pool is a generic async connection pool. It does not know about PostgreSQL: a
 ```
 src/
   lib.rs         re-exports, feature gating
-  pool.rs        the entire pool engine (772 lines)
+  pool.rs        the entire pool engine (858 lines)
   wire.rs        WirePoolable: pools pg_wired::WireConn        (feature = "wire")
   async_wire.rs  AsyncPoolable: pools pg_wired::AsyncConn     (feature = "wire")
 ```
@@ -36,14 +36,14 @@ Three hooks, all async except `has_pending_data`:
 
 - `connect` is the factory. The pool calls it when a new connection is needed.
 - `has_pending_data` is a fast, synchronous health predicate. Returning `true` means the connection is in a bad state (unread bytes, dropped connection) and must be destroyed rather than reused.
-- `reset` is optional cleanup run on checkin. The default is a no-op. `AsyncPoolable` overrides it to send `DISCARD ALL` and clear the statement cache ([`src/async_wire.rs:37`](src/async_wire.rs)). A return of `false` signals reset failure and triggers destruction.
+- `reset` is optional cleanup run on checkin. The default is a no-op. `AsyncPoolable` overrides it ([`src/async_wire.rs:69`](src/async_wire.rs)) with a "state-mutated" fast path: if no operation since the last reset has touched session state, the round-trip is skipped; otherwise it sends `DISCARD ALL` and clears the per-connection statement cache. A return of `false` signals reset failure and triggers destruction.
 
 The trait is intentionally narrow: there is no `close` or `disconnect`. When the pool decides to destroy a connection it simply drops the value and lets the connection's own `Drop` impl handle cleanup.
 
 ## Core data structures
 
 ```rust
-// src/pool.rs:216
+// src/pool.rs:281
 pub struct ConnPool<C: Poolable> {
     config: ConnPoolConfig,
     hooks: LifecycleHooks<C>,
@@ -73,17 +73,17 @@ The entire pool is always wrapped in `Arc<ConnPool<C>>`.
 
 ## Acquire path (checkout)
 
-`ConnPool::get` ([`src/pool.rs:279`](src/pool.rs)) walks four phases:
+`ConnPool::get` ([`src/pool.rs:354`](src/pool.rs)) walks four phases:
 
-1. **Drain check** (line 280). `draining.load(Acquire)` is read first. A draining pool rejects new checkouts with `PoolError::Draining`.
-2. **`before_acquire` hook** (line 284). Fires before any contention, giving users a place to hook tracing or admission control.
-3. **Fast path: an idle connection exists** (line 361, `try_get_idle`). Lock `idle`, `pop_front`. While popping, eagerly discard expired entries (`Instant::now() >= expires_at`) and optionally dirty entries (`has_pending_data()` when `test_on_checkout = true`). Each eviction fires `on_destroy`. First clean entry is returned.
-4. **Slow path: create or wait**. If `total_count < max_size`, call `create_and_track` (line 403) which does `fetch_add(1, Release)` then attempts `C::connect()`. If `connect` fails or another task raced past and the count ended up over `max_size`, the increment is rolled back. Otherwise `on_create` fires and the new connection is returned. If `total_count == max_size`, enqueue a waiter (step below).
+1. **Drain check** (line 355). `draining.load(Acquire)` is read first. A draining pool rejects new checkouts with `PoolError::Draining`.
+2. **`before_acquire` hook** (line 359). Fires before any contention, giving users a place to hook tracing or admission control.
+3. **Fast path: an idle connection exists** (`try_get_idle`, line 436). Lock `idle`, `pop_front`. While popping, eagerly discard expired entries (`Instant::now() >= expires_at`) and optionally dirty entries (`has_pending_data()` when `test_on_checkout = true`). Each eviction fires `on_destroy`. First clean entry is returned.
+4. **Slow path: create or wait**. If `total_count < max_size`, call `create_and_track` (line 479) which does `fetch_add(1, Release)` then attempts `C::connect()`. If `connect` fails or another task raced past and the count ended up over `max_size`, the increment is rolled back. Otherwise `on_create` fires and the new connection is returned. If `total_count == max_size`, enqueue a waiter (step below).
 
 ### Waiter enqueue
 
 ```rust
-// src/pool.rs:319
+// src/pool.rs:394
 let (tx, rx) = oneshot::channel();
 waiters.lock().await.push_back(Waiter { tx });
 waiter_count.fetch_add(1, Release);
@@ -104,7 +104,7 @@ The FIFO property falls out of `push_back` + `pop_front`. A timed-out waiter's `
 
 ## Release path (checkin)
 
-Triggered by `PoolGuard::drop` ([`src/pool.rs:418`](src/pool.rs)), which spawns `return_conn_async` (line 424):
+Triggered by `PoolGuard::drop` ([`src/pool.rs:735`](src/pool.rs)), which spawns `return_conn_async` ([`src/pool.rs:501`](src/pool.rs)):
 
 ```
 1. in_use_count.fetch_sub(1, Release)        // decremented FIRST
@@ -117,13 +117,13 @@ Triggered by `PoolGuard::drop` ([`src/pool.rs:418`](src/pool.rs)), which spawns 
 8. after_release hook
 ```
 
-The `in_use_count` is decremented **before** `reset()` runs. This is the fix for a counter-leak bug where a panicking `reset` would leave the count permanently incremented. The comment in source ([`src/pool.rs:428`](src/pool.rs)) spells it out: "decremented before reset() is called so the pool remains consistent."
+The `in_use_count` is decremented **before** `reset()` runs. This is the fix for a counter-leak bug where a panicking `reset` would leave the count permanently incremented. The comment in source ([`src/pool.rs:37-39`](src/pool.rs)) spells it out: "A panic in `reset()` will cause the spawned return task to abort, but `in_use_count` is decremented before `reset()` is called so the pool remains consistent."
 
 Waiter dispatch is resilient to dropped receivers. `tx.send(conn)` returns the connection back in `Err(conn)` if the other side is gone; the loop simply tries the next waiter. Only when no live waiter remains does the connection go back to the idle deque.
 
 ## Lifecycle hooks
 
-Six hooks, defined in [`LifecycleHooks<C>`](src/pool.rs#L149):
+Six hooks, defined in [`LifecycleHooks<C>`](src/pool.rs#L177):
 
 | Hook | Receives | When |
 |---|---|---|
@@ -136,13 +136,13 @@ Six hooks, defined in [`LifecycleHooks<C>`](src/pool.rs#L149):
 
 All hooks are `Box<dyn Fn(...) + Send + Sync>`: immutable `Fn`, not `FnMut`. Hooks that need mutable state must use interior mutability (`Arc<AtomicU64>`, `Arc<Mutex<_>>`).
 
-Hooks run with **no pool locks held**. In `drain()` this is enforced by explicitly draining the idle deque into a local `Vec` before calling `on_destroy` ([`src/pool.rs:565`](src/pool.rs)). In `return_conn_async`, `on_checkin` fires before `waiters.lock()` is taken; `after_release` and `on_destroy` fire after the lock is released. The doc comment on `ConnPool` ([`src/pool.rs:213`](src/pool.rs)) warns that a hook calling back into `get()` will deadlock, so hooks must not re-enter the pool.
+Hooks run with **no pool locks held**. In `drain()` this is enforced by clearing the idle deque under the lock, releasing it, then calling `on_destroy` once per evicted entry ([`src/pool.rs:651-658`](src/pool.rs)). In `return_conn_async`, `on_checkin` fires before `waiters.lock()` is taken; `after_release` and `on_destroy` fire after the lock is released. The doc comment on `ConnPool` ([`src/pool.rs:279`](src/pool.rs)) warns that a hook calling back into `get()` will deadlock, so hooks must not re-enter the pool.
 
 `after_release` is the cleanup hook that fires on every non-panic release path: returned-to-idle, returned-to-waiter, and destroyed. It is useful for always-fire telemetry without caring about outcome.
 
 ## Drain protocol
 
-`drain()` ([`src/pool.rs:560`](src/pool.rs)) is the shutdown path. Race-free shutdown is non-trivial because in-flight checkouts can return connections at any time.
+`drain()` ([`src/pool.rs:637`](src/pool.rs)) is the shutdown path. Race-free shutdown is non-trivial because in-flight checkouts can return connections at any time.
 
 ```
 1. draining.store(true, Release)
@@ -161,11 +161,11 @@ Hooks run with **no pool locks held**. In `drain()` this is enforced by explicit
 5. send on shutdown_tx to stop the maintenance task
 ```
 
-Step 4 is the coordination point. Each in-flight connection returning through `return_conn_async` sees `draining = true` and destroys itself (step 5 of the release path). After each destruction, `maybe_notify_drain` checks `total_count == 0` and calls `drain_complete.notify_one()` ([`src/pool.rs:501`](src/pool.rs)). The `drain()` loop wakes, re-checks, and either exits or waits again. Multiple concurrent returns are safe: `notify_one` is a wake token, extra notifications are idempotent.
+Step 4 is the coordination point. Each in-flight connection returning through `return_conn_async` sees `draining = true` and destroys itself (step 5 of the release path). After each destruction, `maybe_notify_drain` checks `total_count == 0` and calls `drain_complete.notify_one()` ([`src/pool.rs:578`](src/pool.rs)). The `drain()` loop wakes, re-checks, and either exits or waits again. Multiple concurrent returns are safe: `notify_one` is a wake token, extra notifications are idempotent.
 
 ## Maintenance task
 
-A single `tokio::spawn` started at pool construction ([`src/pool.rs:271`](src/pool.rs)) runs forever on a `tokio::time::interval` (default 10 s). Each tick:
+A single `tokio::spawn` started at pool construction ([`src/pool.rs:347`](src/pool.rs)) runs forever on a `tokio::time::interval` (default 10 s). Each tick:
 
 1. Check `draining`; exit if true (also exits on `shutdown_rx` signal).
 2. Lock `idle`, `retain(|entry| now < entry.expires_at)`. Expired entries are dropped; `total_count` and `total_destroyed` are updated with the evicted count in one atomic step each.
@@ -175,7 +175,7 @@ Eagerly evicting on checkout (in `try_get_idle`) means the maintenance task is n
 
 ## Min / max connections
 
-- `min_idle` connections are created synchronously during `ConnPool::new` ([`src/pool.rs:258`](src/pool.rs)). Failures log a warning (`tracing::warn`) but do not abort construction; the pool starts with fewer than requested.
+- `min_idle` connections are created synchronously during `ConnPool::new` ([`src/pool.rs:333`](src/pool.rs)). Failures log a warning (`tracing::warn`) but do not abort construction; the pool starts with fewer than requested.
 - `warm_up(target)` is an explicit post-construction bulk creator for callers that want predictable latency on the first few requests.
 - On demand, the checkout slow path creates a connection whenever `total_count < max_size`.
 - When `total_count == max_size`, callers wait in the queue until `checkout_timeout` expires.
@@ -185,7 +185,7 @@ The capacity gate uses optimistic `fetch_add` + rollback rather than a compare-a
 ## Metrics
 
 ```rust
-// src/pool.rs:183
+// src/pool.rs:228
 pub struct PoolMetrics {
     pub total: usize,
     pub idle: usize,
@@ -198,7 +198,7 @@ pub struct PoolMetrics {
 }
 ```
 
-Every field is read directly from an atomic without locking. `idle` is computed as `total.saturating_sub(in_use)` to tolerate the brief window where one counter has been updated but the other has not. The doc comment at [`src/pool.rs:513`](src/pool.rs) calls this out explicitly: metrics may be momentarily off by one under high concurrency, but are always consistent with a real program state that existed shortly before or after the snapshot.
+Every field is read directly from an atomic without locking. `idle` is computed as `total.saturating_sub(in_use)` to tolerate the brief window where one counter has been updated but the other has not. The doc comment at [`src/pool.rs:592`](src/pool.rs) calls this out explicitly: metrics may be momentarily off by one under high concurrency, but are always consistent with a real program state that existed shortly before or after the snapshot.
 
 ## Hook safety and the common footguns
 

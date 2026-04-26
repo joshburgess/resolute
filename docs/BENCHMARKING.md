@@ -79,9 +79,8 @@ but the HTML view is the right place to check for bimodal distributions
   CPU power management settings configured. Background load distorts results.
 - **A/B/A interleaving.** For tight comparisons (sub-5% deltas), run the
   baseline, the candidate, and the baseline again, then average across the
-  paired runs. The
-  [`Resolved A. Removed unsafe`](PRE_RELEASE_AUDIT.md) entry in the audit
-  shows this methodology applied to a parser change.
+  paired runs. This catches drift caused by an unrelated container restart or
+  thermal throttling between the two halves of an A/B run.
 
 ## Performance gates in PRs
 

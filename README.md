@@ -70,7 +70,7 @@ If that sounds like you, keep reading.
 
 **Binary format everywhere.** Parameters and results use PostgreSQL's binary wire format. No text parsing, no intermediate representations. Roughly 4-5x faster than sqlx on encode (most types), 2-3x faster on small-query latency, 2-2.5x faster on large-result decode, 2-2.5x faster under concurrent load with `TypedPool` (exclusive), and 3-8x faster with `SharedTypedPool` (multiplexed; the writer task fuses concurrent submissions into batched writes). The Performance section has the full breakdown.
 
-**Statement caching.** `Parse` once per connection, `Bind+Execute` on reuse. LRU cache with 256 entries per connection.
+**Statement caching.** `Parse` once per connection, `Bind+Execute` on reuse. Pseudo-LRU cache with 256 entries per connection.
 
 **Message coalescing.** The writer task batches concurrent requests into a single `write()` syscall. The reader task FIFO-matches responses. Multiple queries from different tasks share one TCP connection efficiently.
 

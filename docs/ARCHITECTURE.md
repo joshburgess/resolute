@@ -73,7 +73,7 @@ The handoff points are all narrow: typed values become bytes at `Encode`, bytes 
 A `TypedPool` is a thin wrapper over `pg-pool`'s `ConnPool<AsyncPoolable>`. The Poolable impl (`AsyncPoolable` in pg-pool, under `wire` feature) carries two PG-aware behaviours:
 
 - `has_pending_data` is `!conn.is_alive()`: a dead `AsyncConn` is destroyed rather than returned to idle.
-- `reset` sends `DISCARD ALL` on checkin and clears pg-wired's per-connection statement cache so the next checkout starts clean. This is what makes pool-shared connections safe across unrelated query workloads.
+- `reset` is conditional: a per-connection "state mutated" flag is set on non-idle `ReadyForQuery` transaction status (or by an explicit `mark_state_mutated()` call from code that issues `SET`, advisory locks, `LISTEN`, etc. via simple-query). On checkin, if the flag is clear (the common case for plain Bind/Execute/Sync workloads), the reset is a no-op round-trip. If the flag is set, `DISCARD ALL` is sent and pg-wired's per-connection statement cache is cleared so the next checkout starts clean.
 
 All six pg-pool lifecycle hooks (`before_acquire`, `on_create`, `on_checkout`, `on_checkin`, `after_release`, `on_destroy`) are available through `TypedPool::new` for users who need them.
 
@@ -94,7 +94,7 @@ does `BEGIN/COMMIT` when called with a `Client` and `SAVEPOINT/RELEASE` when cal
 Two different approaches to "keep working through connection failures":
 
 - **`ReconnectingClient`**: one logical connection that silently rebuilds the `AsyncConn` under ArcSwap when the underlying connection drops. Use it for long-lived single-threaded workloads (daemons, listeners, CLI tools).
-- **`TypedPool`**: N connections, dead ones replaced by a 5-second health monitor tick. Use it for application servers where many tasks contend.
+- **`TypedPool`**: N connections, dead ones replaced by a maintenance task that ticks every `maintenance_interval` (default 10s). Use it for application servers where many tasks contend.
 
 Both compose with `RetryPolicy` for business-level transient errors (serialization failures, deadlocks).
 

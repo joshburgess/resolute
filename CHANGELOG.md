@@ -7,7 +7,7 @@ releases.
 
 ## [Unreleased]
 
-## [0.1.0] - Initial public release
+## [0.1.0] - 2026-04-25
 
 First cut of the Resolute stack across six crates. The workspace aims to cover
 the full PostgreSQL client story for Rust without depending on

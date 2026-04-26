@@ -20,7 +20,7 @@ resolute validates SQL against a live database at compile time (or offline via c
 - **Offline builds**: `.resolute/` cache + `resolute-cli prepare` for CI/Docker
 - **Connection pooling**: `TypedPool` with typed checkout
 - **LISTEN/NOTIFY**: `PgListener` for real-time notifications
-- **Migrations**: Embedded runner + CLI (create, run, revert, status)
+- **Migrations**: Embedded runner + CLI (create, run, revert, status, info, validate, seed)
 - **Database lifecycle**: `resolute-cli database create/drop`
 - **Nullable detection**: Automatic `Option<T>` for nullable columns via `pg_attribute` introspection
 - **2-5x faster than sqlx**: Binary encode is 4-5x faster, query latency 2.3-2.5x faster (benchmarked)
@@ -556,10 +556,13 @@ let client = db.client().await?;
 // ... run tests ...
 db.drop_db().await?;
 
-// Or use the attribute macro:
+// Or use the attribute macro. The macro creates and drops the temp database
+// and binds `client: resolute::Client` in scope. Write the test body as if
+// `client` were a free variable; the macro injects it.
 #[resolute::test]
-async fn my_test(client: resolute::Client) {
-    // temp database created and dropped automatically
+async fn my_test() {
+    let row = resolute::query!("SELECT 1 AS n").fetch_one(&client).await.unwrap();
+    assert_eq!(row.n, Some(1));
 }
 ```
 

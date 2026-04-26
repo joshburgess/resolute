@@ -21,22 +21,23 @@ feature, but the core pool is protocol-agnostic.
 
 ## Minimal example
 
-```rust
-use pg_pool::{Pool, PoolConfig};
-use pg_wired::WireConn;
+```rust,no_run
+use pg_pool::{ConnPool, ConnPoolConfig, LifecycleHooks};
+use pg_pool::wire::WirePoolable;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let pool: Pool<WireConn> = Pool::builder(PoolConfig::default())
-        .with_constructor(|| async {
-            WireConn::connect("127.0.0.1:5432", "user", "pass", "mydb").await
-        })
-        .build()
-        .await?;
+    let mut config = ConnPoolConfig::default();
+    config.addr = "127.0.0.1:5432".into();
+    config.user = "postgres".into();
+    config.password = "postgres".into();
+    config.database = "mydb".into();
 
-    let conn = pool.acquire().await?;
-    // use `conn` like any `WireConn` ...
-    drop(conn); // returns to the pool
+    let pool = ConnPool::<WirePoolable>::new(config, LifecycleHooks::default()).await?;
+
+    let guard = pool.get().await?;
+    // use `guard.conn()` / `guard.conn_mut()` ...
+    drop(guard); // returns to the pool
     Ok(())
 }
 ```

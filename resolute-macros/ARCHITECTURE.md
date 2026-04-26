@@ -16,7 +16,7 @@ The entire proc-macro crate is about 1000 lines in two files. The design priorit
 
 ## The macro pipeline
 
-For `query!` (the most general case), `query_impl` ([`lib.rs:297`](src/lib.rs)) runs the following steps at compile time:
+For `query!` (the most general case), `query_impl` ([`lib.rs:341`](src/lib.rs)) runs the following steps at compile time:
 
 ```
 1. parse input       QueryInput::parse     (sql literal + params)
@@ -32,7 +32,7 @@ Each step is a standalone function, so adding a variant (like `query_file_as!`) 
 
 ## Input parsing
 
-`QueryInput::parse` ([`lib.rs:34`](src/lib.rs)) accepts:
+`QueryInput::parse` ([`lib.rs:35`](src/lib.rs)) accepts:
 
 ```
 query!("SELECT ...", arg1, arg2)                   // positional
@@ -45,7 +45,7 @@ For `query_as!` and `query_scalar!` the input shape varies slightly (leading tar
 
 ## Named parameter rewriter
 
-`rewrite_named_params` ([`lib.rs:833`](src/lib.rs)) is a hand-written character-by-character scanner. The same logic is duplicated verbatim in the runtime path ([`resolute/src/named_params.rs`](../resolute/src/named_params.rs)) so runtime `query_named` and compile-time `query!(:name, ...)` behave identically.
+`rewrite_named_params` ([`lib.rs:882`](src/lib.rs)) is a hand-written character-by-character scanner. The same logic is duplicated verbatim in the runtime path ([`resolute/src/named_params.rs`](../resolute/src/named_params.rs)) so runtime `query_named` and compile-time `query!(:name, ...)` behave identically.
 
 The scanner handles false-positive avoidance in priority order:
 
@@ -65,7 +65,7 @@ Named params are numbered by first occurrence. Duplicates (`:id` appearing twice
 
 ## SQL hashing
 
-`hash_sql` ([`lib.rs:818`](src/lib.rs)) computes FNV-1a over the rewritten SQL bytes. The hash is stable and fast, 64 bits, cross-platform identical. It is used as both the cache filename (`.resolute/query-{hash:016x}.json`) and the generated struct name (`__QueryResult_{hash}`).
+`hash_sql` ([`lib.rs:867`](src/lib.rs)) computes FNV-1a over the rewritten SQL bytes. The hash is stable and fast, 64 bits, cross-platform identical. It is used as both the cache filename (`.resolute/query-{hash:016x}.json`) and the generated struct name (`__QueryResult_{hash}`).
 
 FNV-1a was chosen over SipHash / AHash for stability: the cache files are portable across OSes and Rust versions. The cryptographic weakness of FNV is irrelevant because the input is trusted source SQL, not adversarial input.
 
@@ -81,7 +81,7 @@ FNV-1a was chosen over SipHash / AHash for stability: the cache files are portab
 One file per unique (post-rewrite) SQL. The filename hash matches the compile-time hash.
 
 ```json
-// CacheEntry schema (cache.rs:9)
+// CacheEntry schema (cache.rs:21)
 {
   "sql": "SELECT id, name FROM authors WHERE id = $1",
   "hash": 81985529216486895,
@@ -123,19 +123,19 @@ The runtime is scoped to this one describe call. Each `query!` invocation gets i
 
 ### Nullability inference
 
-By default, every column starts nullable: `nullable = true` at [`lib.rs:179`](src/lib.rs) with the comment "Default: assume nullable".
+By default, every column starts nullable: `nullable = true` at [`lib.rs:178`](src/lib.rs) with the comment "Default: assume nullable".
 
-After `describe_statement` returns `RowDescription`, resolute-macros issues a second simple-query to `pg_attribute`:
+After `describe_statement` returns `RowDescription`, resolute-macros formats one simple-query against `pg_attribute` with the `(attrelid, attnum)` pairs inlined, then sends it as a single `Query` message:
 
 ```sql
 SELECT attrelid, attnum, attnotnull
 FROM pg_attribute
-WHERE (attrelid = $1 AND attnum = $2)
-   OR (attrelid = $3 AND attnum = $4)
+WHERE (attrelid=12345 AND attnum=1)
+   OR (attrelid=12345 AND attnum=2)
    ...
 ```
 
-It batches all `(table_oid, column_id)` pairs from the `RowDescription` where `table_oid != 0 && column_id > 0`. Columns with `table_oid = 0` are computed projections (literals, expressions, function calls, CASE, coalesce with a non-table input, etc.): they fail the filter and stay `nullable = true`.
+It batches all `(table_oid, column_id)` pairs from the `RowDescription` where `table_oid != 0 && column_id > 0`. Columns with `table_oid = 0` are computed projections (literals, expressions, function calls, CASE, coalesce with a non-table input, etc.): they fail the filter and stay `nullable = true`. The OIDs come from the trusted `RowDescription` payload, not from user input, so direct interpolation is safe here; the runtime path that handles user-supplied parameters is parameterised separately.
 
 For pairs that do get queried, `attnotnull = true` flips the column to `nullable = false`. This is the correct conservative inference: the server cannot guarantee non-nullness for arbitrary expressions, only for literal column references.
 

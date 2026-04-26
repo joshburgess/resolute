@@ -2,9 +2,15 @@
 
 High-performance PostgreSQL driver for JavaScript runtimes, binding the [`pg-wired`](../pg-wired) Rust wire-protocol implementation via [napi-rs](https://napi.rs).
 
+> **Status:** unreleased. The crate is `publish = false` and no npm package
+> has been published yet. Build from source against this repo until the
+> first tagged release.
+
 ## Runtime support
 
-The published package ships one prebuilt native binding per platform triple. The same artifact loads in every modern JavaScript runtime with N-API:
+When published, the package will ship one prebuilt native binding per
+platform triple. The same artifact will load in every modern JavaScript
+runtime with N-API:
 
 | runtime | supported | notes |
 |---|---|---|
@@ -12,15 +18,15 @@ The published package ships one prebuilt native binding per platform triple. The
 | Bun >= 1.1      | yes | no flags needed |
 | Deno >= 2.1     | yes | run with `--allow-all --unstable-node-globals --unstable-detect-cjs` (or equivalent `deno.json` config) |
 
-There are no runtime-specific packages (no `pg-wired-node`, `pg-wired-bun`, `pg-wired-deno`). One install covers all three.
+There are no runtime-specific packages (no `pg-wired-node`, `pg-wired-bun`, `pg-wired-deno`). One install will cover all three.
 
-## Install
+## Build from source
 
 ```
-npm install pg-wired
-# or
-bun add pg-wired
-# or (deno) add to deno.json imports: "pg-wired": "npm:pg-wired"
+git clone https://github.com/joshburgess/resolute
+cd resolute/pg-wired-js
+npm install
+npm run build          # napi build + tsc; outputs the native module + lib/
 ```
 
 ## Quick start
