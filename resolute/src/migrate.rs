@@ -144,10 +144,17 @@ pub async fn run(
     migrations_dir: impl AsRef<Path>,
 ) -> Result<Vec<Migration>, TypedError> {
     let mut pg = connect(database_url).await?;
-    ensure_tracking_table(&mut pg).await?;
-
+    // Acquire the advisory lock before touching the tracking table. PostgreSQL's
+    // CREATE TABLE IF NOT EXISTS is not atomic against concurrent invocations:
+    // two racers can both reach the system catalog and one will fail with a
+    // duplicate-key error on pg_type_typname_nsp_index. The advisory lock
+    // serializes the entire run, including table bootstrap.
     acquire_advisory_lock(&mut pg).await?;
-    let result = run_inner(&mut pg, migrations_dir.as_ref()).await;
+    let result = async {
+        ensure_tracking_table(&mut pg).await?;
+        run_inner(&mut pg, migrations_dir.as_ref()).await
+    }
+    .await;
     release_advisory_lock(&mut pg).await;
     result
 }
@@ -218,10 +225,12 @@ pub async fn revert(
     migrations_dir: impl AsRef<Path>,
 ) -> Result<Option<Migration>, TypedError> {
     let mut pg = connect(database_url).await?;
-    ensure_tracking_table(&mut pg).await?;
-
     acquire_advisory_lock(&mut pg).await?;
-    let result = revert_inner(&mut pg, migrations_dir.as_ref()).await;
+    let result = async {
+        ensure_tracking_table(&mut pg).await?;
+        revert_inner(&mut pg, migrations_dir.as_ref()).await
+    }
+    .await;
     release_advisory_lock(&mut pg).await;
     result
 }
