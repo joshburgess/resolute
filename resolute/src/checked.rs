@@ -5,7 +5,7 @@
 //! `.fetch_one()`, `.fetch_opt()`, or `.execute()` to run it.
 //!
 //! All terminator methods accept `&impl Executor`, so they work with
-//! `Client`, `Transaction`, and `PooledTypedClient`.
+//! `Client`, `Transaction`, and `PooledClient`.
 
 use crate::encode::SqlParam;
 use crate::error::TypedError;

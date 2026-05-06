@@ -7,6 +7,45 @@ releases.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-06
+
+### Changed (breaking)
+
+- Renamed `TypedPool` to `ExclusivePool`, `PooledTypedClient` to
+  `PooledClient`, and `SharedTypedClient` to `SharedClient`. The old
+  names were misleading: the type name has nothing to do with whether
+  queries are typed (every pool in this crate gives back typed rows). It
+  describes pool semantics. `ExclusivePool` checks a connection out for
+  one caller at a time. `SharedPool` (previously `SharedTypedPool`)
+  multiplexes many concurrent callers onto a small set of connections
+  driven by `pg-wired`'s writer/reader split. `TypedError` is unchanged.
+
+  Migration: `s/TypedPool/ExclusivePool/g`,
+  `s/PooledTypedClient/PooledClient/g`,
+  `s/SharedTypedClient/SharedClient/g`,
+  `s/SharedTypedPool/SharedPool/g`. The behavior of
+  `ExclusivePool` is identical to the previous `TypedPool`.
+
+### Added
+
+- `SharedPool::exec_transaction(setup_sql, query_sql, params, param_oids)`:
+  packages a setup statement (e.g. `BEGIN; SET LOCAL ROLE …`) and a
+  query into a single pipelined batch over one of the pool's
+  multiplexed connections, returning the query's `Vec<RawRow>`.
+- `SharedPool::exec_query(sql, params, param_oids)`: single-statement
+  variant on the same pipelined path.
+- `RawRow` is now re-exported at the crate root (`resolute::RawRow`)
+  for callers that consume `exec_transaction` / `exec_query` results.
+
+These two methods make `SharedPool` viable as the hot path for
+request-per-transaction servers (REST, GraphQL, RPC) where every
+request opens its own short transaction. Such workloads previously had
+to use `ExclusivePool`, which capped throughput at
+`pool_size / per-request-transaction-time`. `SharedPool` removes that
+ceiling: four connections sustain 20-24K rps in our REST benchmarks
+(see `postgrest-rust`'s PERFORMANCE.md), versus ~4K rps on
+`ExclusivePool` at the same pool size.
+
 ## [0.1.0] - 2026-04-25
 
 First cut of the Resolute stack across six crates. The workspace aims to cover
@@ -53,11 +92,11 @@ The typed query surface layered on `pg-wired` and `pg-pool`.
   handles `::` casts, quoted identifiers, string literals, comments, and
   dollar quoting.
 - `Executor` trait with `&self` receiver so `Client`, `Transaction`,
-  `PooledTypedClient`, and `PooledTransaction` all compose through the same
+  `PooledClient`, and `PooledTransaction` all compose through the same
   generic helpers.
 - Context-aware `atomic()` that expands to `BEGIN/COMMIT` on a `Client` and
   to `SAVEPOINT/RELEASE` inside a `Transaction`.
-- `PgListener` with auto-reconnect, `TypedPool` with lifecycle hooks,
+- `PgListener` with auto-reconnect, `ExclusivePool` with lifecycle hooks,
   streaming row iterators, query pipelining, and COPY helpers.
 - Derives: `FromRow` (with `rename`, `skip`, `default`, `json`, `try_from`,
   `flatten`), `PgEnum` (string- and integer-backed), `PgComposite`,
@@ -92,5 +131,6 @@ status / info / validate / seed), and `database` (create / drop).
   workspace is a napi-rs crate for the npm ecosystem and is not published
   to crates.io.
 
-[Unreleased]: https://github.com/joshburgess/resolute/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/joshburgess/resolute/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/joshburgess/resolute/releases/tag/v0.3.0
 [0.1.0]: https://github.com/joshburgess/resolute/releases/tag/v0.1.0

@@ -1,4 +1,4 @@
-//! Tests for TypedPool (pg-pool + resolute integration).
+//! Tests for ExclusivePool (pg-pool + resolute integration).
 //! Requires: docker compose up -d (PostgreSQL on port 54322)
 
 #![allow(dead_code)]
@@ -6,11 +6,11 @@
 use resolute::test_db::{
     test_addr as addr, test_database as db, test_password as pass, test_user as user,
 };
-use resolute::{Executor, TypedPool};
+use resolute::{Executor, ExclusivePool};
 
 #[tokio::test]
 async fn test_typed_pool_connect() {
-    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3)
+    let pool = ExclusivePool::connect(addr(), user(), pass(), db(), 3)
         .await
         .unwrap();
     let m = pool.metrics();
@@ -19,7 +19,7 @@ async fn test_typed_pool_connect() {
 
 #[tokio::test]
 async fn test_typed_pool_query() {
-    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3)
+    let pool = ExclusivePool::connect(addr(), user(), pass(), db(), 3)
         .await
         .unwrap();
     let client = pool.get().await.unwrap();
@@ -29,7 +29,7 @@ async fn test_typed_pool_query() {
 
 #[tokio::test]
 async fn test_typed_pool_parameterized() {
-    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3)
+    let pool = ExclusivePool::connect(addr(), user(), pass(), db(), 3)
         .await
         .unwrap();
     let client = pool.get().await.unwrap();
@@ -42,7 +42,7 @@ async fn test_typed_pool_parameterized() {
 
 #[tokio::test]
 async fn test_typed_pool_reuse() {
-    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3)
+    let pool = ExclusivePool::connect(addr(), user(), pass(), db(), 3)
         .await
         .unwrap();
 
@@ -69,7 +69,7 @@ async fn test_typed_pool_from_row() {
         name: String,
     }
 
-    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3)
+    let pool = ExclusivePool::connect(addr(), user(), pass(), db(), 3)
         .await
         .unwrap();
     let client = pool.get().await.unwrap();
@@ -88,7 +88,7 @@ async fn test_typed_pool_from_row() {
 
 #[tokio::test]
 async fn test_typed_pool_drain() {
-    let pool = TypedPool::connect(addr(), user(), pass(), db(), 2)
+    let pool = ExclusivePool::connect(addr(), user(), pass(), db(), 2)
         .await
         .unwrap();
     pool.drain().await;
@@ -97,7 +97,7 @@ async fn test_typed_pool_drain() {
 
 #[tokio::test]
 async fn test_typed_pool_query_named() {
-    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3)
+    let pool = ExclusivePool::connect(addr(), user(), pass(), db(), 3)
         .await
         .unwrap();
     let client = pool.get().await.unwrap();
@@ -117,7 +117,7 @@ async fn test_typed_pool_query_named() {
 
 #[tokio::test]
 async fn test_typed_pool_execute_named() {
-    let pool = TypedPool::connect(addr(), user(), pass(), db(), 3)
+    let pool = ExclusivePool::connect(addr(), user(), pass(), db(), 3)
         .await
         .unwrap();
     let client = pool.get().await.unwrap();
@@ -146,7 +146,7 @@ async fn test_typed_pool_execute_named() {
 /// connection returns to idle and is reusable by the next caller.
 #[tokio::test]
 async fn test_pool_not_poisoned_by_aborted_tx_drop() {
-    let pool = TypedPool::connect(addr(), user(), pass(), db(), 1)
+    let pool = ExclusivePool::connect(addr(), user(), pass(), db(), 1)
         .await
         .unwrap();
 
@@ -174,7 +174,7 @@ async fn test_pool_not_poisoned_by_aborted_tx_drop() {
 /// did *not* have to provision a replacement connection.
 #[tokio::test]
 async fn test_pool_reuses_conn_after_aborted_tx_drop() {
-    let pool = TypedPool::connect(addr(), user(), pass(), db(), 1)
+    let pool = ExclusivePool::connect(addr(), user(), pass(), db(), 1)
         .await
         .unwrap();
 
@@ -264,7 +264,7 @@ async fn test_client_recovers_after_tx_dropped_aborted() {
 
 #[tokio::test]
 async fn test_typed_pool_connection_survives_return() {
-    let pool = TypedPool::connect(addr(), user(), pass(), db(), 1)
+    let pool = ExclusivePool::connect(addr(), user(), pass(), db(), 1)
         .await
         .unwrap();
 

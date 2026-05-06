@@ -9,7 +9,7 @@ This document is for people modifying resolute. Read the [`README`](README.md) f
 ```
 src/
   lib.rs             public surface, re-exports
-  executor.rs        the Executor trait, impls for Client, Transaction, PooledTypedClient
+  executor.rs        the Executor trait, impls for Client, Transaction, PooledClient
   query.rs           Client, Transaction, Pipeline, RowStream (pg-wired bridge)
   row.rs             Row struct, FromRow trait
   encode.rs          Encode trait, SqlParam object-safe wrapper, primitive + array impls
@@ -19,7 +19,7 @@ src/
   oid.rs             TypeOid enum (repr u32) with round-trip helpers
   pg_type.rs         PgType trait (const OID and ARRAY_OID), scalar + Vec impls
   named_params.rs    :name -> $N rewriter (runtime path)
-  pooled.rs          TypedPool, PooledTypedClient
+  pooled.rs          ExclusivePool, PooledClient
   reconnect.rs       ReconnectingClient (ArcSwap + Mutex)
   retry.rs           RetryPolicy with exponential backoff
   listener.rs        PgListener (dedicated connection)
@@ -61,7 +61,7 @@ Three contrasts with sqlx's `Executor` worth knowing:
 2. **`&self` instead of consuming `self`.** Because `AsyncConn` internally serialises concurrent submissions through its mpsc channel, there is no Rust-level invariant that requires exclusive access. Callers share one `&Client` across many concurrent queries, and generic functions can call multiple methods on the same `&impl Executor` without re-threading ownership through every call.
 3. **RPIT over boxing.** Every method returns `impl Future` (with `#[allow(clippy::manual_async_fn)]`). No async-trait box allocation on every call.
 
-Implementors: `Client`, `Transaction<'_>`, `PooledTypedClient`, `ReconnectingClient`, `PooledTransaction<'_>` ([`src/executor.rs:225-498`](src/executor.rs)). All five expose the same surface, so a function written against `&impl Executor` works against any of them, including the reconnect-on-error wrapper.
+Implementors: `Client`, `Transaction<'_>`, `PooledClient`, `ReconnectingClient`, `PooledTransaction<'_>` ([`src/executor.rs:225-498`](src/executor.rs)). All five expose the same surface, so a function written against `&impl Executor` works against any of them, including the reconnect-on-error wrapper.
 
 ## Client: the pg-wired bridge
 
@@ -81,7 +81,7 @@ The bridge is thin because pg-wired already does the hard work (statement cache,
 
 - **`Client::atomic`** ([`src/executor.rs:257`](src/executor.rs)): issues `BEGIN`, runs the closure, then `COMMIT` on `Ok` or `ROLLBACK` on `Err`.
 - **`Transaction::atomic`** ([`src/executor.rs:314`](src/executor.rs)): allocates a savepoint name from `SAVEPOINT_COUNTER: AtomicU64` (line 34) and issues `SAVEPOINT resolute_sp_{id}`, then `RELEASE SAVEPOINT` / `ROLLBACK TO SAVEPOINT`.
-- **`PooledTypedClient::atomic`** ([`src/executor.rs:379`](src/executor.rs)): same as `Client` since a pooled checkout is not already inside a transaction.
+- **`PooledClient::atomic`** ([`src/executor.rs:379`](src/executor.rs)): same as `Client` since a pooled checkout is not already inside a transaction.
 
 Because each impl picks the right SQL, a generic function written against `&impl Executor` and calling `db.atomic(...)` does the right thing without ever inspecting the concrete type. This is how resolute gives you "auto-BEGIN on Client, auto-SAVEPOINT on Transaction" composability: a helper function written once works at both levels of nesting, without either knowing whether it is the outermost or an inner caller.
 
@@ -163,13 +163,13 @@ const ARRAY_OID: u32 = if CUSTOM_ARRAY_OID != 0 {
 
 This is a const expression evaluated at compile time. `Email(String)` inherits `String::ARRAY_OID = 1009` (`_text`) with zero runtime overhead, so PostgreSQL knows how to handle `Email[]` columns and parameters correctly. Explicit `#[pg_type(array_oid = N)]` overrides the inheritance for non-standard cases.
 
-## TypedPool
+## ExclusivePool
 
-`TypedPool` ([`src/pooled.rs:32`](src/pooled.rs)) wraps `Arc<ConnPool<AsyncPoolable>>`. The default path (`TypedPool::connect`) registers no lifecycle hooks: `ConnPool::new(config, LifecycleHooks::default())`. `AsyncPoolable::reset` (in pg-pool, [`async_wire.rs:37`](../pg-pool/src/async_wire.rs)) already does `DISCARD ALL` and clears the pg-wired statement cache, so the most important cleanup is wired in at the pg-pool layer, not at TypedPool.
+`ExclusivePool` ([`src/pooled.rs:32`](src/pooled.rs)) wraps `Arc<ConnPool<AsyncPoolable>>`. The default path (`ExclusivePool::connect`) registers no lifecycle hooks: `ConnPool::new(config, LifecycleHooks::default())`. `AsyncPoolable::reset` (in pg-pool, [`async_wire.rs:37`](../pg-pool/src/async_wire.rs)) already does `DISCARD ALL` and clears the pg-wired statement cache, so the most important cleanup is wired in at the pg-pool layer, not at ExclusivePool.
 
-To attach custom hooks (tracing on checkout, metrics on create), use `TypedPool::new(config, hooks)` and pass a `LifecycleHooks<AsyncPoolable>`.
+To attach custom hooks (tracing on checkout, metrics on create), use `ExclusivePool::new(config, hooks)` and pass a `LifecycleHooks<AsyncPoolable>`.
 
-`PooledTypedClient` holds a `PoolGuard<AsyncPoolable>` (pg-pool's checkout token). Its query methods call `Client::query_on_conn` / `execute_on_conn` ([`src/query.rs:263`](src/query.rs)), which are `pub(crate)` helpers that accept a `&AsyncConn` directly. This avoids double-wrapping: a `Client` newtype around the `PoolGuard` would have to reach through twice on every call.
+`PooledClient` holds a `PoolGuard<AsyncPoolable>` (pg-pool's checkout token). Its query methods call `Client::query_on_conn` / `execute_on_conn` ([`src/query.rs:263`](src/query.rs)), which are `pub(crate)` helpers that accept a `&AsyncConn` directly. This avoids double-wrapping: a `Client` newtype around the `PoolGuard` would have to reach through twice on every call.
 
 ## PgListener
 
@@ -198,7 +198,7 @@ The `AsyncConn`-based notification path (forwarding to `notification_tx`) exists
 
 Everything else passes through without retry. Syntax errors, constraint violations, and permission denied are never retried.
 
-`RetryPolicy::execute` is generic over `&impl Executor`, so the same policy works against a `Client`, `Transaction`, or `TypedPool` checkout.
+`RetryPolicy::execute` is generic over `&impl Executor`, so the same policy works against a `Client`, `Transaction`, or `ExclusivePool` checkout.
 
 ## ReconnectingClient
 

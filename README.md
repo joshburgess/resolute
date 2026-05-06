@@ -15,7 +15,7 @@ A ground-up PostgreSQL client stack for Rust. Compile-time checked queries, bina
 | **pg-wired** | PostgreSQL wire protocol v3. Async connections, extended query protocol (Parse/Bind/Describe/Execute/Sync), binary format, statement caching, pipelining, LISTEN/NOTIFY, COPY, cancellation, optional TLS (rustls). |
 | **pg-pool** | Generic async connection pool. Checkout/checkin, 6 lifecycle hooks (`before_acquire`/`on_create`/`on_checkout`/`on_checkin`/`after_release`/`on_destroy`, connection-aware where applicable), idle timeout, health monitoring, metrics, min/max connections, drain. Works with any connection type via the `Poolable` trait. |
 | **pg-wired-js** | JavaScript bindings for `pg-wired` via napi-rs. Published to npm as `pg-wired`. One prebuilt native binding per platform, same artifact works in Node.js >= 22.6, Bun >= 1.1, and Deno >= 2.1. Full binary wire protocol, extended-protocol prepared statements, pipelining, connection pool, transactions with savepoints, `AbortSignal` cancellation, TLS, LISTEN/NOTIFY, streaming, COPY. |
-| **resolute** | Compile-time checked queries. 7 query macros with type overrides (`"col: Type"`), `Executor` trait, `atomic()` with savepoint nesting, named params, `FromRow` (with `skip`/`default`/`json`/`try_from`/`flatten`), `PgEnum` (string + integer-backed), `PgComposite`, `PgDomain` (with array OID inheritance), `TypedPool` with lifecycle hooks, `PgListener`, streaming, pipelining, COPY, retry, auto-reconnect, metrics. |
+| **resolute** | Compile-time checked queries. 7 query macros with type overrides (`"col: Type"`), `Executor` trait, `atomic()` with savepoint nesting, named params, `FromRow` (with `skip`/`default`/`json`/`try_from`/`flatten`), `PgEnum` (string + integer-backed), `PgComposite`, `PgDomain` (with array OID inheritance), `ExclusivePool` with lifecycle hooks, `PgListener`, streaming, pipelining, COPY, retry, auto-reconnect, metrics. |
 | **resolute-derive** | Proc-macro crate. `FromRow`, `PgEnum`, `PgComposite`, `PgDomain` derives and `#[resolute::test]` attribute macro. |
 | **resolute-macros** | Proc-macro crate. Compile-time query validation against a live database or offline cache. Named parameter rewriting. |
 | **resolute-cli** | CLI tool. Offline cache management (`prepare`, `check`), migrations (`create`, `run`, `revert`, `status`, `info`, `validate`, `seed`), database lifecycle (`create`, `drop`). |
@@ -48,7 +48,7 @@ Resolute is for you if:
 - You have used sqlx and like its workflow and general selling points: compile-time checked queries against a live database, offline cache for CI, derive-driven `FromRow`. You do not want to give any of that up.
 - You only target PostgreSQL. You are not looking for a cross-database abstraction and you do not want the lowest-common-denominator API that comes with one. You would rather have first-class support for PostgreSQL features (LISTEN/NOTIFY, advisory locks, COPY, composites, domains, ranges, integer-backed enums) than portability to MySQL or SQLite.
 - You want a more flexible, more convenient API than sqlx offers: named parameters that survive dollar-quoting and casts, an `Executor` trait that takes `&self` so generic helpers compose, an `atomic()` method that dispatches `BEGIN` or `SAVEPOINT` based on the receiver so transactional helpers nest without knowing the caller's context, and richer `FromRow` attributes. See "Why Resolute" below for the full list.
-- You care about performance on small, frequent queries. Resolute implements the wire protocol, pool, and typed surface from scratch rather than layering over tokio-postgres, and it uses the binary wire format throughout. Benchmarks against the same PostgreSQL instance show roughly 4 to 5 times faster parameter encoding and 2 to 3 times faster end-to-end latency on small queries. Under concurrent load the gap is 2 to 2.5 times with the exclusive `TypedPool` and 3 to 8 times with the multiplexed `SharedTypedPool`. On large result sets resolute is up to 2.5 times faster. On server-bound queries (heavy aggregations, scans) the two drivers are at parity. See the "Performance" section for the full picture.
+- You care about performance on small, frequent queries. Resolute implements the wire protocol, pool, and typed surface from scratch rather than layering over tokio-postgres, and it uses the binary wire format throughout. Benchmarks against the same PostgreSQL instance show roughly 4 to 5 times faster parameter encoding and 2 to 3 times faster end-to-end latency on small queries. Under concurrent load the gap is 2 to 2.5 times with the exclusive `ExclusivePool` and 3 to 8 times with the multiplexed `SharedPool`. On large result sets resolute is up to 2.5 times faster. On server-bound queries (heavy aggregations, scans) the two drivers are at parity. See the "Performance" section for the full picture.
 
 If that sounds like you, keep reading.
 
@@ -68,7 +68,7 @@ If that sounds like you, keep reading.
 
 **Query type overrides.** `query!(r#"SELECT id as "id: UserId" FROM users"#)` maps columns to custom Rust types in compile-time macros. Works with any type that implements `Decode`.
 
-**Binary format everywhere.** Parameters and results use PostgreSQL's binary wire format. No text parsing, no intermediate representations. Roughly 4-5x faster than sqlx on encode (most types), 2-3x faster on small-query latency, 2-2.5x faster on large-result decode, 2-2.5x faster under concurrent load with `TypedPool` (exclusive), and 3-8x faster with `SharedTypedPool` (multiplexed; the writer task fuses concurrent submissions into batched writes). The Performance section has the full breakdown.
+**Binary format everywhere.** Parameters and results use PostgreSQL's binary wire format. No text parsing, no intermediate representations. Roughly 4-5x faster than sqlx on encode (most types), 2-3x faster on small-query latency, 2-2.5x faster on large-result decode, 2-2.5x faster under concurrent load with `ExclusivePool` (exclusive), and 3-8x faster with `SharedPool` (multiplexed; the writer task fuses concurrent submissions into batched writes). The Performance section has the full breakdown.
 
 **Statement caching.** `Parse` once per connection, `Bind+Execute` on reuse. Pseudo-LRU cache with 256 entries per connection.
 
@@ -118,7 +118,7 @@ Benchmarked against sqlx 0.8 on the same queries, same PostgreSQL instance. Numb
 
 **Concurrent load and result-heavy queries:**
 
-Resolute ships two pool flavors: `TypedPool` (exclusive checkout, needed for transactions and other session-stateful work) and `SharedTypedPool` (multiplexed: many tasks share each connection's writer task, no semaphore, no waiter queue). The shared pool is the right choice for self-contained `SELECT` / DML workloads and produces the largest concurrency wins.
+Resolute ships two pool flavors: `ExclusivePool` (exclusive checkout, needed for transactions and other session-stateful work) and `SharedPool` (multiplexed: many tasks share each connection's writer task, no semaphore, no waiter queue). The shared pool is the right choice for self-contained `SELECT` / DML workloads and produces the largest concurrency wins.
 
 | Scenario | resolute (exclusive) | resolute (shared) | sqlx | excl/sqlx | shared/sqlx |
 |----------|----------------------|-------------------|------|-----------|-------------|
@@ -131,9 +131,9 @@ Resolute ships two pool flavors: `TypedPool` (exclusive checkout, needed for tra
 
 A few notes on what to take from this:
 
-- **Both pool flavors beat sqlx by 2x+ on concurrent workloads.** `TypedPool` (exclusive checkout) skips `DISCARD ALL` on return when the session was not actually mutated, so the bonus round-trip that sqlx pays per checkout disappears for plain `SELECT` / DML. `SharedTypedPool` adds writer-task multiplexing on top of that: many tasks submit concurrently to the same connection and the writer fuses their messages into one `write_all`. The single-connection coalescing test (8 tasks, 1 conn) shows this most clearly: 117 µs for 8 round-trips fused into one batch.
-- **Use `TypedPool` for session-stateful work.** Transactions, advisory locks, `SET LOCAL`, prepared-statement reuse keyed by name. The exclusive checkout is required for correctness; `DISCARD ALL` runs only when the connection actually mutated session state.
-- **Use `SharedTypedPool` for self-contained concurrent SELECT / DML.** No semaphore, no waiter queue, batched writes through the writer task.
+- **Both pool flavors beat sqlx by 2x+ on concurrent workloads.** `ExclusivePool` (exclusive checkout) skips `DISCARD ALL` on return when the session was not actually mutated, so the bonus round-trip that sqlx pays per checkout disappears for plain `SELECT` / DML. `SharedPool` adds writer-task multiplexing on top of that: many tasks submit concurrently to the same connection and the writer fuses their messages into one `write_all`. The single-connection coalescing test (8 tasks, 1 conn) shows this most clearly: 117 µs for 8 round-trips fused into one batch.
+- **Use `ExclusivePool` for session-stateful work.** Transactions, advisory locks, `SET LOCAL`, prepared-statement reuse keyed by name. The exclusive checkout is required for correctness; `DISCARD ALL` runs only when the connection actually mutated session state.
+- **Use `SharedPool` for self-contained concurrent SELECT / DML.** No semaphore, no waiter queue, batched writes through the writer task.
 - **Server-bound queries are at parity.** When Postgres is doing real work, driver overhead is noise.
 - **Large result decode and wide rows are resolute wins** (2.44x and 1.12x), driven by the binary wire format and zero-copy `Bytes`-backed cells.
 

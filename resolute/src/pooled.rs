@@ -15,13 +15,13 @@ use crate::row::Row;
 /// A pool of typed database connections.
 ///
 /// Connections are `AsyncConn` instances that persist across checkouts.
-/// Each checkout returns a `PooledTypedClient` that auto-returns the
+/// Each checkout returns a `PooledClient` that auto-returns the
 /// connection to the pool on drop.
 ///
 /// ```no_run
 /// # async fn example() -> Result<(), resolute::TypedError> {
-/// use resolute::TypedPool;
-/// let pool = TypedPool::connect("127.0.0.1:5432", "user", "pass", "mydb", 10).await?;
+/// use resolute::ExclusivePool;
+/// let pool = ExclusivePool::connect("127.0.0.1:5432", "user", "pass", "mydb", 10).await?;
 /// let client = pool.get().await?;
 /// let rows = client.query("SELECT 1::int4 AS n", &[]).await?;
 /// # let _ = rows;
@@ -29,11 +29,11 @@ use crate::row::Row;
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct TypedPool {
+pub struct ExclusivePool {
     pool: Arc<ConnPool<AsyncPoolable>>,
 }
 
-impl TypedPool {
+impl ExclusivePool {
     /// Create a new typed pool.
     ///
     /// # Errors
@@ -52,7 +52,7 @@ impl TypedPool {
     ///
     /// # Errors
     ///
-    /// Same cases as [`TypedPool::new`].
+    /// Same cases as [`ExclusivePool::new`].
     pub async fn connect(
         addr: &str,
         user: &str,
@@ -71,7 +71,7 @@ impl TypedPool {
 
     /// Check out a connection from the pool.
     ///
-    /// The returned `PooledTypedClient` implements `Deref<Target = AsyncConn>`
+    /// The returned `PooledClient` implements `Deref<Target = AsyncConn>`
     /// and can be used with all `Executor` trait methods. The connection is
     /// automatically returned to the pool when the client is dropped.
     ///
@@ -83,7 +83,7 @@ impl TypedPool {
     /// connection was needed but couldn't be established, or
     /// `PoolError::Draining` / `PoolError::Closed` if the pool is shutting
     /// down.
-    pub async fn get(&self) -> Result<PooledTypedClient, TypedError> {
+    pub async fn get(&self) -> Result<PooledClient, TypedError> {
         tracing::debug!("pool checkout");
         crate::metrics::record_pool_checkout();
         let guard = self.pool.get().await.map_err(|e| {
@@ -91,7 +91,7 @@ impl TypedPool {
             crate::metrics::record_pool_timeout();
             TypedError::from(e)
         })?;
-        Ok(PooledTypedClient { guard })
+        Ok(PooledClient { guard })
     }
 
     /// Pool metrics.
@@ -104,8 +104,8 @@ impl TypedPool {
     ///
     /// ```no_run
     /// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
-    /// # use resolute::TypedPool;
-    /// let pool = TypedPool::connect("127.0.0.1:5432", "user", "pass", "db", 10).await?;
+    /// # use resolute::ExclusivePool;
+    /// let pool = ExclusivePool::connect("127.0.0.1:5432", "user", "pass", "db", 10).await?;
     /// pool.warm_up(5).await;  // pre-create 5 connections
     /// # Ok(()) }
     /// ```
@@ -123,17 +123,17 @@ impl TypedPool {
 ///
 /// Queries go through the pooled `AsyncConn`. When this is dropped,
 /// the connection is returned to the pool for reuse.
-pub struct PooledTypedClient {
+pub struct PooledClient {
     guard: PoolGuard<AsyncPoolable>,
 }
 
-impl std::fmt::Debug for PooledTypedClient {
+impl std::fmt::Debug for PooledClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PooledTypedClient").finish_non_exhaustive()
+        f.debug_struct("PooledClient").finish_non_exhaustive()
     }
 }
 
-impl PooledTypedClient {
+impl PooledClient {
     /// Access the underlying `AsyncConn` for direct use.
     pub fn conn(&self) -> &pg_wired::AsyncConn {
         self.guard.conn()
@@ -262,7 +262,7 @@ impl PooledTypedClient {
     ///
     /// The returned `PooledTransaction` borrows from this client, so the
     /// connection is pinned to this checkout for the transaction's lifetime
-    /// and released back to the pool when this `PooledTypedClient` is dropped.
+    /// and released back to the pool when this `PooledClient` is dropped.
     ///
     /// # Errors
     ///
@@ -281,7 +281,7 @@ impl PooledTypedClient {
     ///
     /// # Errors
     ///
-    /// Same cases as [`PooledTypedClient::begin`].
+    /// Same cases as [`PooledClient::begin`].
     pub async fn begin_with(
         &self,
         level: crate::IsolationLevel,
@@ -297,7 +297,7 @@ impl PooledTypedClient {
 
 /// A transaction scoped to a pooled connection checkout.
 ///
-/// Mirrors [`crate::Transaction`] but borrows from a [`PooledTypedClient`],
+/// Mirrors [`crate::Transaction`] but borrows from a [`PooledClient`],
 /// so the pool guard is held for the transaction's lifetime.
 ///
 /// **Drop behavior:** if the transaction is dropped without an explicit
@@ -317,7 +317,7 @@ impl PooledTypedClient {
 /// explicitly on the error path. The drop path is best-effort and does not
 /// block on the rollback completing.
 pub struct PooledTransaction<'a> {
-    client: &'a PooledTypedClient,
+    client: &'a PooledClient,
     done: bool,
 }
 
@@ -330,8 +330,8 @@ impl<'a> std::fmt::Debug for PooledTransaction<'a> {
 }
 
 impl<'a> PooledTransaction<'a> {
-    /// Access the underlying [`PooledTypedClient`] this transaction is running on.
-    pub fn client(&self) -> &'a PooledTypedClient {
+    /// Access the underlying [`PooledClient`] this transaction is running on.
+    pub fn client(&self) -> &'a PooledClient {
         self.client
     }
 

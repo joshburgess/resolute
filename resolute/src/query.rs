@@ -259,7 +259,7 @@ impl Client {
         result.map_err(|e| e.with_sql(sql))
     }
 
-    /// Execute a query on an arbitrary AsyncConn (used by PooledTypedClient).
+    /// Execute a query on an arbitrary AsyncConn (used by PooledClient).
     pub(crate) async fn query_on_conn(
         conn: &AsyncConn,
         sql: &str,
@@ -268,7 +268,7 @@ impl Client {
         Self::query_inner_on(conn, sql, params).await
     }
 
-    /// Execute a statement on an arbitrary AsyncConn (used by PooledTypedClient).
+    /// Execute a statement on an arbitrary AsyncConn (used by PooledClient).
     pub(crate) async fn execute_on_conn(
         conn: &AsyncConn,
         sql: &str,

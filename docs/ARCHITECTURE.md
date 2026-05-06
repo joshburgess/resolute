@@ -30,7 +30,7 @@ pg-wired, pg-pool  ──►  tokio
 | Crate | Role |
 |---|---|
 | `resolute-cli` | Offline cache management (`prepare`, `check`), migrations, database lifecycle |
-| `resolute` | Typed query surface: `Executor` trait, `atomic()`, `Client`, `TypedPool`, `ReconnectingClient`, `RetryPolicy`, `PgListener`, `Encode`/`Decode`, `FromRow` |
+| `resolute` | Typed query surface: `Executor` trait, `atomic()`, `Client`, `ExclusivePool`, `ReconnectingClient`, `RetryPolicy`, `PgListener`, `Encode`/`Decode`, `FromRow` |
 | `resolute-macros` | Compile-time query validation (`query!` and variants), named-param rewriter, offline cache |
 | `resolute-derive` | Proc-macro derives: `FromRow`, `PgEnum`, `PgComposite`, `PgDomain` |
 | `pg-wired` | PostgreSQL wire protocol v3: async connection, statement cache, TCP coalescing, TLS, SCRAM |
@@ -41,7 +41,7 @@ A few invariants fall out of this layout:
 
 - **pg-wired does not know about typed values.** It encodes/decodes raw `Option<&[u8]>`, not `i32` or `String`. Binary vs text is a format-code flag on Bind. Caller owns interpretation.
 - **pg-pool does not know about PostgreSQL.** It takes any `Poolable` type. The PG-specific adapters (`WirePoolable`, `AsyncPoolable`) live in pg-pool behind a `wire` feature flag so non-PG users of pg-pool have no unwanted dependencies.
-- **resolute is the integration layer.** It owns the typed surface (`Encode`, `Decode`, `FromRow`, `Executor`), ties a pool to a `Client` ergonomically (`TypedPool`), and provides the reconnecting / retrying / listener toolbox.
+- **resolute is the integration layer.** It owns the typed surface (`Encode`, `Decode`, `FromRow`, `Executor`), ties a pool to a `Client` ergonomically (`ExclusivePool`), and provides the reconnecting / retrying / listener toolbox.
 - **resolute-macros is the compile-time layer.** It is a peer of resolute, not a layer above. It depends on pg-wired directly for the one describe call it makes at build time, and emits code that uses resolute's runtime types.
 
 ## Request life cycle
@@ -70,12 +70,12 @@ The handoff points are all narrow: typed values become bytes at `Encode`, bytes 
 
 ## Pool integration
 
-A `TypedPool` is a thin wrapper over `pg-pool`'s `ConnPool<AsyncPoolable>`. The Poolable impl (`AsyncPoolable` in pg-pool, under `wire` feature) carries two PG-aware behaviours:
+A `ExclusivePool` is a thin wrapper over `pg-pool`'s `ConnPool<AsyncPoolable>`. The Poolable impl (`AsyncPoolable` in pg-pool, under `wire` feature) carries two PG-aware behaviours:
 
 - `has_pending_data` is `!conn.is_alive()`: a dead `AsyncConn` is destroyed rather than returned to idle.
 - `reset` is conditional: a per-connection "state mutated" flag is set on non-idle `ReadyForQuery` transaction status (or by an explicit `mark_state_mutated()` call from code that issues `SET`, advisory locks, `LISTEN`, etc. via simple-query). On checkin, if the flag is clear (the common case for plain Bind/Execute/Sync workloads), the reset is a no-op round-trip. If the flag is set, `DISCARD ALL` is sent and pg-wired's per-connection statement cache is cleared so the next checkout starts clean.
 
-All six pg-pool lifecycle hooks (`before_acquire`, `on_create`, `on_checkout`, `on_checkin`, `after_release`, `on_destroy`) are available through `TypedPool::new` for users who need them.
+All six pg-pool lifecycle hooks (`before_acquire`, `on_create`, `on_checkout`, `on_checkin`, `after_release`, `on_destroy`) are available through `ExclusivePool::new` for users who need them.
 
 ## Transaction composition
 
@@ -94,7 +94,7 @@ does `BEGIN/COMMIT` when called with a `Client` and `SAVEPOINT/RELEASE` when cal
 Two different approaches to "keep working through connection failures":
 
 - **`ReconnectingClient`**: one logical connection that silently rebuilds the `AsyncConn` under ArcSwap when the underlying connection drops. Use it for long-lived single-threaded workloads (daemons, listeners, CLI tools).
-- **`TypedPool`**: N connections, dead ones replaced by a maintenance task that ticks every `maintenance_interval` (default 10s). Use it for application servers where many tasks contend.
+- **`ExclusivePool`**: N connections, dead ones replaced by a maintenance task that ticks every `maintenance_interval` (default 10s). Use it for application servers where many tasks contend.
 
 Both compose with `RetryPolicy` for business-level transient errors (serialization failures, deadlocks).
 

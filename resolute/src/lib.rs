@@ -57,7 +57,7 @@
 //! # async fn _demo() -> Result<(), TypedError> {
 //! # let client: Client = unimplemented!();
 //! # let txn: resolute::Transaction = unimplemented!();
-//! # let pooled: resolute::PooledTypedClient = unimplemented!();
+//! # let pooled: resolute::PooledClient = unimplemented!();
 //! create_user(&client, "Alice").await?;  // Client
 //! create_user(&txn, "Alice").await?;     // Transaction
 //! create_user(&pooled, "Alice").await?;  // Pool
@@ -195,8 +195,9 @@ pub use listener::{ListenerEvent, Notification, PgListener};
 pub use newtypes::{PgDate, PgInet, PgNumeric, PgTimestamp};
 pub use oid::TypeOid;
 pub use pg_type::PgType;
+pub use pg_wired::protocol::types::RawRow;
 pub use pg_wired::CancelToken;
-pub use pooled::{PooledTransaction, PooledTypedClient, TypedPool};
+pub use pooled::{ExclusivePool, PooledClient, PooledTransaction};
 pub use query::{
     parse_connection_string, Client, IsolationLevel, PipelineResult, RowStream, Transaction,
 };
@@ -228,5 +229,5 @@ pub use resolute_macros::query_scalar;
 /// Skip compile-time checking (no DATABASE_URL or cache needed).
 pub use resolute_macros::query_unchecked;
 pub use row::{FromRow, Row};
-pub use shared_pool::{SharedTypedClient, SharedTypedPool};
+pub use shared_pool::{SharedClient, SharedPool};
 pub use types::TypeInfo;

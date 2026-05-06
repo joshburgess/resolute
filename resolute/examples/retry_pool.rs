@@ -4,7 +4,7 @@
 //! Requires: docker compose up -d
 
 use resolute::retry::RetryPolicy;
-use resolute::TypedPool;
+use resolute::ExclusivePool;
 use std::time::Duration;
 
 const ADDR: &str = "127.0.0.1:54322";
@@ -12,7 +12,7 @@ const ADDR: &str = "127.0.0.1:54322";
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a connection pool.
-    let pool = TypedPool::connect(ADDR, "postgres", "postgres", "postgrest_test", 5).await?;
+    let pool = ExclusivePool::connect(ADDR, "postgres", "postgres", "postgrest_test", 5).await?;
     println!("Pool created with max_size=5");
 
     // Check out a client and query.

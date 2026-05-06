@@ -18,7 +18,7 @@ resolute validates SQL against a live database at compile time (or offline via c
 - **Generic arrays**: `Vec<T>` for all Encode/Decode types (bool, i16, i32, i64, f32, f64, String, UUID, chrono types, JSON, numeric, inet)
 - **Pool lifecycle hooks**: `before_acquire`, `on_create`, `on_checkout`, `on_checkin`, `after_release`, `on_destroy`
 - **Offline builds**: `.resolute/` cache + `resolute-cli prepare` for CI/Docker
-- **Connection pooling**: `TypedPool` with typed checkout
+- **Connection pooling**: `ExclusivePool` with typed checkout
 - **LISTEN/NOTIFY**: `PgListener` for real-time notifications
 - **Migrations**: Embedded runner + CLI (create, run, revert, status, info, validate, seed)
 - **Database lifecycle**: `resolute-cli database create/drop`
@@ -393,7 +393,7 @@ Supported: `Vec<bool>`, `Vec<i16>`, `Vec<i32>`, `Vec<i64>`, `Vec<f32>`, `Vec<f64
 ## Connection pool
 
 ```rust
-let pool = TypedPool::connect("127.0.0.1:5432", "user", "pass", "mydb", 10).await?;
+let pool = ExclusivePool::connect("127.0.0.1:5432", "user", "pass", "mydb", 10).await?;
 let client = pool.get().await?;
 let rows = client.query("SELECT 1::int4 AS n", &[]).await?;
 // Named params work through the pool too:
@@ -437,7 +437,7 @@ let hooks = LifecycleHooks {
     })),
 };
 
-let pool = TypedPool::new(config, hooks).await?;
+let pool = ExclusivePool::new(config, hooks).await?;
 ```
 
 | Hook | Parameter | When |
@@ -539,7 +539,7 @@ assert_eq!(ts, PgTimestamp::Infinity);
 ## Pool warm-up and metrics
 
 ```rust
-let pool = TypedPool::connect("127.0.0.1:5432", "user", "pass", "mydb", 10).await?;
+let pool = ExclusivePool::connect("127.0.0.1:5432", "user", "pass", "mydb", 10).await?;
 pool.warm_up(5).await;  // pre-create 5 connections
 
 // Application metrics (Prometheus format):

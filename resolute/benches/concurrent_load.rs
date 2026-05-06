@@ -20,7 +20,7 @@ use resolute::test_db::{
     test_addr as addr, test_database as db, test_database_url, test_password as pass,
     test_user as user,
 };
-use resolute::{SharedTypedPool, TypedPool};
+use resolute::{SharedPool, ExclusivePool};
 use sqlx::postgres::PgPoolOptions;
 
 fn sqlx_url() -> String {
@@ -59,7 +59,7 @@ fn bench_concurrent_select_4c_16t(c: &mut Criterion) {
     let rt = rt_mt();
 
     let pt_pool = Arc::new(
-        rt.block_on(TypedPool::connect(addr(), user(), pass(), db(), 4))
+        rt.block_on(ExclusivePool::connect(addr(), user(), pass(), db(), 4))
             .unwrap(),
     );
     rt.block_on(pt_pool.warm_up(4));
@@ -87,7 +87,7 @@ fn bench_concurrent_select_4c_16t(c: &mut Criterion) {
     // writer task on each conn coalesces submissions into batched writes.
     // No exclusive checkout, no waiter queue.
     let shared_pool = Arc::new(
-        rt.block_on(SharedTypedPool::connect(addr(), user(), pass(), db(), 4))
+        rt.block_on(SharedPool::connect(addr(), user(), pass(), db(), 4))
             .unwrap(),
     );
 
@@ -157,7 +157,7 @@ fn bench_coalesce_single_conn_8t(c: &mut Criterion) {
     let rt = rt_st();
 
     let pt_pool = Arc::new(
-        rt.block_on(TypedPool::connect(addr(), user(), pass(), db(), 1))
+        rt.block_on(ExclusivePool::connect(addr(), user(), pass(), db(), 1))
             .unwrap(),
     );
     rt.block_on(pt_pool.warm_up(1));
@@ -182,7 +182,7 @@ fn bench_coalesce_single_conn_8t(c: &mut Criterion) {
     });
 
     let shared_pool = Arc::new(
-        rt.block_on(SharedTypedPool::connect(addr(), user(), pass(), db(), 1))
+        rt.block_on(SharedPool::connect(addr(), user(), pass(), db(), 1))
             .unwrap(),
     );
 
@@ -249,7 +249,7 @@ fn bench_concurrent_select_8c_64t(c: &mut Criterion) {
     let rt = rt_mt();
 
     let pt_pool = Arc::new(
-        rt.block_on(TypedPool::connect(addr(), user(), pass(), db(), 8))
+        rt.block_on(ExclusivePool::connect(addr(), user(), pass(), db(), 8))
             .unwrap(),
     );
     rt.block_on(pt_pool.warm_up(8));
@@ -274,7 +274,7 @@ fn bench_concurrent_select_8c_64t(c: &mut Criterion) {
     });
 
     let shared_pool = Arc::new(
-        rt.block_on(SharedTypedPool::connect(addr(), user(), pass(), db(), 8))
+        rt.block_on(SharedPool::connect(addr(), user(), pass(), db(), 8))
             .unwrap(),
     );
 

@@ -3045,7 +3045,7 @@ async fn test_executor_trait_with_transaction() {
 
 #[tokio::test]
 async fn test_executor_trait_with_pool() {
-    let pool = resolute::TypedPool::connect(addr(), user(), pass(), db(), 3)
+    let pool = resolute::ExclusivePool::connect(addr(), user(), pass(), db(), 3)
         .await
         .unwrap();
     let pooled = pool.get().await.unwrap();
@@ -4075,7 +4075,7 @@ async fn test_stress_pool_concurrent() {
     // 50 concurrent tasks sharing a pool of 5 connections, each does 10 queries.
     // With the fixed pool (AsyncConn reuse), connections are returned and reused.
     let pool = std::sync::Arc::new(
-        resolute::TypedPool::connect(addr(), user(), pass(), db(), 5)
+        resolute::ExclusivePool::connect(addr(), user(), pass(), db(), 5)
             .await
             .unwrap(),
     );
@@ -4106,7 +4106,7 @@ async fn test_stress_pool_concurrent() {
 #[tokio::test]
 async fn test_stress_pool_mixed_operations() {
     let pool = std::sync::Arc::new(
-        resolute::TypedPool::connect(addr(), user(), pass(), db(), 5)
+        resolute::ExclusivePool::connect(addr(), user(), pass(), db(), 5)
             .await
             .unwrap(),
     );
@@ -4224,7 +4224,7 @@ fn test_pg_date_encode_decode_roundtrip() {
 
 #[tokio::test]
 async fn test_pool_warm_up() {
-    let pool = resolute::TypedPool::connect(addr(), user(), pass(), db(), 5)
+    let pool = resolute::ExclusivePool::connect(addr(), user(), pass(), db(), 5)
         .await
         .unwrap();
     pool.warm_up(3).await;
@@ -4242,7 +4242,7 @@ async fn test_pool_warm_up() {
 
 #[tokio::test]
 async fn test_pool_discard_all_clears_state() {
-    let pool = resolute::TypedPool::connect(addr(), user(), pass(), db(), 1)
+    let pool = resolute::ExclusivePool::connect(addr(), user(), pass(), db(), 1)
         .await
         .unwrap();
 

@@ -15,8 +15,8 @@
 //! # async fn _demo() -> Result<(), TypedError> {
 //! # let client: Client = unimplemented!();
 //! # let txn: resolute::Transaction = unimplemented!();
-//! # let pooled: resolute::PooledTypedClient = unimplemented!();
-//! // Works with Client, Transaction, or PooledTypedClient:
+//! # let pooled: resolute::PooledClient = unimplemented!();
+//! // Works with Client, Transaction, or PooledClient:
 //! get_user(&client, 1).await?;
 //! get_user(&txn, 1).await?;
 //! get_user(&pooled, 1).await?;
@@ -53,8 +53,8 @@ static SAVEPOINT_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// # async fn _demo() -> Result<(), TypedError> {
 /// # let client: Client = unimplemented!();
 /// # let txn: resolute::Transaction = unimplemented!();
-/// # let pooled: resolute::PooledTypedClient = unimplemented!();
-/// // Call with a Client, Transaction, or PooledTypedClient:
+/// # let pooled: resolute::PooledClient = unimplemented!();
+/// // Call with a Client, Transaction, or PooledClient:
 /// let _n = count_users(&client).await?;
 /// let _n = count_users(&txn).await?;
 /// let _n = count_users(&pooled).await?;
@@ -134,7 +134,7 @@ pub trait Executor: Send + Sync {
 
     /// Run a closure with guaranteed atomicity.
     ///
-    /// - **Client / PooledTypedClient**: wraps in `BEGIN` / `COMMIT` (or `ROLLBACK` on error).
+    /// - **Client / PooledClient**: wraps in `BEGIN` / `COMMIT` (or `ROLLBACK` on error).
     /// - **Transaction**: uses a `SAVEPOINT` (nested transaction), so calling `atomic`
     ///   inside an existing transaction is safe and composes correctly.
     ///
@@ -344,13 +344,13 @@ impl Executor for crate::query::Transaction<'_> {
 }
 
 #[allow(clippy::manual_async_fn)]
-impl Executor for crate::pooled::PooledTypedClient {
+impl Executor for crate::pooled::PooledClient {
     fn query<'a>(
         &'a self,
         sql: &'a str,
         params: &'a [&'a dyn SqlParam],
     ) -> impl Future<Output = Result<Vec<Row>, TypedError>> + Send + 'a {
-        crate::pooled::PooledTypedClient::query(self, sql, params)
+        crate::pooled::PooledClient::query(self, sql, params)
     }
 
     fn execute<'a>(
@@ -358,7 +358,7 @@ impl Executor for crate::pooled::PooledTypedClient {
         sql: &'a str,
         params: &'a [&'a dyn SqlParam],
     ) -> impl Future<Output = Result<u64, TypedError>> + Send + 'a {
-        crate::pooled::PooledTypedClient::execute(self, sql, params)
+        crate::pooled::PooledClient::execute(self, sql, params)
     }
 
     fn copy_in<'a>(
@@ -366,14 +366,14 @@ impl Executor for crate::pooled::PooledTypedClient {
         copy_sql: &'a str,
         data: &'a [u8],
     ) -> impl Future<Output = Result<u64, TypedError>> + Send + 'a {
-        crate::pooled::PooledTypedClient::copy_in(self, copy_sql, data)
+        crate::pooled::PooledClient::copy_in(self, copy_sql, data)
     }
 
     fn copy_out<'a>(
         &'a self,
         copy_sql: &'a str,
     ) -> impl Future<Output = Result<Vec<u8>, TypedError>> + Send + 'a {
-        crate::pooled::PooledTypedClient::copy_out(self, copy_sql)
+        crate::pooled::PooledClient::copy_out(self, copy_sql)
     }
 
     fn atomic<'a, T: Send + 'a>(

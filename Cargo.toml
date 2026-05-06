@@ -16,6 +16,6 @@ homepage = "https://github.com/joshburgess/resolute"
 [workspace.dependencies]
 pg-wired = { path = "pg-wired", version = "0.2.0" }
 pg-pool = { path = "pg-pool", version = "0.2.0" }
-resolute = { path = "resolute", version = "0.2.0", default-features = false }
+resolute = { path = "resolute", version = "0.3.0", default-features = false }
 resolute-derive = { path = "resolute-derive", version = "0.1.0" }
 resolute-macros = { path = "resolute-macros", version = "0.1.0" }
