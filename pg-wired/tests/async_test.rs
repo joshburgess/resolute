@@ -291,10 +291,7 @@ async fn test_async_enqueue_rollback_clears_aborted_tx() {
         .exec_query("SELECT 1::int4", &[], &[])
         .await
         .expect("session should be clean after queued ROLLBACK");
-    assert_eq!(
-        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
-        "1"
-    );
+    assert_eq!(std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(), "1");
     assert!(!ac.is_broken());
 }
 

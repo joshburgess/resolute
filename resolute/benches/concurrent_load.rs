@@ -20,7 +20,7 @@ use resolute::test_db::{
     test_addr as addr, test_database as db, test_database_url, test_password as pass,
     test_user as user,
 };
-use resolute::{SharedPool, ExclusivePool};
+use resolute::{ExclusivePool, SharedPool};
 use sqlx::postgres::PgPoolOptions;
 
 fn sqlx_url() -> String {

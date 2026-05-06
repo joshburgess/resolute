@@ -6,7 +6,7 @@
 use resolute::test_db::{
     test_addr as addr, test_database as db, test_password as pass, test_user as user,
 };
-use resolute::{Executor, ExclusivePool};
+use resolute::{ExclusivePool, Executor};
 
 #[tokio::test]
 async fn test_typed_pool_connect() {
@@ -155,7 +155,9 @@ async fn test_pool_not_poisoned_by_aborted_tx_drop() {
     {
         let client = pool.get().await.unwrap();
         let tx = client.begin().await.unwrap();
-        let err = tx.query("SELECT * FROM table_that_does_not_exist", &[]).await;
+        let err = tx
+            .query("SELECT * FROM table_that_does_not_exist", &[])
+            .await;
         assert!(err.is_err(), "expected the bogus query to fail");
         // tx dropped: ROLLBACK is queued on the writer.
     }
@@ -183,7 +185,9 @@ async fn test_pool_reuses_conn_after_aborted_tx_drop() {
     {
         let client = pool.get().await.unwrap();
         let tx = client.begin().await.unwrap();
-        let _ = tx.query("SELECT * FROM table_that_does_not_exist", &[]).await;
+        let _ = tx
+            .query("SELECT * FROM table_that_does_not_exist", &[])
+            .await;
     }
 
     let client = pool.get().await.unwrap();

@@ -116,7 +116,10 @@ async fn test_waiter_provisioned_after_broken_conn_destroyed() {
         "expected at least 2 connections created (original + replacement), got {}",
         m.total_created
     );
-    assert_eq!(m.total_destroyed, 1, "broken conn should have been destroyed");
+    assert_eq!(
+        m.total_destroyed, 1,
+        "broken conn should have been destroyed"
+    );
     assert_eq!(m.total_timeouts, 0);
 
     drop(g2);
