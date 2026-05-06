@@ -1,6 +1,6 @@
 [package]
 name = "pg-wired"
-version = "0.2.0"
+version = "0.3.0"
 description = "Minimal async PostgreSQL wire protocol v3 client: connection, extended query, pipelining, COPY, LISTEN/NOTIFY, TLS, SCRAM."
 edition.workspace = true
 rust-version.workspace = true

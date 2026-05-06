@@ -7,6 +7,8 @@ releases.
 
 ## [Unreleased]
 
+## [pg-wired 0.3.0, pg-pool 0.3.0, resolute-macros 0.2.0, resolute-cli 0.2.0, resolute 0.4.0] - 2026-05-06
+
 ### Fixed
 
 - `SharedPool` no longer races on the per-connection statement cache.
@@ -30,7 +32,11 @@ releases.
 - `pg_wired::AsyncConn::lookup_or_alloc` now takes a `param_oids: &[u32]`
   argument so it can pre-queue `Parse` with the correct parameter type
   hints. Callers must compute `param_oids` before calling. All callers
-  inside `resolute` and `pg-wired-js` have been updated.
+  inside `resolute` and `pg-wired-js` have been updated. This is the
+  reason the dependent crates (`pg-pool`, `resolute-macros`,
+  `resolute-cli`, `resolute`) bump their major version: their public
+  APIs are unchanged, but they transitively pin a major bump of
+  `pg-wired`.
 
 ## [0.3.0] - 2026-05-06
 
