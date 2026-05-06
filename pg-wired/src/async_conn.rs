@@ -349,10 +349,29 @@ impl AsyncConn {
     }
 
     /// Look up or allocate a statement name.
-    /// Uses an LRU-style eviction: when the cache is full, the oldest entry
-    /// (by insertion order / counter) is removed and a Close message is queued
-    /// to free the server-side prepared statement.
-    pub fn lookup_or_alloc(&self, sql: &str) -> (Vec<u8>, bool) {
+    ///
+    /// On a cache miss we MUST queue a `Parse` for the new name into the
+    /// writer FIFO **before** publishing the name in the shared cache, or
+    /// another concurrent caller could observe the cached name and submit
+    /// a Bind-only request that races ahead of our Parse. The server would
+    /// then reject the Bind with `26000: prepared statement "sN" does not
+    /// exist`.
+    ///
+    /// The fast path is unchanged: if `sql` is already in the cache,
+    /// return its name and `needs_parse=false`. On a miss we build a
+    /// `Parse + Sync` message and `try_send` it under the cache lock. If
+    /// the channel accepts it, we insert into the cache and return
+    /// `needs_parse=false` (the caller sends only `Bind/Execute`). If the
+    /// writer channel is full, we DO NOT insert: the freshly-allocated
+    /// name is unique (counter was already advanced) and is returned with
+    /// `needs_parse=true` so the caller includes its own `Parse` in the
+    /// same submit. No other lookup can race in because the entry was
+    /// never published.
+    ///
+    /// LRU eviction: when the cache is full, the oldest entry (by
+    /// insertion order / counter) is removed and a Close message is
+    /// queued to free the server-side prepared statement.
+    pub fn lookup_or_alloc(&self, sql: &str, param_oids: &[u32]) -> (Vec<u8>, bool) {
         let mut cache = match self.stmt_cache.lock() {
             Ok(c) => c,
             Err(poisoned) => poisoned.into_inner(),
@@ -392,8 +411,41 @@ impl AsyncConn {
             .stmt_counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let name = format!("s{n}");
-        cache.insert(sql.to_string(), (name.clone(), n));
-        (name.into_bytes(), true)
+
+        // Queue a Parse + Sync for the new name BEFORE publishing it in
+        // the cache. This guarantees that any concurrent caller who
+        // subsequently sees `name` in the cache will only submit
+        // Bind/Execute requests AFTER this Parse in the writer's FIFO.
+        let mut parse_buf = BytesMut::with_capacity(32 + sql.len());
+        frontend::encode_message(
+            &FrontendMsg::Parse {
+                name: name.as_bytes(),
+                sql: sql.as_bytes(),
+                param_oids,
+            },
+            &mut parse_buf,
+        );
+        frontend::encode_message(&FrontendMsg::Sync, &mut parse_buf);
+        let (parse_tx, _parse_rx) = oneshot::channel();
+        match self.request_tx.try_send(PipelineRequest {
+            messages: parse_buf,
+            collector: ResponseCollector::Drain,
+            response_tx: parse_tx,
+        }) {
+            Ok(()) => {
+                cache.insert(sql.to_string(), (name.clone(), n));
+                (name.into_bytes(), false)
+            }
+            Err(_) => {
+                // Writer channel full or closed. Don't publish the entry:
+                // the unique name is returned with `needs_parse=true` so
+                // the caller emits Parse atomically with Bind/Execute. No
+                // other lookup can pick up `name` because it was never
+                // inserted. Server-side leak per failed try_send is
+                // bounded by the channel-full rate, which is rare.
+                (name.into_bytes(), true)
+            }
+        }
     }
 
     /// Execute COPY FROM STDIN: sends the COPY command, then data in chunks, then CopyDone.
@@ -520,7 +572,7 @@ impl AsyncConn {
         params: &[Option<&[u8]>],
         param_oids: &[u32],
     ) -> Result<Vec<RawRow>, PgWireError> {
-        let (stmt_name, needs_parse) = self.lookup_or_alloc(query_sql);
+        let (stmt_name, needs_parse) = self.lookup_or_alloc(query_sql, param_oids);
         self.pipeline_transaction(
             setup_sql,
             query_sql,
@@ -541,7 +593,7 @@ impl AsyncConn {
         params: &[Option<&[u8]>],
         param_oids: &[u32],
     ) -> Result<Vec<RawRow>, PgWireError> {
-        let (stmt_name, needs_parse) = self.lookup_or_alloc(sql);
+        let (stmt_name, needs_parse) = self.lookup_or_alloc(sql, param_oids);
         match self
             .query(sql, params, param_oids, &stmt_name, needs_parse)
             .await
@@ -552,7 +604,7 @@ impl AsyncConn {
             {
                 tracing::debug!(sql = sql, "prepared statement invalidated — re-parsing");
                 self.invalidate_statement(sql);
-                let (stmt_name, _) = self.lookup_or_alloc(sql);
+                let (stmt_name, _) = self.lookup_or_alloc(sql, param_oids);
                 self.query(sql, params, param_oids, &stmt_name, true).await
             }
             Err(e) => Err(e),
@@ -904,7 +956,7 @@ impl AsyncConn {
         param_formats: &[FormatCode],
         result_formats: &[FormatCode],
     ) -> Result<Vec<RawRow>, PgWireError> {
-        let (stmt_name, needs_parse) = self.lookup_or_alloc(sql);
+        let (stmt_name, needs_parse) = self.lookup_or_alloc(sql, param_oids);
         match self
             .query_with_formats(
                 sql,
@@ -923,7 +975,7 @@ impl AsyncConn {
             {
                 tracing::debug!(sql = sql, "prepared statement invalidated — re-parsing");
                 self.invalidate_statement(sql);
-                let (stmt_name, _) = self.lookup_or_alloc(sql);
+                let (stmt_name, _) = self.lookup_or_alloc(sql, param_oids);
                 self.query_with_formats(
                     sql,
                     params,

@@ -301,8 +301,6 @@ impl Client {
         sql: &str,
         params: &[&dyn SqlParam],
     ) -> Result<Vec<Row>, TypedError> {
-        let (stmt_name, needs_parse) = conn.lookup_or_alloc(sql);
-
         let mut buf = BytesMut::with_capacity(512);
 
         // Encode parameters in binary format.
@@ -321,6 +319,10 @@ impl Client {
             .iter()
             .map(|v| v.as_ref().map(|b| b.as_ref()))
             .collect();
+
+        // Allocate (and pre-queue Parse) AFTER computing param_oids, so the
+        // pre-queued Parse advertises the correct parameter types.
+        let (stmt_name, needs_parse) = conn.lookup_or_alloc(sql, &param_oids);
 
         if needs_parse {
             frontend::encode_message(
@@ -455,7 +457,6 @@ impl Client {
         sql: &str,
         params: &[&dyn SqlParam],
     ) -> Result<u64, TypedError> {
-        let (stmt_name, needs_parse) = conn.lookup_or_alloc(sql);
         let mut buf = BytesMut::with_capacity(512);
 
         let param_formats: Vec<FormatCode> = vec![FormatCode::Binary; params.len()];
@@ -471,6 +472,8 @@ impl Client {
             .iter()
             .map(|v| v.as_ref().map(|b| b.as_ref()))
             .collect();
+
+        let (stmt_name, needs_parse) = conn.lookup_or_alloc(sql, &param_oids);
 
         if needs_parse {
             frontend::encode_message(
@@ -530,8 +533,6 @@ impl Client {
         sql: &str,
         params: &[&dyn SqlParam],
     ) -> Result<RowStream, TypedError> {
-        let (stmt_name, needs_parse) = self.conn.lookup_or_alloc(sql);
-
         let mut buf = BytesMut::with_capacity(512);
         let param_formats: Vec<FormatCode> = vec![FormatCode::Binary; params.len()];
         let result_formats = [FormatCode::Binary];
@@ -546,6 +547,8 @@ impl Client {
             .iter()
             .map(|v| v.as_ref().map(|b| b.as_ref()))
             .collect();
+
+        let (stmt_name, needs_parse) = self.conn.lookup_or_alloc(sql, &param_oids);
 
         if needs_parse {
             frontend::encode_message(
@@ -1072,7 +1075,6 @@ impl<'a> Pipeline<'a> {
     }
 
     fn encode_query(&mut self, sql: &str, params: &[&dyn SqlParam]) {
-        let (stmt_name, needs_parse) = self.client.conn.lookup_or_alloc(sql);
         let param_formats: Vec<FormatCode> = vec![FormatCode::Binary; params.len()];
         let result_formats = [FormatCode::Binary];
 
@@ -1086,6 +1088,8 @@ impl<'a> Pipeline<'a> {
             .iter()
             .map(|v| v.as_ref().map(|b| b.as_ref()))
             .collect();
+
+        let (stmt_name, needs_parse) = self.client.conn.lookup_or_alloc(sql, &param_oids);
 
         let mut buf = BytesMut::with_capacity(256);
         if needs_parse {

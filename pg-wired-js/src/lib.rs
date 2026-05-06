@@ -270,7 +270,7 @@ fn encode_query(
     params: &[Option<&[u8]>],
     param_oids: &[u32],
 ) -> BytesMut {
-    let (stmt_name, needs_parse) = conn.lookup_or_alloc(sql);
+    let (stmt_name, needs_parse) = conn.lookup_or_alloc(sql, param_oids);
     let mut buf = BytesMut::with_capacity(sql.len() + 128);
     let text_fmts: Vec<FormatCode> = vec![FormatCode::Text; params.len().max(1)];
     let result_fmts = [FormatCode::Text];
@@ -349,7 +349,7 @@ fn encode_query_with_formats(
     param_formats: &[FormatCode],
     result_formats: &[FormatCode],
 ) -> BytesMut {
-    let (stmt_name, needs_parse) = conn.lookup_or_alloc(sql);
+    let (stmt_name, needs_parse) = conn.lookup_or_alloc(sql, param_oids);
     let mut buf = BytesMut::with_capacity(sql.len() + 128);
 
     // Default to all-text if caller passes empty.
