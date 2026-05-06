@@ -298,11 +298,24 @@ impl PooledTypedClient {
 /// A transaction scoped to a pooled connection checkout.
 ///
 /// Mirrors [`crate::Transaction`] but borrows from a [`PooledTypedClient`],
-/// so the pool guard is held for the transaction's lifetime. See the
-/// `Transaction` docs for the drop-behavior contract: dropping without
-/// calling `commit()` or `rollback()` logs a warning and relies on
-/// PostgreSQL's next-statement auto-rollback rather than sending `ROLLBACK`
-/// from the destructor.
+/// so the pool guard is held for the transaction's lifetime.
+///
+/// **Drop behavior:** if the transaction is dropped without an explicit
+/// `commit()` or `rollback()` (e.g. a `?` propagated an error out of the
+/// block), the destructor enqueues a `ROLLBACK` on the connection's writer
+/// task via a non-blocking send. The writer processes requests in FIFO
+/// order, so the rollback runs before the pool's `DISCARD ALL` reset on
+/// return, restoring the session to idle and keeping the connection in
+/// the pool. No partial work is committed.
+///
+/// If queueing the rollback fails (writer queue full or task already gone),
+/// the connection is marked broken via [`pg_wired::AsyncConn::mark_broken`]
+/// and the pool destroys it on return rather than handing back a session
+/// in an open or aborted transaction. Either way, the next caller is safe.
+///
+/// For clarity and to surface rollback errors, prefer calling `rollback()`
+/// explicitly on the error path. The drop path is best-effort and does not
+/// block on the rollback completing.
 pub struct PooledTransaction<'a> {
     client: &'a PooledTypedClient,
     done: bool,
@@ -370,9 +383,24 @@ impl<'a> PooledTransaction<'a> {
 impl<'a> Drop for PooledTransaction<'a> {
     fn drop(&mut self) {
         if !self.done && self.client.is_alive() {
-            tracing::warn!(
-                "PooledTransaction dropped without commit — will auto-rollback on next use"
-            );
+            // Drop is sync, so we can't await a ROLLBACK round-trip. Instead,
+            // enqueue a simple-query `ROLLBACK` on the writer task's request
+            // channel via `try_send` (no runtime handle required). The writer
+            // task processes requests in FIFO order, so the rollback runs
+            // before any later request from the same connection — including
+            // the pool's `DISCARD ALL` reset — and the connection is restored
+            // to idle without being destroyed.
+            //
+            // If queueing fails (channel full or the writer task is gone),
+            // mark the connection broken so the pool discards it on return
+            // rather than handing back a session that's stuck in an open or
+            // aborted transaction.
+            if !self.client.conn().enqueue_rollback() {
+                self.client.conn().mark_broken();
+                tracing::warn!(
+                    "PooledTransaction dropped without commit/rollback; could not queue ROLLBACK, connection marked broken"
+                );
+            }
         }
     }
 }

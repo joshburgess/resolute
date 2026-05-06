@@ -109,6 +109,12 @@ pub struct AsyncConn {
     /// only run self-contained Bind/Execute/Sync queries leave this `false`,
     /// allowing pools to skip an expensive DISCARD ALL on return.
     state_mutated: Arc<std::sync::atomic::AtomicBool>,
+    /// True if a caller has declared the connection unusable (e.g., a
+    /// transaction was dropped without commit/rollback, leaving the session
+    /// in an unknown state). The reader/writer tasks may still be running, so
+    /// `is_alive()` is true, but pools should treat the connection as broken
+    /// and destroy it on return rather than reusing it.
+    broken: Arc<std::sync::atomic::AtomicBool>,
     /// Cumulative count of asynchronous notifications dropped because the
     /// notification channel was full or no application code was draining it.
     /// Surfaced via [`AsyncConn::dropped_notifications`] so callers can detect
@@ -169,6 +175,74 @@ impl AsyncConn {
         self.state_mutated
             .load(std::sync::atomic::Ordering::Acquire)
     }
+
+    /// Mark the connection as broken. The reader/writer tasks may still be
+    /// running, but the session is in an indeterminate state (for example,
+    /// a transaction was dropped without commit or rollback) and the
+    /// connection must not be reused. Pool integrations check
+    /// [`AsyncConn::is_broken`] on return and destroy the connection
+    /// instead of returning it to the idle set.
+    pub fn mark_broken(&self) {
+        self.broken
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// True if the connection has been declared broken by a caller via
+    /// [`AsyncConn::mark_broken`]. Independent of [`AsyncConn::is_alive`],
+    /// which only reflects whether the reader/writer tasks are still running.
+    pub fn is_broken(&self) -> bool {
+        self.broken.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Test-only helper that flips the `alive` flag to `false` without
+    /// actually exiting the writer task. Used by pg-wired's own tests and
+    /// by downstream crates' integration tests (e.g. resolute) to exercise
+    /// the dead-conn branch of [`AsyncConn::enqueue_rollback`] (and any
+    /// other code that gates on `is_alive`) without racing against the
+    /// real task-exit timing. Not part of the stable API: the `__` prefix
+    /// and `#[doc(hidden)]` mark this as off-limits for production use.
+    #[doc(hidden)]
+    pub fn __force_mark_dead_for_test(&self) {
+        self.alive
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Fire-and-forget enqueue of a `ROLLBACK` simple-query, intended to be
+    /// callable from a synchronous `Drop`. Returns `true` if the request was
+    /// queued on the writer task, `false` if the connection is not alive or
+    /// the channel was full/closed (in which case the caller should fall
+    /// back to [`AsyncConn::mark_broken`] so the connection is discarded
+    /// by the pool).
+    ///
+    /// PostgreSQL accepts `ROLLBACK` from any in-transaction state — including
+    /// the aborted state (`25P02`) that a failed query leaves behind — so this
+    /// reliably restores the session to idle. The response is drained and
+    /// discarded; ordering on the writer queue is preserved, so any
+    /// subsequent request (e.g., the pool's `DISCARD ALL` reset) sees a clean
+    /// connection.
+    pub fn enqueue_rollback(&self) -> bool {
+        if !self.is_alive() {
+            return false;
+        }
+        try_enqueue_rollback(&self.request_tx)
+    }
+}
+
+/// Inner helper for [`AsyncConn::enqueue_rollback`]: encodes a `ROLLBACK`
+/// simple-query and tries to push it onto the writer's request channel.
+/// Extracted so the channel-full and channel-closed branches can be unit
+/// tested without instantiating a real `AsyncConn`.
+fn try_enqueue_rollback(request_tx: &mpsc::Sender<PipelineRequest>) -> bool {
+    let mut buf = BytesMut::with_capacity(16);
+    frontend::encode_message(&FrontendMsg::Query(b"ROLLBACK"), &mut buf);
+    let (tx, _rx) = oneshot::channel();
+    request_tx
+        .try_send(PipelineRequest {
+            messages: buf,
+            collector: ResponseCollector::Drain,
+            response_tx: tx,
+        })
+        .is_ok()
 }
 
 struct PendingResponse {
@@ -195,6 +269,7 @@ impl AsyncConn {
         let pending_notify = Arc::new(tokio::sync::Notify::new());
         let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let state_mutated = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let broken = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let dropped_notifications = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
         let (stream_read, stream_write) = tokio::io::split(conn.into_stream());
@@ -245,6 +320,7 @@ impl AsyncConn {
             notification_tx,
             notification_rx: std::sync::Mutex::new(Some(notification_rx)),
             state_mutated,
+            broken,
             dropped_notifications,
         }
     }
@@ -1279,5 +1355,68 @@ fn parse_copy_count(tag: &str) -> u64 {
 impl WireConn {
     pub(crate) fn into_stream(self) -> crate::tls::MaybeTlsStream {
         self.stream
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Channel-full branch: when the request channel has no spare capacity,
+    /// `try_enqueue_rollback` returns `false` instead of blocking.
+    #[tokio::test]
+    async fn try_enqueue_rollback_returns_false_when_channel_full() {
+        let (tx, _rx) = mpsc::channel::<PipelineRequest>(2);
+        // Fill the channel by reusing the same helper. capacity=2 plus the
+        // single buffered slot tokio reserves means we may need to push
+        // until try_send fails; loop until we observe the false return.
+        let mut filled = false;
+        for _ in 0..16 {
+            if !try_enqueue_rollback(&tx) {
+                filled = true;
+                break;
+            }
+        }
+        assert!(
+            filled,
+            "expected try_enqueue_rollback to eventually return false on a full channel"
+        );
+        assert!(
+            !try_enqueue_rollback(&tx),
+            "subsequent calls on a full channel must keep returning false"
+        );
+    }
+
+    /// Channel-closed branch: dropping the receiver makes `try_send` fail
+    /// with `Closed`, which `try_enqueue_rollback` reports as `false`.
+    #[tokio::test]
+    async fn try_enqueue_rollback_returns_false_when_channel_closed() {
+        let (tx, rx) = mpsc::channel::<PipelineRequest>(8);
+        drop(rx);
+        assert!(
+            !try_enqueue_rollback(&tx),
+            "try_enqueue_rollback must return false when the receiver has been dropped"
+        );
+    }
+
+    /// Happy path: with a live receiver and free capacity, the helper
+    /// reports success and the receiver observes a queued request whose
+    /// payload starts with the simple-query opcode `'Q'`.
+    #[tokio::test]
+    async fn try_enqueue_rollback_returns_true_and_enqueues_query() {
+        let (tx, mut rx) = mpsc::channel::<PipelineRequest>(2);
+        assert!(try_enqueue_rollback(&tx));
+        let req = rx.recv().await.expect("request should be received");
+        assert_eq!(
+            req.messages.first().copied(),
+            Some(b'Q'),
+            "queued request should be a simple Query message"
+        );
+        // Body should mention ROLLBACK (text follows length prefix and is
+        // null-terminated; just substring-search to keep the test simple).
+        assert!(
+            req.messages.windows(8).any(|w| w == b"ROLLBACK"),
+            "queued request should contain the ROLLBACK statement text"
+        );
     }
 }

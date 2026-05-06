@@ -265,6 +265,70 @@ async fn test_async_sequential_transactions() {
     }
 }
 
+/// `enqueue_rollback` succeeds on a live connection. The queued ROLLBACK
+/// must execute before any subsequent request: if the connection is in an
+/// aborted-tx state (`25P02`) when `enqueue_rollback` is called, the next
+/// query should succeed because the writer task processes the ROLLBACK
+/// first (FIFO).
+#[tokio::test]
+async fn test_async_enqueue_rollback_clears_aborted_tx() {
+    let ac = connect().await;
+
+    ac.exec_query("BEGIN", &[], &[]).await.unwrap();
+    let err = ac
+        .exec_query("SELECT * FROM table_does_not_exist_xyz", &[], &[])
+        .await;
+    assert!(err.is_err(), "bogus query should fail");
+    // Connection is now in 25P02 aborted state.
+
+    assert!(
+        ac.enqueue_rollback(),
+        "enqueue_rollback should succeed on a live connection"
+    );
+
+    // Next query goes onto the writer queue after ROLLBACK and must succeed.
+    let rows = ac
+        .exec_query("SELECT 1::int4", &[], &[])
+        .await
+        .expect("session should be clean after queued ROLLBACK");
+    assert_eq!(
+        std::str::from_utf8(rows[0].cell(0).unwrap()).unwrap(),
+        "1"
+    );
+    assert!(!ac.is_broken());
+}
+
+/// `enqueue_rollback` short-circuits to `false` when `is_alive()` returns
+/// false. Drop paths use this signal to fall back to `mark_broken` so a
+/// pool discards the connection rather than handing back a session in an
+/// indeterminate state.
+///
+/// We use `__force_mark_dead_for_test` to avoid racing against the real
+/// writer-task exit, which is timing-dependent on socket close detection.
+#[tokio::test]
+async fn test_async_enqueue_rollback_returns_false_when_not_alive() {
+    let ac = connect().await;
+    assert!(ac.is_alive());
+    assert!(
+        ac.enqueue_rollback(),
+        "baseline: enqueue should succeed while alive"
+    );
+
+    ac.__force_mark_dead_for_test();
+    assert!(!ac.is_alive());
+    assert!(
+        !ac.enqueue_rollback(),
+        "enqueue_rollback must return false once is_alive() is false so callers fall back to mark_broken"
+    );
+}
+
+// The `try_send` failure branches of enqueue_rollback (full channel and
+// closed channel) are covered by unit tests in `src/async_conn.rs`, which
+// drive the inner `try_enqueue_rollback` helper directly with a tiny
+// synthetic mpsc channel. Filling the real connection's 256-slot request
+// channel through the public `AsyncConn` API isn't practical, so the
+// helper was extracted specifically to make those branches testable.
+
 #[tokio::test]
 async fn test_async_high_concurrency() {
     let ac = std::sync::Arc::new(connect().await);

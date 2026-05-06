@@ -1,6 +1,6 @@
 [package]
 name = "resolute"
-version = "0.1.0"
+version = "0.2.0"
 description = "Compile-time-checked PostgreSQL queries with a pure-Rust wire protocol driver."
 edition.workspace = true
 rust-version.workspace = true

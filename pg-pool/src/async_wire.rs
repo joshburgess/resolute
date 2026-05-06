@@ -49,7 +49,15 @@ impl Poolable for AsyncPoolable {
     }
 
     fn has_pending_data(&self) -> bool {
-        !self.0.is_alive()
+        // Treat both dead and explicitly-broken connections as un-returnable.
+        // `is_broken()` is set by callers (e.g., a `Transaction` dropped
+        // without commit/rollback) to declare the session unusable even though
+        // the reader/writer tasks are still running. The pool's
+        // `return_conn_async` checks `has_pending_data()` first and destroys
+        // the connection without attempting reset, which is correct here:
+        // sending DISCARD ALL into an aborted transaction returns an error
+        // that cannot be recovered from on the same connection.
+        !self.0.is_alive() || self.0.is_broken()
     }
 
     /// Reset connection state on return to pool.

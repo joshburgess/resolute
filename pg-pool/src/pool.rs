@@ -509,6 +509,7 @@ impl<C: Poolable> ConnPool<C> {
             if let Some(ref hook) = self.hooks.on_destroy {
                 hook();
             }
+            self.try_provision_for_waiter().await;
             if let Some(ref hook) = self.hooks.after_release {
                 hook();
             }
@@ -522,6 +523,7 @@ impl<C: Poolable> ConnPool<C> {
             if let Some(ref hook) = self.hooks.on_destroy {
                 hook();
             }
+            self.try_provision_for_waiter().await;
             if let Some(ref hook) = self.hooks.after_release {
                 hook();
             }
@@ -579,6 +581,58 @@ impl<C: Poolable> ConnPool<C> {
         if self.draining.load(Ordering::Acquire) && self.total_count.load(Ordering::Acquire) == 0 {
             self.drain_complete.notify_one();
         }
+    }
+
+    /// After destroying a broken/unresettable connection on return, opportunistically
+    /// provision a fresh connection for a parked waiter. Without this, waiters parked
+    /// at `max_size` capacity would sleep until `checkout_timeout` even though the
+    /// destroyed connection just freed a slot.
+    ///
+    /// No-ops if there are no waiters, the pool is draining, or capacity is full.
+    /// Failures to create a replacement are logged and dropped: the waiter will
+    /// time out normally, which is the same outcome as before this hook existed.
+    async fn try_provision_for_waiter(&self) {
+        if self.draining.load(Ordering::Acquire) {
+            return;
+        }
+        let has_waiter = {
+            let waiters = self.waiters.lock().await;
+            !waiters.is_empty()
+        };
+        if !has_waiter {
+            return;
+        }
+
+        let mut conn = match self.create_and_track().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    "failed to provision replacement for waiter after conn destroyed: {e}"
+                );
+                return;
+            }
+        };
+
+        {
+            let mut waiters = self.waiters.lock().await;
+            while let Some(waiter) = waiters.pop_front() {
+                match waiter.tx.send(conn) {
+                    Ok(()) => return,
+                    Err(returned) => {
+                        conn = returned;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // No live waiter received the conn; park it on the idle stack.
+        let jitter = jittered_duration(self.config.max_lifetime, self.config.max_lifetime_jitter);
+        let mut idle = self.idle.lock().await;
+        idle.push_back(IdleConn {
+            conn,
+            expires_at: Instant::now() + jitter,
+        });
     }
 
     fn destroy_conn_stats(&self) {

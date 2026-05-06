@@ -873,6 +873,13 @@ impl Client {
     pub fn is_alive(&self) -> bool {
         self.conn.is_alive()
     }
+
+    /// Borrow the underlying [`pg_wired::AsyncConn`]. Useful for low-level
+    /// operations (cancel tokens, notifications, marking the connection
+    /// broken) that aren't surfaced directly on `Client`.
+    pub fn conn(&self) -> &AsyncConn {
+        &self.conn
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -888,22 +895,23 @@ impl Client {
 ///
 /// If the `Transaction` is dropped without calling `commit()` or `rollback()`
 /// (for example, because a `?` propagated an error out of the block), the
-/// destructor cannot `await`, so it does **not** send a `ROLLBACK` itself.
-/// Instead it logs a `tracing::warn!` and relies on PostgreSQL's behavior:
-/// the next statement sent on the same connection while still in a failed
-/// or open transaction will either error out or hit the server's automatic
-/// rollback on the first command executed outside the block.
+/// destructor cannot `await`, but it does enqueue a `ROLLBACK` on the
+/// connection's writer task via a non-blocking send. The writer processes
+/// requests in FIFO order, so the rollback runs before any subsequent query
+/// on the same connection (including a pool's `DISCARD ALL` reset on return),
+/// restoring the session to idle. No partial work is committed.
 ///
-/// In practice this means:
+/// If queueing the rollback fails (writer queue full or task already gone),
+/// the connection is marked broken so any pool integration discards it on
+/// return rather than handing back a session in an open or aborted state.
 ///
-/// - For correctness, dropping is safe. No partial work is committed, and
-///   the connection will recover on its next use.
-/// - For clarity, prefer calling `rollback()` explicitly on the error path.
-///   It surfaces errors from the rollback itself and keeps the transaction
-///   state deterministic.
-/// - If you need the rollback to complete before the connection is returned
-///   to a pool, call `rollback()` explicitly. The drop path does not guarantee
-///   the server has observed a rollback by the time the guard is dropped.
+/// Notes:
+///
+/// - For clarity and to surface any rollback errors, prefer calling
+///   `rollback()` explicitly on the error path. The drop path is best-effort.
+/// - The drop path does not block on the rollback completing. If you need
+///   the server to have observed a rollback by the time the guard is dropped,
+///   call `rollback()` explicitly.
 #[derive(Debug)]
 pub struct Transaction<'a> {
     pub(crate) client: &'a Client,
@@ -966,15 +974,24 @@ impl<'a> Transaction<'a> {
 
 impl<'a> Drop for Transaction<'a> {
     fn drop(&mut self) {
-        if !self.done {
-            // Can't await in drop — spawn a task to rollback.
-            // This is best-effort; the connection will recover on next use.
-            let client_alive = self.client.is_alive();
-            if client_alive {
-                // We can't actually send ROLLBACK in drop without a runtime.
-                // The PG connection will auto-rollback when the next statement
-                // is sent outside a transaction block.
-                tracing::warn!("Transaction dropped without commit — will auto-rollback");
+        if !self.done && self.client.is_alive() {
+            // Drop is sync, so we can't await a ROLLBACK round-trip. Instead,
+            // enqueue a simple-query `ROLLBACK` on the writer task's request
+            // channel via `try_send` (no runtime handle required). The writer
+            // task processes requests in FIFO order, so the rollback runs
+            // before any later request from the same connection — including
+            // the pool's `DISCARD ALL` reset — and the connection is restored
+            // to the idle state without being destroyed.
+            //
+            // If queueing fails (channel full or the writer task is gone),
+            // mark the connection broken so any pool integration discards
+            // it on return rather than handing back a session that's stuck
+            // in an open or aborted transaction.
+            if !self.client.conn().enqueue_rollback() {
+                self.client.conn().mark_broken();
+                tracing::warn!(
+                    "Transaction dropped without commit/rollback; could not queue ROLLBACK, connection marked broken"
+                );
             }
         }
     }
