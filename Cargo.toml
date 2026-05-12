@@ -14,8 +14,8 @@ homepage = "https://github.com/joshburgess/resolute"
 # and `version` (required for crates.io publish: cargo strips `path` on upload
 # and falls back to the registry version). Bump versions here on release.
 [workspace.dependencies]
-pg-wired = { path = "pg-wired", version = "0.3.0" }
-pg-pool = { path = "pg-pool", version = "0.3.0" }
-resolute = { path = "resolute", version = "0.4.0", default-features = false }
+pg-wired = { path = "pg-wired", version = "0.4.0" }
+pg-pool = { path = "pg-pool", version = "0.4.0" }
+resolute = { path = "resolute", version = "0.5.0", default-features = false }
 resolute-derive = { path = "resolute-derive", version = "0.1.0" }
-resolute-macros = { path = "resolute-macros", version = "0.2.0" }
+resolute-macros = { path = "resolute-macros", version = "0.3.0" }

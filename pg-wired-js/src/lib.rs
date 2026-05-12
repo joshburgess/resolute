@@ -264,12 +264,19 @@ fn map_err(e: PgWireError) -> Error {
 // Extended-protocol encoder: Parse? + Bind + Describe(portal) + Execute + Sync
 // ---------------------------------------------------------------------------
 
+struct EncodedQuery {
+    buf: BytesMut,
+    /// (sql, stmt_name) to publish via `cache_statement` after a
+    /// successful submit. None on cache hit.
+    pending_cache: Option<(String, Vec<u8>)>,
+}
+
 fn encode_query(
     conn: &AsyncConn,
     sql: &str,
     params: &[Option<&[u8]>],
     param_oids: &[u32],
-) -> BytesMut {
+) -> EncodedQuery {
     let (stmt_name, needs_parse) = conn.lookup_or_alloc(sql, param_oids);
     let mut buf = BytesMut::with_capacity(sql.len() + 128);
     let text_fmts: Vec<FormatCode> = vec![FormatCode::Text; params.len().max(1)];
@@ -311,7 +318,12 @@ fn encode_query(
         &mut buf,
     );
     frontend::encode_message(&FrontendMsg::Sync, &mut buf);
-    buf
+    let pending_cache = if needs_parse {
+        Some((sql.to_string(), stmt_name))
+    } else {
+        None
+    };
+    EncodedQuery { buf, pending_cache }
 }
 
 async fn exec_query_full(
@@ -320,11 +332,14 @@ async fn exec_query_full(
     params: &[Option<&[u8]>],
     param_oids: &[u32],
 ) -> Result<QueryResult> {
-    let buf = encode_query(conn, sql, params, param_oids);
+    let EncodedQuery { buf, pending_cache } = encode_query(conn, sql, params, param_oids);
     let resp = conn
         .submit(buf, ResponseCollector::Rows)
         .await
         .map_err(map_err)?;
+    if let Some((sql, name)) = pending_cache {
+        conn.cache_statement(&sql, &name);
+    }
     Ok(pipeline_response_to_query_result(resp))
 }
 
@@ -348,7 +363,7 @@ fn encode_query_with_formats(
     param_oids: &[u32],
     param_formats: &[FormatCode],
     result_formats: &[FormatCode],
-) -> BytesMut {
+) -> EncodedQuery {
     let (stmt_name, needs_parse) = conn.lookup_or_alloc(sql, param_oids);
     let mut buf = BytesMut::with_capacity(sql.len() + 128);
 
@@ -402,7 +417,12 @@ fn encode_query_with_formats(
         &mut buf,
     );
     frontend::encode_message(&FrontendMsg::Sync, &mut buf);
-    buf
+    let pending_cache = if needs_parse {
+        Some((sql.to_string(), stmt_name))
+    } else {
+        None
+    };
+    EncodedQuery { buf, pending_cache }
 }
 
 fn rows_to_buffers(rows: Vec<pg_wired::protocol::types::RawRow>) -> Vec<Vec<Option<Buffer>>> {
@@ -423,12 +443,15 @@ async fn exec_query_raw(
     param_formats: &[FormatCode],
     result_formats: &[FormatCode],
 ) -> Result<RawQueryResult> {
-    let buf =
+    let EncodedQuery { buf, pending_cache } =
         encode_query_with_formats(conn, sql, params, param_oids, param_formats, result_formats);
     let resp = conn
         .submit(buf, ResponseCollector::Rows)
         .await
         .map_err(map_err)?;
+    if let Some((sql, name)) = pending_cache {
+        conn.cache_statement(&sql, &name);
+    }
     Ok(match resp {
         PipelineResponse::Rows {
             fields,
@@ -597,12 +620,16 @@ impl Connection {
         param_oids: Vec<u32>,
     ) -> Result<ColumnarResult> {
         let refs = borrow_params(&params);
-        let buf = encode_query(&self.inner, &sql, &refs, &param_oids);
+        let EncodedQuery { buf, pending_cache } =
+            encode_query(&self.inner, &sql, &refs, &param_oids);
         let resp = self
             .inner
             .submit(buf, ResponseCollector::Rows)
             .await
             .map_err(map_err)?;
+        if let Some((sql_to_cache, name)) = pending_cache {
+            self.inner.cache_statement(&sql_to_cache, &name);
+        }
         self.warm.lock().await.insert(sql);
         Ok(response_to_columnar(resp))
     }
@@ -630,8 +657,12 @@ impl Connection {
         param_oids: Vec<u32>,
     ) -> Result<RowStream> {
         let refs = borrow_params(&params);
-        let buf = encode_query(&self.inner, &sql, &refs, &param_oids);
+        let EncodedQuery { buf, pending_cache } =
+            encode_query(&self.inner, &sql, &refs, &param_oids);
         let (header, rx) = self.inner.submit_stream(buf, 1024).await.map_err(map_err)?;
+        if let Some((sql_to_cache, name)) = pending_cache {
+            self.inner.cache_statement(&sql_to_cache, &name);
+        }
         Ok(RowStream {
             fields: fields_to_info(header.fields),
             rx: Arc::new(Mutex::new(Some(rx))),

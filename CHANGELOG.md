@@ -7,6 +7,40 @@ releases.
 
 ## [Unreleased]
 
+## [pg-wired 0.4.0, pg-pool 0.4.0, resolute-macros 0.3.0, resolute-cli 0.3.0, resolute 0.5.0] - 2026-05-12
+
+### Fixed
+
+- `AsyncConn` no longer pre-queues `Parse` from `lookup_or_alloc`, which
+  ran outside any caller-managed transaction. On a PostgREST-style
+  authenticator role that lacks `USAGE` on the target schema, the
+  speculative `Parse` would fail with `42501: permission denied for
+  schema ...` and poison the cache so subsequent `Bind`s observed
+  `26000: prepared statement "sN" does not exist`. The fix removes the
+  pre-queue path entirely. `lookup_or_alloc` now allocates a unique
+  statement name (monotonic counter) without publishing it; each
+  caller's own request emits `Parse + Bind + Execute + Sync` atomically
+  inside their role-switched transaction. A new
+  `AsyncConn::cache_statement` publishes the (sql -> name) mapping
+  after a successful submit, with first-publisher-wins semantics so
+  concurrent first-missers each get their own session-bounded name
+  (bounded by the existing LRU eviction). Adds a stale-statement retry
+  to `exec_transaction` to match `exec_query`. Regression coverage:
+  `resolute/tests/shared_pool_stress_test.rs` continues to pass 1600
+  concurrent runs (64 cases x 25 replays) deterministically.
+
+### Changed (breaking)
+
+- `pg_wired::AsyncConn::lookup_or_alloc` no longer publishes to the
+  cache. Direct callers must now invoke
+  `AsyncConn::cache_statement(sql, name)` after a successful submit to
+  enable reuse. The `param_oids` parameter is retained but unused; the
+  signature is unchanged. All callers inside `resolute` and
+  `pg-wired-js` have been updated.
+- `pg-wired-js`: `encode_query` and `encode_query_with_formats` now
+  return `EncodedQuery { buf, pending_cache }` instead of bare
+  `BytesMut`. Callers must invoke `cache_statement` after submit.
+
 ## [pg-wired 0.3.0, pg-pool 0.3.0, resolute-macros 0.2.0, resolute-cli 0.2.0, resolute 0.4.0] - 2026-05-06
 
 ### Fixed

@@ -320,8 +320,10 @@ impl Client {
             .map(|v| v.as_ref().map(|b| b.as_ref()))
             .collect();
 
-        // Allocate (and pre-queue Parse) AFTER computing param_oids, so the
-        // pre-queued Parse advertises the correct parameter types.
+        // Allocate the prepared-statement name. On a miss, the name is
+        // not yet published in the cache; we publish via
+        // `cache_statement` below only after the Parse + Bind + Execute
+        // round-trip succeeds.
         let (stmt_name, needs_parse) = conn.lookup_or_alloc(sql, &param_oids);
 
         if needs_parse {
@@ -366,6 +368,9 @@ impl Client {
         frontend::encode_message(&FrontendMsg::Sync, &mut buf);
 
         let resp = conn.submit(buf, ResponseCollector::Rows).await?;
+        if needs_parse {
+            conn.cache_statement(sql, &stmt_name);
+        }
         match resp {
             PipelineResponse::Rows {
                 fields,
@@ -505,6 +510,9 @@ impl Client {
         frontend::encode_message(&FrontendMsg::Sync, &mut buf);
 
         let resp = conn.submit(buf, ResponseCollector::Rows).await?;
+        if needs_parse {
+            conn.cache_statement(sql, &stmt_name);
+        }
         match resp {
             PipelineResponse::Rows { command_tag, .. } => Ok(parse_row_count(&command_tag)),
             PipelineResponse::Done => Ok(0),
@@ -590,6 +598,9 @@ impl Client {
             .conn
             .submit_stream(buf, Self::DEFAULT_STREAM_BUFFER)
             .await?;
+        if needs_parse {
+            self.conn.cache_statement(sql, &stmt_name);
+        }
 
         let has_desc = !header.fields.is_empty();
         let schema = Arc::new(build_row_schema(&header.fields, None));
@@ -1050,6 +1061,10 @@ pub struct Pipeline<'a> {
     client: &'a Client,
     /// One encoded wire message buffer per queued query.
     buffers: Vec<BytesMut>,
+    /// For each buffer where `needs_parse=true`, the (sql, stmt_name)
+    /// to publish via `cache_statement` after a successful `run()`.
+    /// Buffers that hit the cache don't add an entry here.
+    pending_cache: Vec<(String, Vec<u8>)>,
 }
 
 /// Result from a single pipeline step.
@@ -1128,6 +1143,10 @@ impl<'a> Pipeline<'a> {
         );
         frontend::encode_message(&FrontendMsg::Sync, &mut buf);
         self.buffers.push(buf);
+        if needs_parse {
+            self.pending_cache
+                .push((sql.to_string(), stmt_name.clone()));
+        }
     }
 
     /// Execute all queries in one round-trip and return results.
@@ -1142,6 +1161,7 @@ impl<'a> Pipeline<'a> {
             return Ok(Vec::new());
         }
 
+        let pending_cache = self.pending_cache;
         let items: Vec<(BytesMut, ResponseCollector)> = self
             .buffers
             .into_iter()
@@ -1149,6 +1169,15 @@ impl<'a> Pipeline<'a> {
             .collect();
 
         let responses = self.client.conn.submit_batch(items).await?;
+        // The wire submit succeeded as a unit; per-query errors are
+        // surfaced below. Publish freshly Parsed statements to the
+        // cache. Buffers that errored on Parse won't be cached because
+        // we propagate the first per-query error, but caching the rest
+        // is benign because `cache_statement` is keyed on SQL text and
+        // uses first-publisher-wins.
+        for (sql, name) in &pending_cache {
+            self.client.conn.cache_statement(sql, name);
+        }
         let mut results = Vec::with_capacity(responses.len());
         for resp in responses {
             match resp? {
@@ -1190,6 +1219,7 @@ impl Client {
         Pipeline {
             client: self,
             buffers: Vec::new(),
+            pending_cache: Vec::new(),
         }
     }
 }

@@ -350,37 +350,87 @@ impl AsyncConn {
 
     /// Look up or allocate a statement name.
     ///
-    /// On a cache miss we MUST queue a `Parse` for the new name into the
-    /// writer FIFO **before** publishing the name in the shared cache, or
-    /// another concurrent caller could observe the cached name and submit
-    /// a Bind-only request that races ahead of our Parse. The server would
-    /// then reject the Bind with `26000: prepared statement "sN" does not
-    /// exist`.
+    /// Cache hit: returns the cached name with `needs_parse=false`. The
+    /// caller submits only `Bind/Execute/Sync`.
     ///
-    /// The fast path is unchanged: if `sql` is already in the cache,
-    /// return its name and `needs_parse=false`. On a miss we build a
-    /// `Parse + Sync` message and `try_send` it under the cache lock. If
-    /// the channel accepts it, we insert into the cache and return
-    /// `needs_parse=false` (the caller sends only `Bind/Execute`). If the
-    /// writer channel is full, we DO NOT insert: the freshly-allocated
-    /// name is unique (counter was already advanced) and is returned with
-    /// `needs_parse=true` so the caller includes its own `Parse` in the
-    /// same submit. No other lookup can race in because the entry was
-    /// never published.
+    /// Cache miss: allocates a fresh, unique name from the connection's
+    /// statement counter and returns `(name, needs_parse=true)`. The name
+    /// is NOT yet published in the cache: the caller MUST include a
+    /// `Parse` for the new name in the same atomic submit as
+    /// `Bind/Execute/Sync` (so the Parse runs inside whatever
+    /// role-switched transaction the caller has framed, e.g. `BEGIN; SET
+    /// LOCAL ROLE …; …`), and then call [`Self::cache_statement`] to
+    /// publish the name only after the Parse has succeeded on the wire.
     ///
-    /// LRU eviction: when the cache is full, the oldest entry (by
-    /// insertion order / counter) is removed and a Close message is
-    /// queued to free the server-side prepared statement.
-    pub fn lookup_or_alloc(&self, sql: &str, param_oids: &[u32]) -> (Vec<u8>, bool) {
-        let mut cache = match self.stmt_cache.lock() {
+    /// Why publish-after-success: an earlier version pre-queued the
+    /// Parse as its own writer request and published the cache entry
+    /// up-front to avoid a race where a concurrent caller saw the
+    /// cached name and submitted a Bind-only request that races ahead
+    /// of the Parse. That eliminated the race, but ran the Parse
+    /// outside any transaction, under the connection's persistent role
+    /// (e.g. PostgREST's `authenticator`). SQL that references objects
+    /// only reachable after `SET LOCAL ROLE` to a user role failed
+    /// with `42501 permission denied` during Parse, while every
+    /// subsequent Bind for the same name failed with `26000: prepared
+    /// statement "sN" does not exist`. Publishing only after a
+    /// successful Parse keeps caching role-correct: each first-time
+    /// concurrent caller pays for its own Parse (rather than sharing a
+    /// pre-queued one), and `cache_statement` uses first-publisher-wins
+    /// semantics so the losing names become session-bounded orphans
+    /// (bounded by the 256-entry LRU on this connection).
+    pub fn lookup_or_alloc(&self, sql: &str, _param_oids: &[u32]) -> (Vec<u8>, bool) {
+        let cache = match self.stmt_cache.lock() {
             Ok(c) => c,
             Err(poisoned) => poisoned.into_inner(),
         };
         if let Some((name, _)) = cache.get(sql) {
             return (name.as_bytes().to_vec(), false);
         }
-        // LRU eviction: remove the entry with the lowest counter value
-        // and send a Close message to free the server-side prepared statement.
+        // Allocate a unique name. Counters never collide, so concurrent
+        // misses get distinct names. The cache stays empty for `sql`
+        // until the caller calls `cache_statement` after a successful
+        // Parse.
+        let n = self
+            .stmt_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let name = format!("s{n}");
+        (name.into_bytes(), true)
+    }
+
+    /// Publish a freshly Parsed statement in the cache so subsequent
+    /// lookups for the same SQL skip the Parse step.
+    ///
+    /// Called by the high-level `exec_*` helpers (and any external
+    /// caller of [`Self::lookup_or_alloc`]) after the writer submit that
+    /// included `Parse` for `name` returned successfully. Skipping this
+    /// step doesn't cause correctness problems; the next lookup just
+    /// misses and re-Parses.
+    ///
+    /// First-publisher-wins: if another concurrent miss already
+    /// published a different name for the same SQL, that name stays in
+    /// the cache and the caller's name becomes a server-side orphan
+    /// (cleaned up at session end; bounded by LRU eviction during the
+    /// session).
+    ///
+    /// LRU eviction: when the cache reaches its 256-entry cap, the
+    /// oldest entry by counter is removed and a `Close + Sync` is
+    /// fire-and-forget queued to free the server-side prepared
+    /// statement.
+    pub fn cache_statement(&self, sql: &str, name: &[u8]) {
+        let Ok(name_str) = std::str::from_utf8(name) else {
+            return;
+        };
+        let counter = name_str
+            .strip_prefix('s')
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or_else(|| self.stmt_counter.load(std::sync::atomic::Ordering::Relaxed));
+        let mut cache = match self.stmt_cache.lock() {
+            Ok(c) => c,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if cache.contains_key(sql) {
+            return;
+        }
         if cache.len() >= 256 {
             if let Some((oldest_key, oldest_name)) = cache
                 .iter()
@@ -388,8 +438,6 @@ impl AsyncConn {
                 .map(|(k, (name, _))| (k.clone(), name.clone()))
             {
                 cache.remove(&oldest_key);
-                // Queue a Close + Sync to free the server-side statement.
-                // Fire-and-forget: if the channel is full or closed, skip it.
                 let mut close_buf = BytesMut::with_capacity(32);
                 frontend::encode_message(
                     &FrontendMsg::Close {
@@ -407,45 +455,7 @@ impl AsyncConn {
                 });
             }
         }
-        let n = self
-            .stmt_counter
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let name = format!("s{n}");
-
-        // Queue a Parse + Sync for the new name BEFORE publishing it in
-        // the cache. This guarantees that any concurrent caller who
-        // subsequently sees `name` in the cache will only submit
-        // Bind/Execute requests AFTER this Parse in the writer's FIFO.
-        let mut parse_buf = BytesMut::with_capacity(32 + sql.len());
-        frontend::encode_message(
-            &FrontendMsg::Parse {
-                name: name.as_bytes(),
-                sql: sql.as_bytes(),
-                param_oids,
-            },
-            &mut parse_buf,
-        );
-        frontend::encode_message(&FrontendMsg::Sync, &mut parse_buf);
-        let (parse_tx, _parse_rx) = oneshot::channel();
-        match self.request_tx.try_send(PipelineRequest {
-            messages: parse_buf,
-            collector: ResponseCollector::Drain,
-            response_tx: parse_tx,
-        }) {
-            Ok(()) => {
-                cache.insert(sql.to_string(), (name.clone(), n));
-                (name.into_bytes(), false)
-            }
-            Err(_) => {
-                // Writer channel full or closed. Don't publish the entry:
-                // the unique name is returned with `needs_parse=true` so
-                // the caller emits Parse atomically with Bind/Execute. No
-                // other lookup can pick up `name` because it was never
-                // inserted. Server-side leak per failed try_send is
-                // bounded by the channel-full rate, which is rare.
-                (name.into_bytes(), true)
-            }
-        }
+        cache.insert(sql.to_string(), (name_str.to_string(), counter));
     }
 
     /// Execute COPY FROM STDIN: sends the COPY command, then data in chunks, then CopyDone.
@@ -565,6 +575,13 @@ impl AsyncConn {
     }
 
     /// Execute a pipelined transaction with automatic statement caching.
+    ///
+    /// On a successful Parse the new statement name is published in the
+    /// cache via [`Self::cache_statement`]. If a cached statement turns
+    /// out to be invalid (PG error 26000 or 0A000), the cache entry is
+    /// evicted and the transaction is retried once with a fresh Parse.
+    /// This handles schema changes invalidating cached plans after their
+    /// initial Parse.
     pub async fn exec_transaction(
         &self,
         setup_sql: &str,
@@ -573,15 +590,44 @@ impl AsyncConn {
         param_oids: &[u32],
     ) -> Result<Vec<RawRow>, PgWireError> {
         let (stmt_name, needs_parse) = self.lookup_or_alloc(query_sql, param_oids);
-        self.pipeline_transaction(
-            setup_sql,
-            query_sql,
-            params,
-            param_oids,
-            &stmt_name,
-            needs_parse,
-        )
-        .await
+        match self
+            .pipeline_transaction(
+                setup_sql,
+                query_sql,
+                params,
+                param_oids,
+                &stmt_name,
+                needs_parse,
+            )
+            .await
+        {
+            Ok(rows) => {
+                if needs_parse {
+                    self.cache_statement(query_sql, &stmt_name);
+                }
+                Ok(rows)
+            }
+            Err(PgWireError::Pg(ref pg_err))
+                if !needs_parse && is_stale_statement_error(pg_err) =>
+            {
+                tracing::debug!(
+                    sql = query_sql,
+                    "prepared statement invalidated — re-parsing in transaction"
+                );
+                self.invalidate_statement(query_sql);
+                let (stmt_name, _) = self.lookup_or_alloc(query_sql, param_oids);
+                let result = self
+                    .pipeline_transaction(
+                        setup_sql, query_sql, params, param_oids, &stmt_name, true,
+                    )
+                    .await;
+                if result.is_ok() {
+                    self.cache_statement(query_sql, &stmt_name);
+                }
+                result
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Execute a parameterized query with automatic statement caching.
@@ -598,14 +644,23 @@ impl AsyncConn {
             .query(sql, params, param_oids, &stmt_name, needs_parse)
             .await
         {
-            Ok(rows) => Ok(rows),
+            Ok(rows) => {
+                if needs_parse {
+                    self.cache_statement(sql, &stmt_name);
+                }
+                Ok(rows)
+            }
             Err(PgWireError::Pg(ref pg_err))
                 if !needs_parse && is_stale_statement_error(pg_err) =>
             {
                 tracing::debug!(sql = sql, "prepared statement invalidated — re-parsing");
                 self.invalidate_statement(sql);
                 let (stmt_name, _) = self.lookup_or_alloc(sql, param_oids);
-                self.query(sql, params, param_oids, &stmt_name, true).await
+                let result = self.query(sql, params, param_oids, &stmt_name, true).await;
+                if result.is_ok() {
+                    self.cache_statement(sql, &stmt_name);
+                }
+                result
             }
             Err(e) => Err(e),
         }
@@ -969,23 +1024,33 @@ impl AsyncConn {
             )
             .await
         {
-            Ok(rows) => Ok(rows),
+            Ok(rows) => {
+                if needs_parse {
+                    self.cache_statement(sql, &stmt_name);
+                }
+                Ok(rows)
+            }
             Err(PgWireError::Pg(ref pg_err))
                 if !needs_parse && is_stale_statement_error(pg_err) =>
             {
                 tracing::debug!(sql = sql, "prepared statement invalidated — re-parsing");
                 self.invalidate_statement(sql);
                 let (stmt_name, _) = self.lookup_or_alloc(sql, param_oids);
-                self.query_with_formats(
-                    sql,
-                    params,
-                    param_oids,
-                    param_formats,
-                    result_formats,
-                    &stmt_name,
-                    true,
-                )
-                .await
+                let result = self
+                    .query_with_formats(
+                        sql,
+                        params,
+                        param_oids,
+                        param_formats,
+                        result_formats,
+                        &stmt_name,
+                        true,
+                    )
+                    .await;
+                if result.is_ok() {
+                    self.cache_statement(sql, &stmt_name);
+                }
+                result
             }
             Err(e) => Err(e),
         }

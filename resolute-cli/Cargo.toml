@@ -1,6 +1,6 @@
 [package]
 name = "resolute-cli"
-version = "0.2.0"
+version = "0.3.0"
 description = "CLI for resolute: offline query cache and database migrations."
 edition.workspace = true
 rust-version.workspace = true
